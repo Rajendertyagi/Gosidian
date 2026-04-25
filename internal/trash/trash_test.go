@@ -87,6 +87,53 @@ func TestBin_DiscardProject(t *testing.T) {
 	}
 }
 
+// TestBin_RejectsPathTraversal locks down the validateName guard at every
+// public entry point. CodeQL flagged these flows as path-injection in v1.0.0;
+// the fix lives in validateName + per-method calls.
+func TestBin_RejectsPathTraversal(t *testing.T) {
+	b, root := newBin(t)
+	write(t, root, "victim.md", "preserve me")
+
+	bad := []string{
+		"",
+		"..",
+		"../etc/passwd",
+		"foo/../../etc",
+		"/abs/path",
+		`\abs\windows`,
+		`..\windows`,
+		"with\x00null",
+	}
+	for _, name := range bad {
+		t.Run("DiscardNote/"+name, func(t *testing.T) {
+			if _, err := b.DiscardNote(name); err == nil {
+				t.Errorf("DiscardNote(%q) accepted, expected rejection", name)
+			}
+		})
+		t.Run("DiscardProject/"+name, func(t *testing.T) {
+			if _, _, err := b.DiscardProject(name); err == nil {
+				t.Errorf("DiscardProject(%q) accepted, expected rejection", name)
+			}
+		})
+		t.Run("Restore/"+name, func(t *testing.T) {
+			if _, err := b.Restore(name); err == nil {
+				t.Errorf("Restore(%q) accepted, expected rejection", name)
+			}
+		})
+		t.Run("Purge/"+name, func(t *testing.T) {
+			if err := b.Purge(name); err == nil {
+				t.Errorf("Purge(%q) accepted, expected rejection", name)
+			}
+		})
+	}
+
+	// Sanity: the victim file outside any "valid" prefix is still on disk —
+	// none of the bad inputs above should have removed it.
+	if _, err := os.Stat(filepath.Join(root, "victim.md")); err != nil {
+		t.Errorf("victim file disappeared: %v", err)
+	}
+}
+
 func TestBin_PurgeAndPruneExpired(t *testing.T) {
 	b, root := newBin(t)
 	write(t, root, "x.md", "x")

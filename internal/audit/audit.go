@@ -81,7 +81,7 @@ func Open(path string) (*Log, error) {
 
 // Write appends an entry. Best-effort: errors are returned but callers are
 // free to ignore them — failing to audit must never block the user request.
-func (l *Log) Write(e Entry) error {
+func (l *Log) Write(e Entry) (err error) {
 	if l == nil {
 		return nil
 	}
@@ -98,8 +98,14 @@ func (l *Log) Write(e Entry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := f.Write(append(data, '\n')); err != nil {
+	// Promote a Close() error to the return value so a failed flush is
+	// observed by the caller, unless an earlier write already failed.
+	defer func() {
+		if cerr := f.Close(); err == nil && cerr != nil {
+			err = cerr
+		}
+	}()
+	if _, err = f.Write(append(data, '\n')); err != nil {
 		return err
 	}
 	return nil

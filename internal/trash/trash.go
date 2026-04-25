@@ -33,9 +33,40 @@ func New(vaultRoot string, retention time.Duration) *Bin {
 	}
 }
 
+// validateName rejects any input that, when joined with a base directory,
+// could escape the intended root via traversal, absolute paths or null
+// bytes. Used as a first-line guard at every public entry point that
+// accepts user-provided names or ids before they reach filepath.Join.
+// The check is intentionally strict: callers normalize / sanitize before
+// reaching the trash module if they need looser semantics.
+func validateName(s string) error {
+	if s == "" {
+		return errors.New("empty name")
+	}
+	if strings.ContainsRune(s, 0) {
+		return errors.New("null byte in name")
+	}
+	if filepath.IsAbs(s) || strings.HasPrefix(s, "/") || strings.HasPrefix(s, `\`) {
+		return errors.New("absolute path not allowed")
+	}
+	// Reject any ".." component on either separator. Linux's filepath.ToSlash
+	// is a no-op, so we normalize backslashes manually before splitting —
+	// otherwise "..\foo" would slip through as a single non-".." segment.
+	norm := strings.ReplaceAll(filepath.ToSlash(s), `\`, "/")
+	for _, p := range strings.Split(norm, "/") {
+		if p == ".." {
+			return errors.New("parent traversal not allowed")
+		}
+	}
+	return nil
+}
+
 // DiscardNote moves a single note into the trash. Returns the trash-relative
 // id (timestamp-prefixed name) so callers can audit it.
 func (b *Bin) DiscardNote(rel string) (string, error) {
+	if err := validateName(rel); err != nil {
+		return "", err
+	}
 	src := filepath.Join(b.vaultRoot, filepath.FromSlash(rel))
 	if _, err := os.Stat(src); err != nil {
 		return "", err
@@ -57,6 +88,9 @@ func (b *Bin) DiscardNote(rel string) (string, error) {
 
 // DiscardProject moves an entire project directory (recursively) into trash.
 func (b *Bin) DiscardProject(name string) (string, []string, error) {
+	if err := validateName(name); err != nil {
+		return "", nil, err
+	}
 	src := filepath.Join(b.vaultRoot, name)
 	st, err := os.Stat(src)
 	if err != nil {
@@ -134,6 +168,9 @@ func (b *Bin) List() ([]Entry, error) {
 // expected to reindex what comes back. Returns the list of vault-relative
 // .md paths that were restored (single entry for notes, multi for projects).
 func (b *Bin) Restore(id string) ([]string, error) {
+	if err := validateName(id); err != nil {
+		return nil, err
+	}
 	src := filepath.Join(b.dir, id)
 	st, err := os.Stat(src)
 	if err != nil {
@@ -176,6 +213,9 @@ func (b *Bin) Restore(id string) ([]string, error) {
 
 // Purge deletes a single trashed entry permanently.
 func (b *Bin) Purge(id string) error {
+	if err := validateName(id); err != nil {
+		return err
+	}
 	return os.RemoveAll(filepath.Join(b.dir, id))
 }
 

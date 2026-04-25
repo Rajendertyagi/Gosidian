@@ -4,6 +4,55 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [1.0.1] — 2026-04-25 — "Security hardening"
+
+Bundle of security findings raised by the first CodeQL run on the
+public repo. No behaviour change for callers using the documented
+APIs; only inputs that would have escaped the intended root via
+traversal, absolute paths, or null bytes are now rejected up-front.
+
+### Security
+
+- **`internal/trash`**: every public entry point (`DiscardNote`,
+  `DiscardProject`, `Restore`, `Purge`) now calls a new `validateName`
+  helper before any `filepath.Join`. The guard rejects empty input,
+  null bytes, absolute paths (`/foo`, `\foo`), and any `..` component
+  on either separator. Defends against path traversal via user-supplied
+  ids/names reaching the trash directory or vault root. Closes 10
+  CodeQL `go/path-injection` alerts (CWE-22).
+- **`internal/server/handlers_login.go`** (`safeNext`): redirect
+  validation now also rejects `?next=/\evil.com` (backslash
+  protocol-relative URL), in addition to the already-existing reject
+  for `?next=//evil.com`. Closes `go/bad-redirect-check` alert.
+- **`internal/server/handlers_i18n.go`**: `lang` cookie now sets
+  `Secure: true` when the request is over TLS (matches the pattern
+  already used by the webauth session cookie). Closes
+  `go/cookie-secure-not-set` alert.
+- **`internal/audit/audit.go`** (`Log.Write`): `f.Close()` is now
+  observed via a deferred closure that promotes a close-time error
+  to the function's return value (named return). Prevents silent
+  data loss on a failed flush. Closes
+  `go/unhandled-writable-file-close` alert.
+
+### Internal
+
+- New regression test `TestBin_RejectsPathTraversal` in
+  `internal/trash/trash_test.go` covers eight bad-input shapes
+  (empty, `..`, `../etc/passwd`, `foo/../../etc`, absolute
+  Linux/Windows paths, `..\windows`, null byte) across all four
+  trash entry points.
+- `validateName` is intentionally strict: callers that need looser
+  semantics (e.g. allowing forward-slash separators in legitimate
+  rel paths) sanitize before reaching the trash module.
+
+### Notes
+
+- Zero schema changes, zero breaking changes for third-party users.
+- 8 additional CodeQL alerts on `internal/vault/vault.go` were
+  dismissed as false positives (path-injection guarded by the
+  existing `sanitizeProjectName` helper, which CodeQL does not
+  recognize as a sanitizer).
+
 ## [1.0.0] — 2026-04-25 — "Initial public release"
 
 First public release of gosidian: a self-hosted, Obsidian-compatible

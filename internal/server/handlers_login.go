@@ -199,13 +199,15 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 // safeNext rejects anything that isn't a local absolute path, preventing
-// ?next=//evil.com open-redirect tricks.
+// ?next=//evil.com or ?next=/\evil.com open-redirect tricks. Both forms
+// are interpreted by some browsers as protocol-relative URLs that escape
+// the origin, hence the second-char check on both '/' and '\'.
 func safeNext(next string) bool {
 	if next == "" || next[0] != '/' {
 		return false
 	}
-	if len(next) > 1 && next[1] == '/' {
-		return false // protocol-relative URL
+	if len(next) > 1 && (next[1] == '/' || next[1] == '\\') {
+		return false // protocol-relative URL ('//evil', '/\evil')
 	}
 	// Ensure it parses as a relative URL with no host
 	u, err := url.Parse(next)
