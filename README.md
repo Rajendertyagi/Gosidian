@@ -7,12 +7,7 @@ edit through a web UI, agents talk to it over MCP, everything lives
 in plain `.md` files that Obsidian (and every other markdown tool)
 reads natively.
 
-<!-- TODO: replace with real 10-15s demo GIF once v1.0.0 ships:
-     create a note in the web UI → agent reads via MCP → agent edits
-     → UI live-updates. Target ≤5MB, host at docs/demo.gif.
--->
-
-![Screenshot placeholder](docs/screenshot-placeholder.png)
+![gosidian in action](docs/demo.gif)
 
 ## Quick start
 
