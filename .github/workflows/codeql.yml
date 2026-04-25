@@ -4,6 +4,7 @@ name: CodeQL
 # Security → Code scanning alerts.
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
