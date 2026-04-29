@@ -212,6 +212,7 @@ func (s *Server) registerTools() {
 	s.registerSelfStatsTool()
 	s.registerScaffoldTool()
 	s.registerBootstrapTemplatesTool()
+	s.registerInitAgentTool()
 	s.registerRefreshHotTool()
 	s.registerTodosTool()
 	s.registerLintTool()

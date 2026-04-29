@@ -153,13 +153,31 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 	return s
 }
 
-// ServeSSE starts the HTTP+SSE transport on addr. Blocks until the listener
-// stops or errors. When the token store is non-empty, the SSE handler wraps
-// authentication: unknown bearers receive 401, valid ones are threaded
-// through the per-session context so tool handlers can scope by token.
-func (s *Server) ServeSSE(addr string) error {
-	sse := server.NewSSEServer(
-		s.impl,
+// Handler returns an http.Handler exposing the MCP SSE transport, ready to
+// be mounted on any mux. basePath sets the URL prefix the SSE server
+// announces to clients during the initial handshake (it ships back the
+// "endpoint" event with the URL the client must POST messages to). Pass
+// "" to mount at the root of an http.Server (legacy standalone shape);
+// pass e.g. "/mcp" when mounting on a shared mux under that prefix —
+// otherwise the announced message URL is a path the public mux won't
+// route, and the client reports "SSE streaming not supported" because
+// its POST to /message fails.
+//
+// The handler is wrapped with bearer-token auth when the underlying
+// token store is non-empty (unknown bearers → 401; valid ones threaded
+// through the per-session context for tool handlers).
+//
+// Each invocation constructs a fresh SSEServer instance — callers should
+// obtain one handler per mount point. Internal session state is per
+// SSEServer so this is correct: clients connect to one endpoint at a time.
+//
+// Path semantics with basePath="/mcp": the SSEServer matches /mcp/sse for
+// the event stream and /mcp/message for client→server messages, using
+// exact path matching against r.URL.Path. The mux must therefore route
+// the prefix /mcp/ to this handler WITHOUT StripPrefix, so the SSE
+// server still sees the full path.
+func (s *Server) Handler(basePath string) http.Handler {
+	opts := []server.SSEOption{
 		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			ctx = context.WithValue(ctx, correlationCtxKey, generateCorrelationID())
 			if lang := r.Header.Get("Accept-Language"); lang != "" {
@@ -171,16 +189,30 @@ func (s *Server) ServeSSE(addr string) error {
 			}
 			return ctx
 		}),
-	)
+	}
+	if basePath != "" {
+		opts = append(opts, server.WithStaticBasePath(basePath))
+	}
+	sse := server.NewSSEServer(s.impl, opts...)
 
 	handler := http.Handler(sse)
 	if s.tokens != nil && !s.tokens.Empty() {
 		handler = s.requireToken(sse)
 	}
+	return handler
+}
 
+// ServeSSE starts a standalone HTTP listener serving the MCP SSE endpoint
+// at the root of addr. Kept for backward compatibility with the pre-v1.12
+// deployment pattern (env GOSIDIAN_MCP_ADDR / --mcp-addr). New deployments
+// should mount Handler() on the main web server (single-port mode) — see
+// *internal/server.Server.MountMCP.
+//
+// Blocks until the listener stops or errors.
+func (s *Server) ServeSSE(addr string) error {
 	srv := &http.Server{
 		Addr:    addr,
-		Handler: handler,
+		Handler: s.Handler(""),
 	}
 	return srv.ListenAndServe()
 }

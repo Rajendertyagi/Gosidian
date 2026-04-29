@@ -57,11 +57,18 @@ for precise schemas; the groupings below are the conceptual map.
 
 ## Attachments
 
-- `memory_upload_attachment(note_path, content_b64|source_path,
-  filename)`
-- `memory_list_attachments(note_path)`
-- `memory_delete_attachment(attachment_path)`
-- `memory_attachment_info(attachment_path)`
+- `memory_upload_attachment(project, data|source_path, filename)` —
+  single-step upload returning a ready-to-splice markdown embed
+- `memory_upload_resource(project, data|source_path, filename, kind?)` —
+  pre-uploader for the "stage, then attach" pattern; returns the
+  resource handle without an embed
+- `memory_list_attachments(project?)`
+- `memory_delete_attachment(path)`
+- `memory_attachment_info(path)`
+
+The single-step / pre-uploader split, the equivalent REST endpoint
+`POST /api/upload`, and the full error catalogue live in
+[Upload flow](upload.md).
 
 ## Workflow
 

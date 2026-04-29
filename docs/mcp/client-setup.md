@@ -4,13 +4,18 @@ Connect any MCP-compatible client to the SSE endpoint, passing the
 token as a bearer header. Language preference uses the standard
 `Accept-Language` header.
 
+The default endpoint is **`/mcp/sse` on the web port** (single-port
+mode). The legacy standalone listener at `/sse` on a separate port
+(typically 8765) is still supported for backward compatibility but is
+deprecated — see the migration note at the bottom of this page.
+
 ## Generic JSON config
 
 ```json
 {
   "mcpServers": {
     "gosidian": {
-      "url": "http://127.0.0.1:8765/sse",
+      "url": "http://127.0.0.1:8080/mcp/sse",
       "transport": "sse",
       "headers": {
         "Authorization": "Bearer gosidian_XXXXXXXXXXXXXXXXXXXXXXXX",
@@ -27,7 +32,7 @@ plaintext printed by `gosidian token create`.
 ## Claude Code
 
 ```bash
-claude mcp add gosidian http://127.0.0.1:8765/sse \
+claude mcp add gosidian http://127.0.0.1:8080/mcp/sse \
   --transport sse \
   --header "Authorization: Bearer gosidian_XXXXXXXXXXXXXXXXXXXXXXXX"
 ```
@@ -47,7 +52,7 @@ Add to your `settings.json`:
       "source": "custom",
       "command": {
         "type": "sse",
-        "url": "http://127.0.0.1:8765/sse",
+        "url": "http://127.0.0.1:8080/mcp/sse",
         "headers": {
           "Authorization": "Bearer gosidian_..."
         }
@@ -62,7 +67,9 @@ Add to your `settings.json`:
 Any MCP-compatible client that supports the SSE transport with
 custom headers works. Typical configuration fields:
 
-- `url` — `http://<host>:<port>/sse`
+- `url` — `http://<host>:<port>/mcp/sse` (single-port; recommended)
+  or the legacy `http://<host>:<port>/sse` when the standalone
+  listener is enabled
 - `transport` — `"sse"`
 - `headers.Authorization` — `Bearer <plaintext>`
 - `headers.Accept-Language` — optional; `en`, `it`, `es`, `fr`, `de`
@@ -96,3 +103,24 @@ A healthy response contains `hot_md_content`, `readme_content`,
 token is wrong; with an empty project list, your vault has no
 top-level folders yet (see
 [Agent patterns → Bootstrap a project](patterns.md#bootstrap-a-new-project)).
+
+## Migrating from the legacy standalone port
+
+Versions before the single-port change exposed MCP on its own port
+(typically 8765) at path `/sse`. That deployment shape is still
+supported when `--mcp-addr` / `GOSIDIAN_MCP_ADDR` is set, but is
+deprecated. To migrate:
+
+1. **Update the client URL** from `http://<host>:<legacy-port>/sse` to
+   `http://<host>:<web-port>/mcp/sse`. Bearer header unchanged.
+2. **Drop the second port mapping** from your Docker / compose config
+   (the line that bound `8765:8765`).
+3. **Unset `GOSIDIAN_MCP_ADDR`** to silence the deprecation warning at
+   boot. The standalone listener will not start; clients must use the
+   web-port path.
+
+The motivation: a single tunnel (SSH `-L 8080`, reverse proxy, or any
+other single-port forwarder) now serves both the web UI and the agent
+transport. This removes a class of remote-deployment misconfiguration
+where clients reached the web port for `/api/upload` but not the
+agent port for MCP.

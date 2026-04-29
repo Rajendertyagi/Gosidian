@@ -1,0 +1,69 @@
+# gosidian — deploy via pull from GHCR
+#
+# This compose pulls a published image from GitHub Container Registry
+# instead of building from source. Use this on hosts that only consume
+# gosidian (staging, production, second laptop) — keep the build-from-
+# source compose at the repo root for the build host.
+#
+# Prerequisites:
+#   1. Docker + Docker Compose installed.
+#   2. A `vault/` directory next to this file (gosidian creates
+#      `.gosidian/` inside it on first boot):
+#         mkdir -p ./vault
+#   3. No `docker login` required: GHCR public images are
+#      anonymous-pullable.
+#
+# Usage:
+#   docker compose -f docker-compose.image.yml pull
+#   docker compose -f docker-compose.image.yml up -d
+#   docker compose -f docker-compose.image.yml logs -f gosidian
+#
+# Smoke test after up:
+#   curl -s   http://localhost:8080/healthz                    # → ok
+#   curl -sI  http://localhost:8080/mcp/sse | head -1           # → 401 (auth required, path mounted)
+#   open      http://localhost:8080                             # web UI; first-run admin via /admin/users
+#
+# Image tags published on GHCR (https://github.com/daniele-chiappa/gosidian/pkgs/container/gosidian):
+#   ghcr.io/daniele-chiappa/gosidian:latest      # mobile target, last released
+#   ghcr.io/daniele-chiappa/gosidian:vX.Y.Z      # pinned to a specific release
+#
+# Pinning a specific version is recommended for production. `:latest`
+# is convenient for staging and quick trials.
+
+services:
+  gosidian:
+    image: ghcr.io/daniele-chiappa/gosidian:latest
+    container_name: gosidian
+    restart: unless-stopped
+
+    # Single-port mode: web UI + MCP transport on the same port. An SSH
+    # tunnel forwarding 8080 reaches both `/api/upload` and `/mcp/sse`.
+    # See docs/mcp/client-setup.md for the agent endpoint URL.
+    ports:
+      - "8080:8080"
+      # Legacy MCP listener (separate port). Uncomment ONLY if you need
+      # backward-compat with clients pinned to the old `:8765/sse` URL,
+      # and also uncomment GOSIDIAN_MCP_ADDR below. New deployments
+      # should leave both commented and migrate clients to /mcp/sse.
+      # - "8765:8765"
+
+    volumes:
+      - ./vault:/vault
+
+    environment:
+      GOSIDIAN_VAULT: /vault
+      GOSIDIAN_ADDR: ":8080"
+      # GOSIDIAN_MCP_ADDR: "0.0.0.0:8765"   # uncomment for legacy MCP listener
+      # Optional: git sync to a remote (GitHub / GitLab / Gitea / self-hosted).
+      # GOSIDIAN_GIT_ENABLED: "true"
+      # GOSIDIAN_GIT_REMOTE:  "https://your.git.host/you/vault.git"
+      # GOSIDIAN_GIT_PUSH:    "true"
+      # GOSIDIAN_GIT_TOKEN_ENV: "GIT_TOKEN"
+      # GIT_TOKEN: "${GIT_TOKEN}"
+
+    healthcheck:
+      test: ["CMD", "/gosidian", "healthcheck"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s

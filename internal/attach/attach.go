@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -51,6 +52,95 @@ func ValidateExt(ext string) (mime string, isImage bool, err error) {
 	return info.MIME, info.IsImage, nil
 }
 
+// VerifyMIME inspects the first 512 bytes of content and confirms the
+// detected MIME family is compatible with declaredExt. This catches MIME
+// spoofing where a caller declares ".png" but uploads a JS payload (only
+// the extension is whitelisted by ValidateExt — without this check the
+// content could be anything).
+//
+// The check is family-tolerant rather than exact:
+//   - Images: detected MIME must begin with "image/" (covers webp, animated
+//     gif, exotic png variants). SVG is text-based so text/* and
+//     image/svg+xml are both accepted.
+//   - PDF / ZIP: exact detected MIME match.
+//   - DOCX / XLSX: these are zip containers, so application/zip is accepted
+//     (also application/octet-stream as a tolerant fallback).
+//   - JSON: text/* prefix or application/json.
+//   - CSV / TXT: text/* prefix (DetectContentType conflates them).
+//
+// Returns the detected MIME on success, or an error describing the
+// mismatch when content does not match the declared extension.
+func VerifyMIME(content []byte, declaredExt string) (string, error) {
+	info, ok := AllowedExt[strings.ToLower(declaredExt)]
+	if !ok {
+		return "", fmt.Errorf("unsupported file type: %s", declaredExt)
+	}
+	if len(content) == 0 {
+		return "", errors.New("empty file content")
+	}
+
+	probe := content
+	if len(probe) > 512 {
+		probe = probe[:512]
+	}
+	detected := http.DetectContentType(probe)
+	// Strip "; charset=..." suffix so comparisons are stable.
+	if i := strings.Index(detected, ";"); i >= 0 {
+		detected = strings.TrimSpace(detected[:i])
+	}
+
+	if info.IsImage {
+		// SVG is XML/text — accept text/* and image/svg+xml.
+		if strings.ToLower(declaredExt) == ".svg" {
+			if strings.HasPrefix(detected, "text/") || detected == "image/svg+xml" {
+				return info.MIME, nil
+			}
+			return "", mimeMismatch(declaredExt, info.MIME, detected)
+		}
+		// Other images must detect as some image/* family.
+		if !strings.HasPrefix(detected, "image/") {
+			return "", mimeMismatch(declaredExt, info.MIME, detected)
+		}
+		return detected, nil
+	}
+
+	// Document handling: per-extension tolerance.
+	switch strings.ToLower(declaredExt) {
+	case ".pdf":
+		if detected != "application/pdf" {
+			return "", mimeMismatch(declaredExt, "application/pdf", detected)
+		}
+	case ".zip":
+		if detected != "application/zip" {
+			return "", mimeMismatch(declaredExt, "application/zip", detected)
+		}
+	case ".docx", ".xlsx":
+		// Both are zip containers; DetectContentType returns application/zip.
+		// Some minimal/empty office files detect as octet-stream — accept that
+		// as a tolerant fallback rather than reject legitimate empty templates.
+		if detected != "application/zip" && detected != "application/octet-stream" {
+			return "", mimeMismatch(declaredExt, "application/zip (zip-based office)", detected)
+		}
+	case ".json":
+		if !strings.HasPrefix(detected, "text/") && detected != "application/json" {
+			return "", mimeMismatch(declaredExt, "text/* or application/json", detected)
+		}
+	case ".csv", ".txt":
+		if !strings.HasPrefix(detected, "text/") {
+			return "", mimeMismatch(declaredExt, "text/*", detected)
+		}
+	default:
+		// AllowedExt would have rejected unknown extensions earlier.
+		return detected, nil
+	}
+	return info.MIME, nil
+}
+
+func mimeMismatch(ext, expected, detected string) error {
+	return fmt.Errorf("MIME mismatch: declared extension %q expects %s, content detected as %s",
+		ext, expected, detected)
+}
+
 // HashFilename computes a short, collision-resistant filename from the file
 // data: the first 16 hex characters of the SHA-256 digest plus the extension.
 func HashFilename(data []byte, ext string) string {
@@ -91,9 +181,23 @@ type Result struct {
 	Markdown string // ready-to-insert markdown
 }
 
+// remoteSetupHint is appended to source_path errors to guide users running
+// gosidian on a remote server (SSH tunnel, separate host) toward the right
+// pattern: source_path is resolved server-side, so a client-side path will
+// never match the allow-list. The base64 `data` parameter is the correct
+// alternative for cross-host uploads. Kept as a const so tests can pin it.
+const remoteSetupHint = "Hint: source_path is resolved on the server filesystem, not the client. " +
+	"For remote deployments (SSH tunnel, separate host, container without a shared volume), " +
+	"use the 'data' parameter (base64-encoded content) instead."
+
 // ValidateSourcePath checks that sourcePath is an absolute path pointing to an
 // existing regular file inside one of the allowedRoots. Returns an error
 // describing the violation, or nil when the path is safe to read.
+//
+// Errors that suggest a likely remote-deployment misuse (path not inside any
+// allowed root, or path simply does not exist on the server) are augmented
+// with remoteSetupHint to guide the caller toward the `data` parameter
+// instead of guessing at GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS configuration.
 func ValidateSourcePath(sourcePath string, allowedRoots []string) error {
 	clean := filepath.Clean(sourcePath)
 	if !filepath.IsAbs(clean) {
@@ -110,10 +214,16 @@ func ValidateSourcePath(sourcePath string, allowedRoots []string) error {
 		}
 	}
 	if !allowed {
-		return fmt.Errorf("source_path %q is not inside any allowed upload root", sourcePath)
+		return fmt.Errorf("source_path %q is not inside any allowed upload root. %s", sourcePath, remoteSetupHint)
 	}
 	fi, err := os.Stat(clean)
 	if err != nil {
+		// File missing despite path being inside an allowed root usually means
+		// the caller is on a different host than the server (the path exists
+		// client-side but not server-side). Surface the same hint.
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("source_path %q does not exist on the server. %s", sourcePath, remoteSetupHint)
+		}
 		return fmt.Errorf("source_path: %w", err)
 	}
 	if fi.IsDir() {
@@ -151,6 +261,10 @@ func Store(v Saver, data []byte, origFilename, project string) (*Result, error) 
 	}
 	if len(data) > MaxBytes {
 		return nil, errors.New("file too large (max 10 MiB)")
+	}
+	// Magic-bytes verification: catch MIME spoof (declared png, content JS).
+	if _, err := VerifyMIME(data, ext); err != nil {
+		return nil, err
 	}
 
 	filename := HashFilename(data, ext)

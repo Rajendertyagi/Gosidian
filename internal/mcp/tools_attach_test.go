@@ -10,11 +10,38 @@ import (
 	"testing"
 )
 
+// pngBytes is a minimal valid PNG (1×1 transparent pixel) used as upload
+// payload in tests. After v1.11 the attach module verifies magic bytes,
+// so test inputs must be detectable as their declared type.
+var pngBytes = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+	0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+	0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+	0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41,
+	0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+	0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00,
+	0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+	0x42, 0x60, 0x82,
+}
+
+// pdfBytes returns a minimal byte sequence detected as application/pdf.
+func pdfBytes() []byte {
+	return []byte("%PDF-1.4\n%minimal valid header for tests\n")
+}
+
+// xlsxBytes returns a minimal byte sequence detected as application/zip
+// (xlsx is a zip container).
+func xlsxBytes() []byte {
+	return []byte{0x50, 0x4B, 0x03, 0x04, 0x14, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+}
+
 func TestMCP_UploadAttachment(t *testing.T) {
 	s, _, dir := newTestServer(t)
 	ctx := context.Background()
 
-	data := base64.StdEncoding.EncodeToString([]byte("fake-png-data"))
+	data := base64.StdEncoding.EncodeToString(pngBytes)
 	res, err := s.handleUploadAttachment(ctx, call(map[string]any{
 		"data":     data,
 		"filename": "photo.png",
@@ -53,7 +80,7 @@ func TestMCP_UploadAttachmentWithProject(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := base64.StdEncoding.EncodeToString([]byte("pdf-content"))
+	data := base64.StdEncoding.EncodeToString(pdfBytes())
 	res, err := s.handleUploadAttachment(ctx, call(map[string]any{
 		"data":     data,
 		"filename": "report.pdf",
@@ -246,7 +273,7 @@ func TestMCP_UploadAttachmentFromSourcePath(t *testing.T) {
 	// Create a file inside the vault to upload from.
 	srcFile := filepath.Join(dir, ".uploads", "report.pdf")
 	os.MkdirAll(filepath.Dir(srcFile), 0o755)
-	os.WriteFile(srcFile, []byte("pdf-data-here"), 0o644)
+	os.WriteFile(srcFile, pdfBytes(), 0o644)
 
 	res, err := s.handleUploadAttachment(ctx, call(map[string]any{
 		"source_path": srcFile,
@@ -288,7 +315,7 @@ func TestMCP_UploadAttachmentFromSourcePathWithProject(t *testing.T) {
 
 	srcFile := filepath.Join(dir, ".uploads", "data.xlsx")
 	os.MkdirAll(filepath.Dir(srcFile), 0o755)
-	os.WriteFile(srcFile, []byte("xlsx-data"), 0o644)
+	os.WriteFile(srcFile, xlsxBytes(), 0o644)
 
 	res, err := s.handleUploadAttachment(ctx, call(map[string]any{
 		"source_path": srcFile,
@@ -333,6 +360,174 @@ func TestMCP_UploadAttachmentRequiresDataOrPath(t *testing.T) {
 
 	res, err := s.handleUploadAttachment(ctx, call(map[string]any{
 		"filename": "test.png",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectError(t, res)
+}
+
+// TestMCP_UploadAttachmentRejectsMIMESpoof: caller declares .png but sends
+// JS-like content. Magic-bytes verification (added 2026-04-25) must catch
+// it. Regression for the "fake-png-data" pattern that used to slip through.
+func TestMCP_UploadAttachmentRejectsMIMESpoof(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+
+	data := base64.StdEncoding.EncodeToString([]byte("alert('xss');\nfunction f(){}"))
+	res, err := s.handleUploadAttachment(ctx, call(map[string]any{
+		"data":     data,
+		"filename": "fake.png",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectError(t, res)
+}
+
+// TestMCP_UploadResource exercises the new editor-decoupled tool added in
+// v1.11. Same storage / validation as memory_upload_attachment but the
+// response carries richer metadata and NO `markdown` field — the caller
+// builds the embed when (and if) attaching to a note.
+func TestMCP_UploadResource(t *testing.T) {
+	s, v, dir := newTestServer(t)
+	ctx := context.Background()
+	if _, err := v.CreateProject("Work"); err != nil {
+		t.Fatal(err)
+	}
+
+	data := base64.StdEncoding.EncodeToString(pngBytes)
+	res, err := s.handleUploadResource(ctx, call(map[string]any{
+		"data":     data,
+		"filename": "screenshot.png",
+		"project":  "Work",
+		"kind":     "auto",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, res)
+
+	var out struct {
+		Path             string `json:"path"`
+		URL              string `json:"url"`
+		MIME             string `json:"mime"`
+		Kind             string `json:"kind"`
+		Size             int    `json:"size"`
+		OriginalFilename string `json:"original_filename"`
+		Hash             string `json:"hash"`
+		Markdown         string `json:"markdown"` // expected to be absent
+	}
+	if err := json.Unmarshal([]byte(text), &out); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(out.Path, "Work/attachments/") {
+		t.Errorf("path: %q", out.Path)
+	}
+	if out.Kind != "image" {
+		t.Errorf("kind = %q, want image", out.Kind)
+	}
+	if out.MIME != "image/png" {
+		t.Errorf("mime = %q, want image/png", out.MIME)
+	}
+	if out.Size != len(pngBytes) {
+		t.Errorf("size = %d, want %d", out.Size, len(pngBytes))
+	}
+	if out.OriginalFilename != "screenshot.png" {
+		t.Errorf("original_filename = %q", out.OriginalFilename)
+	}
+	if out.Hash == "" {
+		t.Errorf("hash is empty")
+	}
+	if out.Markdown != "" {
+		t.Errorf("markdown must be absent for memory_upload_resource, got %q", out.Markdown)
+	}
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(out.Path))); err != nil {
+		t.Errorf("file not saved: %v", err)
+	}
+}
+
+func TestMCP_UploadResourceFromSourcePath(t *testing.T) {
+	s, v, dir := newTestServer(t)
+	ctx := context.Background()
+	if _, err := v.CreateProject("Work"); err != nil {
+		t.Fatal(err)
+	}
+
+	srcFile := filepath.Join(dir, ".uploads", "doc.pdf")
+	os.MkdirAll(filepath.Dir(srcFile), 0o755)
+	os.WriteFile(srcFile, pdfBytes(), 0o644)
+
+	res, err := s.handleUploadResource(ctx, call(map[string]any{
+		"source_path": srcFile,
+		"project":     "Work",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := resultText(t, res)
+
+	var out struct {
+		Path string `json:"path"`
+		Kind string `json:"kind"`
+		MIME string `json:"mime"`
+	}
+	json.Unmarshal([]byte(text), &out)
+	if out.Kind != "document" {
+		t.Errorf("kind = %q, want document", out.Kind)
+	}
+	if out.MIME != "application/pdf" {
+		t.Errorf("mime = %q", out.MIME)
+	}
+}
+
+func TestMCP_UploadResourceRequiresProject(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+
+	data := base64.StdEncoding.EncodeToString(pngBytes)
+	res, err := s.handleUploadResource(ctx, call(map[string]any{
+		"data":     data,
+		"filename": "x.png",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectError(t, res)
+}
+
+func TestMCP_UploadResourceRejectsBadKind(t *testing.T) {
+	s, v, _ := newTestServer(t)
+	ctx := context.Background()
+	if _, err := v.CreateProject("Work"); err != nil {
+		t.Fatal(err)
+	}
+
+	data := base64.StdEncoding.EncodeToString(pngBytes)
+	res, err := s.handleUploadResource(ctx, call(map[string]any{
+		"data":     data,
+		"filename": "x.png",
+		"project":  "Work",
+		"kind":     "bogus",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	expectError(t, res)
+}
+
+func TestMCP_UploadResourceRejectsMIMESpoof(t *testing.T) {
+	s, v, _ := newTestServer(t)
+	ctx := context.Background()
+	if _, err := v.CreateProject("Work"); err != nil {
+		t.Fatal(err)
+	}
+
+	data := base64.StdEncoding.EncodeToString([]byte("not a real png at all"))
+	res, err := s.handleUploadResource(ctx, call(map[string]any{
+		"data":     data,
+		"filename": "fake.png",
+		"project":  "Work",
 	}))
 	if err != nil {
 		t.Fatal(err)

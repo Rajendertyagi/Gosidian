@@ -14,7 +14,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_VAULT` | — (CLI only `--vault`) | *required* |
 | `GOSIDIAN_ADDR` | — (CLI `--addr`) | `:8080` |
 | `GOSIDIAN_DB` | — (CLI `--db`) | `<vault>/.gosidian/index.db` |
-| `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (MCP disabled) |
+| `GOSIDIAN_MCP_ADDR` | — (CLI `--mcp-addr`) | empty (legacy listener disabled; MCP is always at `/mcp/sse` on the web port) |
 | `GOSIDIAN_LOG_LEVEL` | — | `info` (`debug`, `warn`, `error`) |
 | `GOSIDIAN_LOG_FORMAT` | — | `text` (`json`) |
 | `GOSIDIAN_GIT_ENABLED` | `git.enabled` | `false` |

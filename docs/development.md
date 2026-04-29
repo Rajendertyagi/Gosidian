@@ -10,7 +10,7 @@ git clone https://github.com/daniele-chiappa/gosidian.git
 cd gosidian
 go test ./...                            # full test suite
 go build -o gosidian ./cmd/gosidian
-./gosidian --vault ./testdata/vault --mcp-addr 127.0.0.1:8765
+./gosidian --vault ./testdata/vault
 ```
 
 **Requirements**: Go 1.22 or newer. No CGO required for the default

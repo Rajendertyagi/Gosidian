@@ -11,7 +11,10 @@ memory. Clients (Claude Code, Zed, Cursor, Continue, custom agents)
 connect to MCP servers and call typed tools. gosidian implements the
 **server** side.
 
-Transport: **HTTP + SSE** at `/sse` by default.
+Transport: **HTTP + SSE** at `/mcp/sse` on the web port (single-port
+mode, recommended). A legacy standalone listener at `/sse` on a
+separate port is still supported for backward compatibility, opt-in
+via `--mcp-addr` / `GOSIDIAN_MCP_ADDR`.
 Auth: **Bearer tokens** with per-project scoping.
 
 ## Why typed retrieval

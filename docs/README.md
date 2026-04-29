@@ -15,13 +15,15 @@ trial, read the [root README](../README.md) first.
 ## MCP server
 
 - [Overview](mcp/overview.md) — what MCP is, why gosidian uses it
-- [Tool catalogue](mcp/tools.md) — all 44 typed tools, grouped by purpose
+- [Tool catalogue](mcp/tools.md) — all 47 typed tools, grouped by purpose
 - [Authentication](mcp/authentication.md) — bearer tokens, scopes,
   rotation
 - [Client setup](mcp/client-setup.md) — Claude Code, Zed, Cursor,
   Continue, custom clients
 - [Agent patterns](mcp/patterns.md) — typical session flow, bootstrap →
   discover → read → write → self-check
+- [Upload flow](mcp/upload.md) — REST `/api/upload` + the two MCP
+  upload tools, contract and decision tree
 
 ## Web UI
 

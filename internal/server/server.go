@@ -107,6 +107,23 @@ func (s *Server) SetTrash(t *trash.Bin) {
 	s.trash = t
 }
 
+// MountMCP registers an MCP SSE handler under /mcp/* on the web mux for
+// single-port deployments. The handler MUST be configured with a basePath
+// that matches the mount prefix (see *internal/mcp.Server.Handler) so that
+// (a) the SSEServer's exact-path router accepts /mcp/sse and /mcp/message,
+// and (b) the URL it announces in the initial "endpoint" SSE event is the
+// public-facing /mcp/message — otherwise clients fall back to "SSE
+// streaming not supported" because their POST to the announced endpoint
+// 404s on the mux. No StripPrefix here for the same reason.
+//
+// The /mcp/ prefix is in isOpenPath so the web-auth redirect middleware
+// leaves it alone — MCP carries its own Bearer-token auth at the SSE
+// handshake. Agents talk to it directly, never through the cookie
+// session that the browser-facing routes rely on.
+func (s *Server) MountMCP(handler http.Handler) {
+	s.mux.Handle("/mcp/", handler)
+}
+
 // templateFiles lists all templates (pages + partial-only) that should be
 // parsed as their own isolated set combining layout.html + the file itself.
 // Isolated sets avoid cross-contamination of the `body` block across files.
@@ -172,6 +189,7 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store, configPath string
 	s.mux.HandleFunc("/api/note-excerpt", s.handleNoteExcerpt)
 	s.mux.HandleFunc("/api/command-palette", s.handleCommandPalette)
 	s.mux.HandleFunc("/api/attach", s.handleAttach)
+	s.mux.HandleFunc("/api/upload", s.handleUpload)
 	s.mux.HandleFunc("/vault-files/", s.handleVaultFile)
 	s.mux.HandleFunc("/search", s.handleSearch)
 	s.mux.HandleFunc("/tags", s.handleTags)
@@ -218,6 +236,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // statusRecorder lets the metrics middleware observe the final status code.
+//
+// It also forwards http.Flusher / http.Hijacker / Unwrap so that handlers
+// downstream (notably the MCP SSE transport, which type-asserts the writer
+// to http.Flusher and returns 500 "Streaming unsupported" otherwise) keep
+// working when wrapped. Without these, mounting the MCP handler on the web
+// mux breaks SSE streaming because Go's interface promotion does not
+// propagate methods through an embedded interface field — only the
+// concrete *http.response provides Flush(), and the wrapper hides it.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -226,6 +252,18 @@ type statusRecorder struct {
 func (s *statusRecorder) WriteHeader(code int) {
 	s.status = code
 	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Unwrap exposes the inner ResponseWriter to http.NewResponseController
+// (Go 1.20+) and any helper that walks wrapper chains.
+func (s *statusRecorder) Unwrap() http.ResponseWriter {
+	return s.ResponseWriter
 }
 
 // routeLabel collapses URL paths into bounded label values so metrics
@@ -265,7 +303,12 @@ func isOpenPath(p string) bool {
 	case "/login", "/logout", "/healthz", "/metrics", "/theme.css", "/signup":
 		return true
 	}
-	return strings.HasPrefix(p, "/static/")
+	if strings.HasPrefix(p, "/static/") {
+		return true
+	}
+	// MCP transport carries its own Bearer-token auth at the SSE handshake;
+	// it must not be redirected to /login by the web-auth middleware.
+	return strings.HasPrefix(p, "/mcp/")
 }
 
 // isAuthenticated returns true if r carries a live session cookie.

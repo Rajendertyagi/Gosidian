@@ -5,8 +5,6 @@ import (
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // handleI18nSet switches the preferred UI language by setting a persistent
@@ -31,15 +29,13 @@ func (s *Server) handleI18nSet(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Cookie TTL: 1 year is plenty for a UI preference; refreshed on every
-	// explicit user switch. Secure flag is set automatically when the request
-	// looks like TLS (matches the pattern used by webauth session cookies).
+	// explicit user switch.
 	http.SetCookie(w, &http.Cookie{
 		Name:     langCookieName,
 		Value:    lang,
 		Path:     "/",
 		Expires:  time.Now().Add(365 * 24 * time.Hour),
 		HttpOnly: false, // readable by JS if we ever add a client-side switch
-		Secure:   webauth.IsSecureRequest(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, next, http.StatusSeeOther)

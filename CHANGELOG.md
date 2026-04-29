@@ -4,6 +4,88 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [1.1.0] — 2026-04-29 — "Agent workflow + single-port"
+
+Two-bundle MINOR. MCP transport now co-locates with the web UI on a
+single port; two new MCP tools land for agent adoption and decoupled
+file staging; the upload pipeline gets magic-bytes verification.
+
+### Added
+
+- **`memory_init_agent` MCP tool** — replaces `/init`-style scaffolding
+  for Claude Code, Cursor, Codex, Aider, generic. Two modes
+  (augment / from-scratch) selected by `existing_content`. New
+  package `internal/initprompt/` with renderer + per-profile
+  prompts + a single shared `gosidian_block.tmpl.md`.
+- **`memory_upload_resource` MCP tool** — pre-uploader twin of
+  `memory_upload_attachment`. Same storage and validation, returns
+  the resource handle (path, url, mime, kind, size, hash) without
+  an embed markdown — agents stage files first, attach later.
+- **MCP single-port mode**: SSE transport mounted on the web port at
+  `/mcp/sse`. A single SSH tunnel forwarding port 8080 reaches both
+  web UI and MCP transport. New client URL:
+  `http://<host>:8080/mcp/sse`. The legacy standalone listener
+  (`--mcp-addr` / `GOSIDIAN_MCP_ADDR`) is now opt-in (deprecated).
+- **`docs/mcp/upload.md`** — single reference for the three
+  equivalent upload paths: REST `POST /api/upload`, MCP
+  `memory_upload_attachment`, MCP `memory_upload_resource`. Decision
+  tree, request/response contracts, MIME tolerance per extension,
+  unified error catalogue mapping the same validation failures to
+  REST status codes and MCP error results.
+- **`docs/examples/docker-compose.image.yml`** — annotated template
+  for pull-from-GHCR deploys (no Go toolchain, no `docker login`
+  required for the public image, single-port mode by default).
+
+### Changed
+
+- **`/api/upload` co-located with MCP** on the web port. Agents
+  behind an SSH tunnel forwarding only 8080 can now reach both the
+  REST upload endpoint and the MCP transport through the same
+  forward, removing a class of remote-deployment confusion.
+- **SQLite engine bumped to 3.53.0** via `modernc.org/sqlite`
+  1.32.0 → 1.50.0. Pure correctness margin from upstream fixes
+  (64-bit RowID ABI, `Deserialize` memory leak,
+  `commitHookTrampoline` signature) — gosidian doesn't use the
+  affected APIs but the pull-through is still net-positive.
+  Includes new `ColumnInfo` API and sqlite-vec v0.1.9.
+
+### Fixed
+
+- **MCP `/mcp/sse` returned `500 Streaming unsupported`** when
+  reached via the shared web mux. Root cause: the metrics middleware
+  wrapped the response writer in a struct that did not propagate
+  `Flush()` through Go's interface promotion; the SSE handler's
+  `w.(http.Flusher)` assertion failed and the stream never opened.
+  Fix: the wrapper now forwards `Flush()` and exposes `Unwrap()`
+  for `http.NewResponseController` compatibility.
+- **`source_path` upload errors hint at the `data` parameter for
+  remote setups**. Users running gosidian behind an SSH tunnel hit
+  a cryptic "not inside any allowed upload root" — `source_path`
+  is resolved server-side, so a client-side path will never match
+  the allow-list. Both that error and the file-not-found branch
+  now point the caller at base64 `data` as the correct alternative
+  for cross-host uploads. Same hint added to the MCP tool
+  descriptions so callers see it in the schema.
+
+### Security
+
+- **Magic-bytes verification on uploads** rejects MIME-spoofed
+  payloads. `attach.VerifyMIME` inspects the first 512 bytes with
+  `http.DetectContentType` and confirms the detected MIME family
+  matches the declared extension, with per-extension tolerance
+  (SVG/text, DOCX/XLSX as zip containers, PDF/ZIP exact). Catches
+  the classic "JS-as-PNG", "HTML-as-PDF", "plain-text-as-ZIP"
+  spoof shapes the extension allowlist alone could not stop.
+
+### Deprecated
+
+- `--mcp-addr` flag and `GOSIDIAN_MCP_ADDR` env var. Will be removed
+  in a future major release once `/mcp/sse` has been the default
+  for at least two minor versions. Existing deployments that keep
+  the env var set continue to work and expose both endpoints; new
+  deployments should drop the env var and migrate clients to
+  `/mcp/sse`.
+
 ## [1.0.1] — 2026-04-25 — "Security hardening"
 
 Bundle of security findings raised by the first CodeQL run on the

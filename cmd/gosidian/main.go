@@ -84,7 +84,7 @@ func main() {
 	vaultDir := flag.String("vault", "", "path to vault directory (required)")
 	addr := flag.String("addr", ":8080", "HTTP listen address")
 	dbPath := flag.String("db", "", "path to SQLite index file (default: <vault>/.gosidian/index.db)")
-	mcpAddr := flag.String("mcp-addr", "", "MCP (HTTP+SSE) listen address, e.g. 127.0.0.1:8765. Empty disables MCP.")
+	mcpAddr := flag.String("mcp-addr", "", "Optional standalone MCP (HTTP+SSE) listen address (e.g. 127.0.0.1:8765). Deprecated: MCP is always served on the web port at /mcp/sse. Set this only when a separate listener is required for backward compatibility.")
 	flag.Parse()
 
 	// Env var overrides: CLI > env > default.
@@ -261,27 +261,39 @@ func main() {
 		srv.SetTrash(bin)
 		log.Printf("trash: enabled (retention %s)", cfg.Trash.Retention)
 	}
+	// MCP is always wired and mounted on the web mux at /mcp/sse — single-port
+	// mode is the recommended deployment shape (one SSH tunnel forwards
+	// :8080 and exposes both web UI and MCP). The legacy standalone listener
+	// is opt-in via --mcp-addr / GOSIDIAN_MCP_ADDR for backward compatibility.
+	mcpServer := mcpsrv.New(v, idx, tokenStore)
+	mcpServer.SetAuditLog(auditLog)
+	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
+	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
+	srv.MountMCP(mcpServer.Handler("/mcp"))
+
 	httpSrv := &http.Server{
 		Addr:              *addr,
 		Handler:           srv,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		log.Printf("listening on %s", *addr)
+		log.Printf("listening on %s (web + MCP at /mcp/sse)", *addr)
 		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("http: %v", err)
 		}
 	}()
 
+	var legacyMCPSrv *http.Server
 	if *mcpAddr != "" {
-		mcpServer := mcpsrv.New(v, idx, tokenStore)
-		mcpServer.SetAuditLog(auditLog)
-		mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
-		mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
+		log.Printf("MCP legacy listener on %s (DEPRECATED — clients should use %s/mcp/sse)", *mcpAddr, *addr)
+		legacyMCPSrv = &http.Server{
+			Addr:              *mcpAddr,
+			Handler:           mcpServer.Handler(""),
+			ReadHeaderTimeout: 5 * time.Second,
+		}
 		go func() {
-			log.Printf("MCP server listening on %s", *mcpAddr)
-			if err := mcpServer.ServeSSE(*mcpAddr); err != nil && ctx.Err() == nil {
-				log.Fatalf("mcp: %v", err)
+			if err := legacyMCPSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed && ctx.Err() == nil {
+				log.Fatalf("mcp legacy: %v", err)
 			}
 		}()
 	}
@@ -295,4 +307,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_ = httpSrv.Shutdown(shutdownCtx)
+	if legacyMCPSrv != nil {
+		_ = legacyMCPSrv.Shutdown(shutdownCtx)
+	}
 }

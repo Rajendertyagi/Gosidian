@@ -92,9 +92,23 @@ func (f *fakeSaver) Save(rel string, content []byte) error {
 	return nil
 }
 
+// pdfContent returns a minimal byte sequence that http.DetectContentType
+// recognises as application/pdf. Used by tests that need a "valid" PDF
+// payload after the magic-bytes verification was added in v1.11.
+func pdfContent() []byte {
+	return []byte("%PDF-1.4\n%minimal valid header for tests\n")
+}
+
+// pngContent returns a minimal byte sequence detected as image/png.
+func pngContent() []byte {
+	return []byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 'I', 'H', 'D', 'R',
+		0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0}
+}
+
 func TestStore(t *testing.T) {
 	s := &fakeSaver{saved: make(map[string][]byte)}
-	res, err := Store(s, []byte("hello"), "report.pdf", "Work")
+	res, err := Store(s, pdfContent(), "report.pdf", "Work")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +123,20 @@ func TestStore(t *testing.T) {
 	}
 	if len(s.saved) != 1 {
 		t.Errorf("expected 1 saved file, got %d", len(s.saved))
+	}
+}
+
+// TestStoreRejectsMIMESpoof: caller declares .png but uploads JS-like
+// content. The magic-bytes verification (added 2026-04-25) must catch this.
+func TestStoreRejectsMIMESpoof(t *testing.T) {
+	s := &fakeSaver{saved: make(map[string][]byte)}
+	jsLike := []byte("alert('xss');\nfunction stuff(){return 1}")
+	_, err := Store(s, jsLike, "fake.png", "")
+	if err == nil {
+		t.Error("expected MIME mismatch error for JS content declared as .png")
+	}
+	if !strings.Contains(err.Error(), "MIME mismatch") {
+		t.Errorf("expected 'MIME mismatch' in error, got: %v", err)
 	}
 }
 
@@ -163,7 +191,7 @@ func TestValidateSourcePath(t *testing.T) {
 func TestStoreFromPath(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "report.pdf")
-	os.WriteFile(file, []byte("pdf-content"), 0o644)
+	os.WriteFile(file, pdfContent(), 0o644)
 
 	s := &fakeSaver{saved: make(map[string][]byte)}
 	res, err := StoreFromPath(s, file, "", "Work", []string{dir})
@@ -181,7 +209,7 @@ func TestStoreFromPath(t *testing.T) {
 func TestStoreFromPathOverrideFilename(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "data.pdf")
-	os.WriteFile(file, []byte("content"), 0o644)
+	os.WriteFile(file, pdfContent(), 0o644)
 
 	s := &fakeSaver{saved: make(map[string][]byte)}
 	res, err := StoreFromPath(s, file, "custom-name.pdf", "", []string{dir})
@@ -190,6 +218,51 @@ func TestStoreFromPathOverrideFilename(t *testing.T) {
 	}
 	if !strings.Contains(res.Markdown, "[custom-name.pdf]") {
 		t.Errorf("markdown should use override name: %q", res.Markdown)
+	}
+}
+
+// TestVerifyMIME locks down the magic-bytes guard added in v1.11 to
+// prevent MIME spoofing on uploads. Covers the canonical happy paths plus
+// the four spoof shapes that motivated the helper (JS-as-PNG,
+// HTML-as-PDF, plain-text-as-zip, and the SVG-as-text legitimate case).
+func TestVerifyMIME(t *testing.T) {
+	// Build a tiny but real ZIP archive (PK header).
+	zipContent := []byte{0x50, 0x4B, 0x03, 0x04, 0x14, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
+
+	tests := []struct {
+		name    string
+		content []byte
+		ext     string
+		wantErr bool
+	}{
+		// Happy paths
+		{"valid PDF", pdfContent(), ".pdf", false},
+		{"valid PNG", pngContent(), ".png", false},
+		{"valid ZIP", zipContent, ".zip", false},
+		{"valid SVG (text/xml detected)", []byte(`<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg"/>`), ".svg", false},
+		{"valid CSV (text/plain detected)", []byte("col1,col2\nvalue,42\n"), ".csv", false},
+		{"valid TXT", []byte("plain text content for testing\n"), ".txt", false},
+		{"valid JSON", []byte(`{"key":"value"}`), ".json", false},
+
+		// Spoofs (caller lies about content)
+		{"JS-as-PNG spoof", []byte("alert('xss')\nfunction f(){}"), ".png", true},
+		{"HTML-as-PDF spoof", []byte("<html><body>fake</body></html>"), ".pdf", true},
+		{"plain-text-as-ZIP spoof", []byte("not a zip at all"), ".zip", true},
+		{"binary-as-CSV spoof", pngContent(), ".csv", true},
+
+		// Edge cases
+		{"empty content", []byte{}, ".pdf", true},
+		{"unknown extension", pdfContent(), ".exe", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := VerifyMIME(tt.content, tt.ext)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("VerifyMIME(%q) error = %v, wantErr %v", tt.ext, err, tt.wantErr)
+			}
+		})
 	}
 }
 
@@ -202,5 +275,42 @@ func TestStoreFromPathBlocksOutsideRoots(t *testing.T) {
 	_, err := StoreFromPath(s, file, "", "", []string{"/some/other/root"})
 	if err == nil {
 		t.Error("expected error for path outside allowed roots")
+	}
+}
+
+// TestValidateSourcePath_RemoteSetupHint locks down the IMP-036 fix: the
+// errors that typically hit users running gosidian behind an SSH tunnel
+// (path not in allowed roots, or path simply missing on the server) now
+// carry a hint that points them at the 'data' parameter instead of letting
+// them guess at GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS configuration.
+func TestValidateSourcePath_RemoteSetupHint(t *testing.T) {
+	dir := t.TempDir()
+	allowed := []string{dir}
+
+	// Case 1: path outside allowed roots (typical remote-deployment error).
+	err := ValidateSourcePath("/home/someone/local/file.pdf", allowed)
+	if err == nil {
+		t.Fatal("expected error for path outside allowed roots")
+	}
+	if !strings.Contains(err.Error(), "data") || !strings.Contains(err.Error(), "remote") {
+		t.Errorf("error should hint at 'data' param + remote setup, got: %v", err)
+	}
+
+	// Case 2: path inside allowed root but file missing (also typical when
+	// client and server filesystems differ).
+	missing := filepath.Join(dir, "phantom.pdf")
+	err = ValidateSourcePath(missing, allowed)
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if !strings.Contains(err.Error(), "data") || !strings.Contains(err.Error(), "remote") {
+		t.Errorf("missing-file error should also hint at 'data' / remote setup, got: %v", err)
+	}
+
+	// Case 3: legitimate happy path keeps working without hint pollution.
+	good := filepath.Join(dir, "ok.pdf")
+	os.WriteFile(good, pdfContent(), 0o644)
+	if err := ValidateSourcePath(good, allowed); err != nil {
+		t.Errorf("happy path failed: %v", err)
 	}
 }
