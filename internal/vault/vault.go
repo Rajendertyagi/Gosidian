@@ -173,9 +173,14 @@ func (v *Vault) ScanInto(idx *index.Index) error {
 
 // Project describes a top-level directory inside the vault. Projects are
 // derived from the filesystem — no metadata is stored separately.
+//
+// ModTime is the directory's last-modification timestamp, used as a
+// proxy for "last activity" (fs birth time isn't preserved by rsync,
+// git checkout, or container layer copy, so it would be misleading).
 type Project struct {
 	Name      string
 	NoteCount int
+	ModTime   time.Time
 }
 
 // Projects returns all top-level directories under the vault root, sorted by
@@ -195,7 +200,11 @@ func (v *Vault) Projects() ([]Project, error) {
 			continue
 		}
 		count, _ := v.countNotesIn(name)
-		out = append(out, Project{Name: name, NoteCount: count})
+		var modTime time.Time
+		if info, err := e.Info(); err == nil {
+			modTime = info.ModTime()
+		}
+		out = append(out, Project{Name: name, NoteCount: count, ModTime: modTime})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out, nil

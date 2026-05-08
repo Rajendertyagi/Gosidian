@@ -27,12 +27,16 @@
     "revoke_button": "Revoke",
     "disable_button": "Disable",
     "loading": "Loading…",
-    "vault": "Vault"
+    "vault": "Vault",
+    "back": "Back"
   },
   "tree": {
     "filter_placeholder": "Filter notes…",
     "expand_all": "Expand all",
-    "collapse_all": "Collapse all"
+    "collapse_all": "Collapse all",
+    "download_project": "Download project as zip",
+    "download_vault": "Download whole vault",
+    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
   },
   "nav": {
     "projects": "Projects",
@@ -132,7 +136,8 @@
     "dashboard_link": "Dashboard",
     "rename_button": "Rename project",
     "delete_button": "Delete project",
-    "no_notes": "No notes in this project."
+    "no_notes": "No notes in this project.",
+    "settings_link": "Settings"
   },
   "project_dashboard": {
     "subtitle": "dashboard",
@@ -162,7 +167,13 @@
     "git_legend": "Git sync",
     "theme_legend": "Theme",
     "theme_hint": "Pick a preset or switch to Custom to edit the 5 root colors manually. Other tokens derive automatically. Changes apply on next page refresh — no restart required.",
-    "token_not_persisted": "The token is never persisted to file; export it in gosidian's environment."
+    "token_not_persisted": "The token is never persisted to file; export it in gosidian's environment.",
+    "token_env_help": "Name of the env var holding the PAT (read at runtime, overrides the saved token).",
+    "token_field_label": "Git token (rotate at runtime)",
+    "token_status": "Current state:",
+    "token_field_help": "Leave empty to keep it as-is. Paste a plaintext PAT to rotate. The env var (above) takes precedence.",
+    "token_clear_confirm": "Remove the saved git token?",
+    "token_clear_button": "Remove token"
   },
   "tag_notes": {
     "filter_all_projects": "all projects"
@@ -250,5 +261,13 @@
     "password_hint": "Password (min 8 characters)",
     "password_confirm": "Confirm password",
     "invalid_invite": "Invalid or expired invite link."
+  },
+  "project_settings": {
+    "title": "Project settings",
+    "legend": "Visibility and synchronization",
+    "skip_git_sync": "Exclude from git sync",
+    "skip_git_sync_help": "When enabled, this project is not included in auto-commits. It stays in the vault and visible in the web UI.",
+    "hidden_from_mcp": "Hide from MCP server",
+    "hidden_from_mcp_help": "When enabled, MCP agents do not see this project in lists and receive an error when naming it explicitly."
   }
 }

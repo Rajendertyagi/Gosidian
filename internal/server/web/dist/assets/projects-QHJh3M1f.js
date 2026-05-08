@@ -1,0 +1,2 @@
+import{z as e}from"./index-CrclG0B9.js";async function c(){const{data:t}=await e.get("/projects");return t.items}async function s(t){const{data:a}=await e.post("/projects",{name:t});return a}async function r(t,a){const{data:n}=await e.put(`/projects/${encodeURIComponent(t)}`,a);return n}async function i(t){await e.delete(`/projects/${encodeURIComponent(t)}`)}export{s as c,i as d,c as l,r as u};
+//# sourceMappingURL=projects-QHJh3M1f.js.map

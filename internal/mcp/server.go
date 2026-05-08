@@ -10,6 +10,8 @@ import (
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/projects"
+	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/server"
 )
@@ -55,11 +57,57 @@ type Server struct {
 	vault              *vault.Vault
 	index              *index.Index
 	tokens             *auth.Store
+	projects           *projects.Store
 	audit              *audit.Log
 	impl               *server.MCPServer
 	limiter            *writeLimiter
 	maxNoteBytes       int64
 	allowedUploadRoots []string
+	// events is optional. When wired, MCP write handlers (create,
+	// update, delete) publish on the `note` and `tree` topics so the
+	// SPA SSE stream can invalidate caches in real time. nil keeps
+	// the legacy behaviour (no announcements, the SPA polls).
+	events *events.Hub
+}
+
+// SetEvents wires the SSE hub used to broadcast note/tree changes
+// from MCP write handlers. The publisher path is best-effort — a nil
+// hub no-ops, and a slow subscriber loses events under the hub's
+// drop-oldest policy rather than back-pressuring the writer.
+func (s *Server) SetEvents(h *events.Hub) {
+	s.events = h
+}
+
+// publishNoteChange broadcasts a note-level write (create/update/
+// delete) on the `note` topic. For mutations that change the tree
+// shape (create, delete, rename) the tree topic is published too so
+// the SPA sidebar invalidates its cache. Best-effort: no error
+// surfaced to the caller, and slow subscribers lose events under the
+// hub's drop-oldest policy.
+func (s *Server) publishNoteChange(action, path string, etag string, treeAffected bool) {
+	if s.events == nil {
+		return
+	}
+	payload := map[string]any{
+		"action": action,
+		"path":   path,
+		"source": "mcp",
+	}
+	if etag != "" {
+		payload["etag"] = etag
+	}
+	s.events.Publish(events.TopicNote, payload)
+	if treeAffected {
+		s.events.Publish(events.TopicTree, payload)
+	}
+}
+
+// SetProjects wires the per-project flag store. When non-nil, projects with
+// HiddenFromMCP=true are filtered out of list-style tools and rejected with
+// an explicit "hidden by config" error when a tool receives the project name
+// directly. nil = no per-project visibility filter (current behaviour).
+func (s *Server) SetProjects(p *projects.Store) {
+	s.projects = p
 }
 
 // SetWriteLimits configures the per-token write/minute cap and the per-note

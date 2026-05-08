@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	apiv1 "github.com/gosidian/gosidian/internal/api/v1"
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/config"
@@ -21,8 +22,11 @@ import (
 	"github.com/gosidian/gosidian/internal/index"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/metrics"
+	"github.com/gosidian/gosidian/internal/parser"
+	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/gosidian/gosidian/internal/scaffold"
 	"github.com/gosidian/gosidian/internal/server"
+	"github.com/gosidian/gosidian/internal/server/events"
 	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -140,6 +144,34 @@ func main() {
 		log.Fatalf("open audit log: %v", err)
 	}
 	log.Printf("audit log: %s", auditPath)
+
+	projectsPath := filepath.Join(hiddenDir, "projects.json")
+	projectsStore, err := projects.Open(projectsPath)
+	if err != nil {
+		log.Fatalf("open projects flag store: %v", err)
+	}
+
+	gitTokenPath := filepath.Join(hiddenDir, "gitsync.json")
+	gitTokenStore, err := gitsync.OpenTokenStore(gitTokenPath)
+	if err != nil {
+		log.Fatalf("open gitsync token store: %v", err)
+	}
+
+	// v2.0: SPA browser-session token store, separate from MCP tokens.
+	// Wired unconditionally so the /api/v1/login endpoint always works;
+	// the SPA shell itself is opt-in via GOSIDIAN_SPA_MODE.
+	spaTokensPath := filepath.Join(hiddenDir, "spa_tokens.json")
+	spaTokenStore, err := auth.OpenSpaTokens(spaTokensPath)
+	if err != nil {
+		log.Fatalf("open spa token store: %v", err)
+	}
+	spaTokenStore.StartCleanup(1 * time.Hour)
+	defer spaTokenStore.Close()
+
+	// v2.0: SSE events hub. Subscribers connect via /api/v1/events; the
+	// vault watcher and MCP write handlers publish here in subsequent
+	// phases. Always allocated (cheap) even when SPA mode is off.
+	eventsHub := events.New(events.HubOptions{Logger: slog.Default()})
 	if webauthStore.Enabled() {
 		users := webauthStore.ListUsers()
 		log.Printf("web auth: enabled (%d account(s), owner=%q, TOTP=%v)", len(users), webauthStore.Username(), webauthStore.TOTPEnabled())
@@ -193,7 +225,9 @@ func main() {
 		v.SetCacheSize(cfg.Vault.CacheSize)
 		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)
 	}
-	server.ConfigureLogin(cfg.Webauth.SessionTTL, cfg.Webauth.LoginWindow, cfg.Webauth.LoginMaxFailures)
+	// Web-side login rate-limit + session TTL configuration moved
+	// to internal/api/v1 — the legacy server.ConfigureLogin retired
+	// at the v2.0 cutover alongside the cookie-session middleware.
 	log.Printf("scanning vault %s", absVault)
 	if err := v.ScanInto(idx); err != nil {
 		log.Fatalf("scan: %v", err)
@@ -210,6 +244,8 @@ func main() {
 	defer stop()
 
 	syncer := gitsync.New(absVault, cfg.Git)
+	syncer.SetProjects(projectsStore)
+	syncer.SetTokenStore(gitTokenStore)
 	if err := syncer.Start(ctx); err != nil {
 		// IMP-002: gitsync init failure is non-fatal. Log loudly, mark the
 		// subsystem as degraded (Sync.Status() + Prometheus gauge), and keep
@@ -219,14 +255,32 @@ func main() {
 		// take down unrelated subsystems with it.
 		log.Printf("gitsync: DEGRADED at startup: %v", err)
 	}
-	var onChange func()
+	// fsnotify-driven onChange fans out to two consumers:
+	//   - gitsync.TriggerCommit when git sync is enabled (debounced
+	//     auto-commit of vault changes).
+	//   - eventsHub publish on the `tree` topic so SSE subscribers
+	//     invalidate their sidebar cache. Carries no path data
+	//     because the v1 watcher signature doesn't surface it; the
+	//     SPA refetches /api/v1/tree on receipt. Per-path note
+	//     events come from the MCP/api write hooks instead, which
+	//     do know which path changed.
+	onChange := func() {
+		if cfg.Git.Enabled {
+			syncer.TriggerCommit()
+		}
+		if eventsHub != nil {
+			eventsHub.Publish(events.TopicTree, map[string]any{
+				"action": "fs_change",
+				"source": "watcher",
+			})
+		}
+	}
 	if cfg.Git.Enabled {
 		if syncer.Status().Healthy {
 			log.Printf("gitsync: enabled (debounce=%s push=%v)", cfg.Git.Debounce, cfg.Git.Push)
 		} else {
 			log.Printf("gitsync: enabled in config but subsystem is DEGRADED — commits will be skipped")
 		}
-		onChange = syncer.TriggerCommit
 	}
 
 	go func() {
@@ -235,30 +289,28 @@ func main() {
 		}
 	}()
 
-	srv := server.New(v, idx, tokenStore, cfgPath, webauthStore)
+	srv := server.New(v, idx)
 	srv.SetBuildInfo(version, cfg.Git.Enabled)
-	srv.SetAuditLog(auditLog)
 
-	// i18n: load embedded catalogues. Missing files are not fatal — the
-	// catalogue falls back to key literals so developers see missing
-	// translations immediately.
-	if cat, err := i18n.Load(cfg.I18n.DefaultLang); err != nil {
-		log.Printf("i18n: load error (using key literals as fallback): %v", err)
+	// i18n: load embedded catalogues. /api/v1/i18n serves them to the
+	// SPA; load failures are not fatal — vue-i18n falls back to bundle-
+	// time strings, dev-friendly enough that we don't bring down boot.
+	if _, err := i18n.Load(cfg.I18n.DefaultLang); err != nil {
+		log.Printf("i18n: load error (SPA falls back to bundled strings): %v", err)
 	} else {
-		srv.SetI18n(cat, cfg.I18n.DefaultLang)
 		log.Printf("i18n: loaded (default=%s, enabled=%v)", cfg.I18n.DefaultLang, cfg.I18n.EnabledLangs)
 	}
 	if cfg.Git.Enabled {
 		srv.SetGitSync(syncer)
 	}
+	var trashBin *trash.Bin
 	if cfg.Trash.Enabled {
-		bin := trash.New(absVault, cfg.Trash.Retention)
-		if removed, err := bin.PruneExpired(); err != nil {
+		trashBin = trash.New(absVault, cfg.Trash.Retention)
+		if removed, err := trashBin.PruneExpired(); err != nil {
 			log.Printf("trash prune: %v", err)
 		} else if removed > 0 {
 			log.Printf("trash: pruned %d expired entries (retention %s)", removed, cfg.Trash.Retention)
 		}
-		srv.SetTrash(bin)
 		log.Printf("trash: enabled (retention %s)", cfg.Trash.Retention)
 	}
 	// MCP is always wired and mounted on the web mux at /mcp/sse — single-port
@@ -269,7 +321,38 @@ func main() {
 	mcpServer.SetAuditLog(auditLog)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
 	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
+	mcpServer.SetProjects(projectsStore)
+	// MCP write handlers publish on the SSE hub so SPA subscribers
+	// see external-tab + agent edits in real time.
+	mcpServer.SetEvents(eventsHub)
+
+	// v2.0: REST API router under /api/v1/. Mounted always (purely
+	// additive). The SPA shell on `/` is gated by env var below.
+	apiv1.Version = version
+	apiv1.DefaultLang = cfg.I18n.DefaultLang
+	apiv1.EnabledLangs = cfg.I18n.EnabledLangs
+	apiRouter := apiv1.NewRouter(&apiv1.Deps{
+		Auth: &apiv1.AuthDeps{
+			WebAuth:   webauthStore,
+			SpaAuth:   spaTokenStore,
+			MCPTokens: tokenStore,
+			Logger:    slog.Default(),
+		},
+		Audit:    auditLog,
+		Vault:    v,
+		Events:   eventsHub,
+		Index:      idx,
+		Renderer:   parser.NewRenderer(),
+		Trash:      trashBin,
+		Projects:   projectsStore,
+		GitSync:    syncer, // nil-safe; History returns "git sync disabled" when cfg off
+		ConfigPath: cfgPath,
+	})
+	srv.MountAPIv1(apiRouter)
 	srv.MountMCP(mcpServer.Handler("/mcp"))
+	// v2.0 cutover: the SPA is the only frontend. The legacy
+	// GOSIDIAN_SPA_MODE flag was retired alongside the HTMX
+	// templates and per-page handlers — see docs/migration-v2.md.
 
 	httpSrv := &http.Server{
 		Addr:              *addr,

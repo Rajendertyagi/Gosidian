@@ -249,7 +249,16 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 	// project (never expand). We fetch a few extra hits when a filter is
 	// active so the final result still has up to `limit` entries after
 	// filtering.
-	filter := buildProjectsFilter(req.GetStringSlice("projects", nil), tok.ProjectFilter())
+	requestedProjects := req.GetStringSlice("projects", nil)
+	// Reject explicit hidden projects with a clear error so the caller knows
+	// why the result is empty. Vault-wide search (no projects[] arg) silently
+	// drops hits from hidden projects further down.
+	for _, p := range requestedProjects {
+		if res := s.rejectIfHidden(strings.TrimSpace(p)); res != nil {
+			return res, nil
+		}
+	}
+	filter := buildProjectsFilter(requestedProjects, tok.ProjectFilter())
 	fetchLimit := limit
 	if filter.active {
 		fetchLimit = limit * 4
@@ -272,6 +281,9 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 			continue
 		}
 		if !filter.matches(h.Path) {
+			continue
+		}
+		if s.pathInHiddenProject(h.Path) {
 			continue
 		}
 		if len(out) >= limit {
@@ -327,6 +339,14 @@ func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (
 		}
 		project = tok.ProjectFilter()
 	}
+	// Per-project visibility: an explicit hidden project is rejected; an
+	// implicit vault-wide listing silently drops notes from hidden projects
+	// further down.
+	if project != "" {
+		if res := s.rejectIfHidden(project); res != nil {
+			return res, nil
+		}
+	}
 
 	var notes []index.NoteRow
 	var err error
@@ -341,6 +361,9 @@ func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (
 	out := make([]noteRef, 0, len(notes))
 	for _, n := range notes {
 		if !tok.AllowsPath(n.Path) {
+			continue
+		}
+		if s.pathInHiddenProject(n.Path) {
 			continue
 		}
 		out = append(out, noteRef{Path: n.Path, Title: n.Title})
@@ -367,6 +390,9 @@ func (s *Server) handleListProjects(ctx context.Context, req mcp.CallToolRequest
 		if tok.ProjectFilter() != "" && p.Name != tok.ProjectFilter() {
 			continue
 		}
+		if s.projectHidden(p.Name) {
+			continue
+		}
 		out = append(out, projectEntry{Name: p.Name, NoteCount: p.NoteCount})
 	}
 	return mcp.NewToolResultJSON(map[string]any{"projects": out})
@@ -390,6 +416,11 @@ func (s *Server) handleListTags(ctx context.Context, req mcp.CallToolRequest) (*
 		}
 		project = scope
 	}
+	if project != "" {
+		if res := s.rejectIfHidden(project); res != nil {
+			return res, nil
+		}
+	}
 
 	var (
 		tags []index.TagCount
@@ -403,6 +434,10 @@ func (s *Server) handleListTags(ctx context.Context, req mcp.CallToolRequest) (*
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("tags failed", err), nil
 	}
+	// When listing vault-wide, the index aggregates all tags across projects.
+	// Without a per-tag project breakdown we cannot strip hidden-project
+	// occurrences, so vault-wide tag totals may include counts from hidden
+	// projects. The leak is bounded (only the tag counter, not note bodies).
 	out := make([]tagEntry, 0, len(tags))
 	for _, t := range tags {
 		out = append(out, tagEntry{Tag: t.Tag, Count: t.Count})
@@ -426,6 +461,11 @@ func (s *Server) handleNotesByTag(ctx context.Context, req mcp.CallToolRequest) 
 		}
 		project = scope
 	}
+	if project != "" {
+		if res := s.rejectIfHidden(project); res != nil {
+			return res, nil
+		}
+	}
 
 	var (
 		notes []index.NoteRow
@@ -441,6 +481,9 @@ func (s *Server) handleNotesByTag(ctx context.Context, req mcp.CallToolRequest) 
 	out := make([]noteRef, 0, len(notes))
 	for _, n := range notes {
 		if !tok.AllowsPath(n.Path) {
+			continue
+		}
+		if s.pathInHiddenProject(n.Path) {
 			continue
 		}
 		out = append(out, noteRef{Path: n.Path, Title: n.Title})
@@ -559,6 +602,11 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("write failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionCreate, rel, "", int64(len(content)))
+	if fresh, err := s.vault.Load(rel); err == nil {
+		s.publishNoteChange("create", rel, fresh.ETag(), true)
+	} else {
+		s.publishNoteChange("create", rel, "", true)
+	}
 	return mcp.NewToolResultJSON(pathResult{Path: rel})
 }
 
@@ -596,9 +644,15 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	// Return the new etag so the caller can pipeline further edits without a
 	// re-read. Note: reloading here is cheap (likely cache hit on the write).
 	out := map[string]any{"path": rel}
+	freshETag := ""
 	if fresh, err := s.vault.Load(rel); err == nil {
-		out["etag"] = fresh.ETag()
+		freshETag = fresh.ETag()
+		out["etag"] = freshETag
 	}
+	// Update doesn't change the tree shape, so only the `note` topic
+	// fires here. Two tabs editing the same path each see the other's
+	// save via the `etag` payload field.
+	s.publishNoteChange("update", rel, freshETag, false)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -751,6 +805,7 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("index delete failed", err), nil
 	}
 	s.auditWrite(ctx, audit.ActionDelete, rel, "", 0)
+	s.publishNoteChange("delete", rel, "", true)
 	return mcp.NewToolResultJSON(map[string]any{"deleted": true, "path": rel})
 }
 

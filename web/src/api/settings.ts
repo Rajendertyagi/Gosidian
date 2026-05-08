@@ -1,0 +1,65 @@
+import client from './client'
+
+export interface GitSettings {
+  enabled: boolean
+  remote: string
+  branch: string
+  author_name: string
+  author_email: string
+  debounce_ms: number
+  push: boolean
+  token_env: string
+}
+export interface TrashSettings {
+  enabled: boolean
+  retention_ms: number
+}
+export interface I18nSettings {
+  default_lang: string
+  enabled_langs: string[]
+}
+export interface MCPSettings {
+  write_per_minute: number
+  max_note_bytes: number
+}
+export interface Settings {
+  git: GitSettings
+  trash: TrashSettings
+  i18n: I18nSettings
+  mcp: MCPSettings
+}
+
+export interface UpdateSettings {
+  git?: Partial<{
+    enabled: boolean
+    remote: string
+    branch: string
+    author_name: string
+    author_email: string
+    debounce_ms: number
+    push: boolean
+    token_env: string
+  }>
+  trash?: Partial<{
+    enabled: boolean
+    retention_ms: number
+  }>
+  i18n?: Partial<{
+    default_lang: string
+    enabled_langs: string[]
+  }>
+  mcp?: Partial<{
+    write_per_minute: number
+    max_note_bytes: number
+  }>
+}
+
+export async function getSettings(): Promise<Settings> {
+  const { data } = await client.get<Settings>('/settings')
+  return data
+}
+
+export async function updateSettings(body: UpdateSettings): Promise<Settings> {
+  const { data } = await client.put<Settings>('/settings', body)
+  return data
+}

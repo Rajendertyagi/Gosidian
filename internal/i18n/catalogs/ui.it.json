@@ -27,12 +27,16 @@
     "revoke_button": "Revoca",
     "disable_button": "Disabilita",
     "loading": "Caricamento…",
-    "vault": "Vault"
+    "vault": "Vault",
+    "back": "Indietro"
   },
   "tree": {
     "filter_placeholder": "Filtra note…",
     "expand_all": "Espandi tutto",
-    "collapse_all": "Chiudi tutto"
+    "collapse_all": "Chiudi tutto",
+    "download_project": "Scarica progetto come zip",
+    "download_vault": "Scarica tutto il vault",
+    "download_vault_help": "Scarica un archivio zip dell'intero vault (escluso .gosidian/). Solo owner."
   },
   "nav": {
     "projects": "Progetti",
@@ -132,7 +136,8 @@
     "dashboard_link": "Dashboard",
     "rename_button": "Rinomina progetto",
     "delete_button": "Elimina progetto",
-    "no_notes": "Nessuna nota in questo progetto."
+    "no_notes": "Nessuna nota in questo progetto.",
+    "settings_link": "Impostazioni"
   },
   "project_dashboard": {
     "subtitle": "dashboard",
@@ -162,7 +167,13 @@
     "git_legend": "Git sync",
     "theme_legend": "Tema",
     "theme_hint": "Scegli un preset o passa a Custom per editare i 5 colori radice manualmente. Gli altri token sono derivati automaticamente. Le modifiche si applicano al prossimo refresh del browser — niente riavvio.",
-    "token_not_persisted": "Il token non viene mai persistito in file; va esportato nell'ambiente di gosidian."
+    "token_not_persisted": "Il token non viene mai persistito in file; va esportato nell'ambiente di gosidian.",
+    "token_env_help": "Nome della variabile d'ambiente che contiene il PAT (lettura at-runtime, override del token salvato).",
+    "token_field_label": "Token git (sovrascrivibile a runtime)",
+    "token_status": "Stato attuale:",
+    "token_field_help": "Lascia vuoto per non modificarlo. Inserisci il PAT in chiaro per ruotarlo. La env var (sopra) ha la precedenza.",
+    "token_clear_confirm": "Confermi la rimozione del token git salvato?",
+    "token_clear_button": "Rimuovi token"
   },
   "tag_notes": {
     "filter_all_projects": "tutti i progetti"
@@ -250,5 +261,13 @@
     "password_hint": "Password (min 8 caratteri)",
     "password_confirm": "Conferma password",
     "invalid_invite": "Link di invito non valido o scaduto."
+  },
+  "project_settings": {
+    "title": "Impostazioni progetto",
+    "legend": "Visibilità e sincronizzazione",
+    "skip_git_sync": "Escludi dal git sync",
+    "skip_git_sync_help": "Quando attivo, il progetto non viene incluso nei commit automatici. Resta nel vault e visibile dalla web UI.",
+    "hidden_from_mcp": "Nascondi dal server MCP",
+    "hidden_from_mcp_help": "Quando attivo, gli agent MCP non vedono questo progetto nelle liste e ricevono un errore se lo nominano esplicitamente."
   }
 }

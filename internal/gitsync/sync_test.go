@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/config"
+	"github.com/gosidian/gosidian/internal/projects"
 )
 
 func requireGit(t *testing.T) {
@@ -241,3 +242,80 @@ func TestSync_GracefulDegradeOnInitFailure(t *testing.T) {
 		t.Errorf("no-op calls should not flip Healthy, got %+v", st2)
 	}
 }
+
+func TestSync_RefreshGitignore_ManagedBlock(t *testing.T) {
+	// refreshGitignore is pure file I/O — no git binary required.
+	dir := t.TempDir()
+
+	pstore, err := projects.Open(filepath.Join(dir, ".gosidian", "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := pstore.Set("alpha", projects.Flags{SkipGitSync: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := pstore.Set("beta", projects.Flags{SkipGitSync: true}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-existing user-managed lines outside the marker block must survive.
+	gitignorePath := filepath.Join(dir, ".gitignore")
+	if err := os.WriteFile(gitignorePath, []byte("# user content\n*.bak\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s := New(dir, testCfg())
+	s.SetProjects(pstore)
+	if err := s.refreshGitignore(); err != nil {
+		t.Fatalf("refreshGitignore: %v", err)
+	}
+
+	got, err := os.ReadFile(gitignorePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(got)
+	if !strings.Contains(body, "# gosidian-managed-begin") {
+		t.Errorf("missing begin marker: %s", body)
+	}
+	if !strings.Contains(body, "# gosidian-managed-end") {
+		t.Errorf("missing end marker: %s", body)
+	}
+	if !strings.Contains(body, "alpha/") || !strings.Contains(body, "beta/") {
+		t.Errorf("missing skipped projects in managed block: %s", body)
+	}
+	if !strings.Contains(body, ".gosidian/") {
+		t.Errorf("baseline .gosidian/ exclusion missing: %s", body)
+	}
+	if !strings.Contains(body, "*.bak") || !strings.Contains(body, "# user content") {
+		t.Errorf("user-managed lines lost: %s", body)
+	}
+
+	// Idempotent: running again with the same projects yields the same content.
+	if err := s.refreshGitignore(); err != nil {
+		t.Fatal(err)
+	}
+	got2, _ := os.ReadFile(gitignorePath)
+	if string(got2) != body {
+		t.Errorf("refresh not idempotent:\nfirst:%s\nsecond:%s", body, got2)
+	}
+
+	// Removing skip flag updates the managed block but keeps user content.
+	if err := pstore.Set("alpha", projects.Flags{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.refreshGitignore(); err != nil {
+		t.Fatal(err)
+	}
+	got3, _ := os.ReadFile(gitignorePath)
+	if strings.Contains(string(got3), "alpha/") {
+		t.Errorf("alpha/ should be removed: %s", got3)
+	}
+	if !strings.Contains(string(got3), "beta/") {
+		t.Errorf("beta/ should remain: %s", got3)
+	}
+	if !strings.Contains(string(got3), "*.bak") {
+		t.Errorf("user-managed lines lost on second refresh: %s", got3)
+	}
+}
+

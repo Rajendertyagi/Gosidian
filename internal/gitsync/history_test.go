@@ -27,13 +27,13 @@ func TestSync_HistoryAndShow(t *testing.T) {
 		t.Fatal(err)
 	}
 	s.TriggerCommit()
-	time.Sleep(150 * time.Millisecond)
+	s.Flush()
 
 	if err := os.WriteFile(filepath.Join(dir, "note.md"), []byte("v2"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	s.TriggerCommit()
-	time.Sleep(150 * time.Millisecond)
+	s.Flush()
 
 	commits, err := s.History("note.md", 10)
 	if err != nil {
@@ -68,13 +68,13 @@ func TestSync_RestoreReturnsHistoricalBytes(t *testing.T) {
 
 	_ = os.WriteFile(filepath.Join(dir, "n.md"), []byte("first"), 0o644)
 	s.TriggerCommit()
-	time.Sleep(150 * time.Millisecond)
+	s.Flush()
 	commits, _ := s.History("n.md", 5)
 	firstSHA := commits[0].SHA
 
 	_ = os.WriteFile(filepath.Join(dir, "n.md"), []byte("second"), 0o644)
 	s.TriggerCommit()
-	time.Sleep(150 * time.Millisecond)
+	s.Flush()
 
 	bytes, err := s.Restore("n.md", firstSHA)
 	if err != nil {

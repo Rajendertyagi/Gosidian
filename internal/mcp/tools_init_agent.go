@@ -63,6 +63,9 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 	if scope := tok.ProjectFilter(); scope != "" && project != scope {
 		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
 	}
+	if res := s.rejectIfHidden(project); res != nil {
+		return res, nil
+	}
 
 	profileStr := strings.TrimSpace(req.GetString("agent_profile", "generic"))
 	if profileStr == "" {

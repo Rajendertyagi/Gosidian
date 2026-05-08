@@ -237,6 +237,11 @@ func (s *Server) handleListAttachments(ctx context.Context, req mcp.CallToolRequ
 		}
 		project = tok.ProjectFilter()
 	}
+	if project != "" {
+		if res := s.rejectIfHidden(project); res != nil {
+			return res, nil
+		}
+	}
 
 	infos, err := s.vault.ListAttachments(project, allowedExtSet())
 	if err != nil {

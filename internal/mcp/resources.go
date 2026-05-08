@@ -77,6 +77,9 @@ func (s *Server) handleLoadProjectContext(ctx context.Context, req mcp.GetPrompt
 	if tok.ProjectFilter() != "" && project != tok.ProjectFilter() {
 		return nil, errResource("project outside scope")
 	}
+	if s.projectHidden(project) {
+		return nil, errResource("project hidden by config")
+	}
 
 	var sb strings.Builder
 	sb.WriteString("# Project context for ")

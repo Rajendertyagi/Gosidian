@@ -246,10 +246,13 @@ func (s *Server) resolveProject(tok interface {
 		if project != "" && project != scope {
 			return "", fmt.Errorf("project %q is outside the token's scope %q", project, scope)
 		}
-		return scope, nil
+		project = scope
 	}
 	if project == "" {
 		return "", fmt.Errorf("project is required")
+	}
+	if s.projectHidden(project) {
+		return "", fmt.Errorf("project %q is hidden from MCP by config", project)
 	}
 	return project, nil
 }

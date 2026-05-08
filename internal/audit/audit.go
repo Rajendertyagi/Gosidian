@@ -49,6 +49,21 @@ const (
 	ActionDeleteAttachment Action = "delete_attachment"
 	ActionTokenCreate      Action = "token_create"
 	ActionTokenRevoke      Action = "token_revoke"
+	// v1.13: per-project flags update via /projects/<name>/settings.
+	// Path = project name; To = compact diff "skip_git_sync:false→true ...".
+	ActionProjectFlagsUpdate Action = "project_flags_update"
+	// v1.13: git-sync runtime token rotated/cleared from /settings. Path is
+	// always the masked token value ("••••XXXX" or "(non impostato)"); the
+	// plaintext is never written to the audit log.
+	ActionGitTokenSet   Action = "git_token_set"
+	ActionGitTokenUnset Action = "git_token_unset"
+	// v2.0: SPA browser-session token lifecycle from /api/v1/login,
+	// /refresh, /logout. Path = SpaToken.ID (8 hex of hash); plaintext
+	// never logged. Actor = username from webauth store.
+	ActionSpaTokenCreate  Action = "spa_token_create"
+	ActionSpaTokenRefresh Action = "spa_token_refresh"
+	ActionSpaTokenRevoke  Action = "spa_token_revoke"
+	ActionSpaLoginFailed  Action = "spa_login_failed"
 )
 
 // Entry is the on-disk shape. Keep field names short; this file may grow.
@@ -81,7 +96,9 @@ func Open(path string) (*Log, error) {
 
 // Write appends an entry. Best-effort: errors are returned but callers are
 // free to ignore them — failing to audit must never block the user request.
-func (l *Log) Write(e Entry) error {
+// Named return so the deferred close can promote a flush error to the caller
+// when the write itself succeeded (CodeQL go/unhandled-writable-file-close).
+func (l *Log) Write(e Entry) (err error) {
 	if l == nil {
 		return nil
 	}
@@ -98,9 +115,13 @@ func (l *Log) Write(e Entry) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := f.Write(append(data, '\n')); err != nil {
-		return err
+	defer func() {
+		if cerr := f.Close(); cerr != nil && err == nil {
+			err = cerr
+		}
+	}()
+	if _, werr := f.Write(append(data, '\n')); werr != nil {
+		return werr
 	}
 	return nil
 }

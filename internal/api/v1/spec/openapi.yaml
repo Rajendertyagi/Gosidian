@@ -1,0 +1,562 @@
+openapi: 3.1.0
+info:
+  title: gosidian REST API
+  version: "v1"
+  description: |
+    REST/JSON API consumed by the gosidian Vue 3 SPA (v2.0). Audience is
+    the browser; the parallel MCP transport (`/mcp/sse`) covers agents.
+
+    Auth: every endpoint outside the `public` tag requires a Bearer
+    token in the `Authorization` header. Tokens are issued by
+    `POST /api/v1/login` and managed by an SPA-specific token store
+    distinct from the long-lived MCP token surface.
+
+    Phase status: this spec is grown phase by phase together with
+    handler implementations. Endpoints whose body is not yet wired
+    return `501 Not Implemented` with `error.code = server.unavailable`
+    so the SPA can render a "feature coming soon" state without
+    special-casing each fetch.
+  contact:
+    name: gosidian
+    url: https://github.com/daniele-chiappa/gosidian
+  license:
+    name: MIT
+
+servers:
+  - url: /
+    description: same-origin
+
+tags:
+  - name: public
+    description: No authentication required.
+  - name: auth
+    description: Session lifecycle for the SPA.
+  - name: meta
+    description: Build/version/capability discovery.
+  - name: notes
+    description: Note CRUD and read-side helpers.
+  - name: projects
+  - name: tags
+  - name: search
+  - name: graph
+  - name: tree
+  - name: settings
+  - name: admin
+  - name: trash
+  - name: history
+  - name: events
+
+# ---------------------------------------------------------------------------
+# Reusable schemas
+# ---------------------------------------------------------------------------
+
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: gsp_<base64url>
+      description: |
+        Bearer token issued by `POST /api/v1/login`. Sliding TTL 24h,
+        absolute hard expiry 7d. Refresh via `POST /api/v1/refresh`
+        before `expires_at`; full re-login required after the hard
+        expiry regardless of refresh activity.
+
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          $ref: "#/components/schemas/ErrorBody"
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable dotted identifier consumed by the SPA i18n layer.
+          examples: ["auth.invalid_credentials", "concurrency.etag_mismatch"]
+        message:
+          type: string
+          description: Developer-readable English fallback. Not for end-user display.
+        details:
+          type: object
+          additionalProperties: true
+        trace_id:
+          type: string
+          description: Best-effort request id; empty in dev.
+
+    Role:
+      type: string
+      enum: [owner, member]
+
+    User:
+      type: object
+      required: [id, username, role]
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        role:
+          $ref: "#/components/schemas/Role"
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+        totp:
+          type: string
+          description: Six-digit TOTP code; required when the account has it enabled.
+
+    LoginResponse:
+      type: object
+      required: [token, expires_at, hard_expiry, user]
+      properties:
+        token:
+          type: string
+          description: Bearer plaintext. Shown once; the SPA persists it in localStorage.
+        expires_at:
+          type: string
+          format: date-time
+        hard_expiry:
+          type: string
+          format: date-time
+        user:
+          $ref: "#/components/schemas/User"
+
+    RefreshResponse:
+      type: object
+      required: [token, expires_at, hard_expiry]
+      properties:
+        token:
+          type: string
+          description: Same plaintext as the request — refresh extends the sliding window without rotating the value.
+        expires_at:
+          type: string
+          format: date-time
+        hard_expiry:
+          type: string
+          format: date-time
+
+    SignupRequest:
+      type: object
+      required: [username, password, invite]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+          minLength: 8
+        invite:
+          type: string
+          description: Single-use registration token issued by an owner.
+
+    VersionResponse:
+      type: object
+      required: [version, api]
+      properties:
+        version:
+          type: string
+        api:
+          type: string
+        build_time:
+          type: string
+          format: date-time
+        commit:
+          type: string
+
+    HealthResponse:
+      type: object
+      required: [api, status]
+      properties:
+        api:
+          type: string
+          example: v1
+        status:
+          type: string
+          example: ok
+        sse_subs:
+          type: integer
+
+    I18nCatalog:
+      type: object
+      additionalProperties:
+        oneOf:
+          - type: string
+          - type: object
+            additionalProperties: true
+      description: |
+        Nested JSON catalog. The exact shape mirrors the on-disk
+        `internal/i18n/catalogs/ui.<lang>.json`; the SPA loads it as-is
+        into vue-i18n.
+
+  parameters:
+    Lang:
+      name: lang
+      in: query
+      schema:
+        type: string
+        pattern: ^[a-z]{2}$
+      description: Two-letter locale code; defaults to the configured server locale.
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid Bearer token.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Token valid but role/scope insufficient.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource missing.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotImplemented:
+      description: Endpoint is reserved by the spec but not yet wired in this build.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+# Default security: bearer required unless overridden per-operation.
+security:
+  - bearer: []
+
+# ---------------------------------------------------------------------------
+# Paths
+# ---------------------------------------------------------------------------
+
+paths:
+
+  # -------------------------------- public ----------------------------------
+
+  /api/v1/health:
+    get:
+      tags: [public, meta]
+      security: []
+      summary: Liveness probe.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /api/v1/version:
+    get:
+      tags: [public, meta]
+      security: []
+      summary: Build metadata.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VersionResponse"
+
+  /api/v1/i18n:
+    get:
+      tags: [public, meta]
+      security: []
+      summary: Localized UI catalog.
+      parameters:
+        - $ref: "#/components/parameters/Lang"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/I18nCatalog"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/login:
+    post:
+      tags: [public, auth]
+      security: []
+      summary: Authenticate and issue a Bearer SPA token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "401":
+          description: Invalid credentials or missing/wrong TOTP.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Rate-limited (too many failed attempts from this IP).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/v1/signup:
+    post:
+      tags: [public, auth]
+      security: []
+      summary: Redeem an invite token to create a new member account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SignupRequest"
+      responses:
+        "201":
+          description: Account created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: Invalid invite token, weak password, or duplicate username.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Username already taken.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/events:
+    get:
+      tags: [public, events]
+      security: []
+      summary: |
+        Server-Sent Events stream for live updates.
+
+        EventSource cannot send custom headers, so the Bearer token
+        travels in the `token` query parameter; everything else mirrors
+        a normal authenticated request. Reconnect with `Last-Event-ID`
+        is supported but no historical events are replayed; the SPA
+        refetches affected resources via REST after reconnect.
+      parameters:
+        - in: query
+          name: token
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: topics
+          required: false
+          schema:
+            type: string
+          description: Comma-separated topics to subscribe to. Empty = all.
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream: {}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  # ----------------------------- authenticated ------------------------------
+
+  /api/v1/me:
+    get:
+      tags: [auth]
+      summary: Current authenticated user.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/refresh:
+    post:
+      tags: [auth]
+      summary: Extend the sliding TTL of the current token.
+      responses:
+        "200":
+          description: ok
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RefreshResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current token.
+      responses:
+        "204":
+          description: revoked
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  # ---- placeholder paths reserved for subsequent v2.0 phases ---------------
+  # Each currently returns 501. The spec carries them so the SPA fetch
+  # client + types.gen.ts know the contract surface from day one and the
+  # CI drift check (scripts/check-openapi-drift.sh) catches accidental
+  # divergence.
+
+  /api/v1/notes:
+    get:
+      tags: [notes]
+      summary: List notes (Phase 1 follow-up).
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+    post:
+      tags: [notes]
+      summary: Create a note (Phase 1 follow-up).
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/preview:
+    post:
+      tags: [notes]
+      summary: Render markdown to sanitized HTML (Phase 1 follow-up).
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/note-titles:
+    get:
+      tags: [notes]
+      summary: Wikilink autocomplete source (Phase 4).
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/tree:
+    get:
+      tags: [tree]
+      summary: Sidebar tree JSON (Phase 1 follow-up).
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/projects:
+    get:
+      tags: [projects]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/tags:
+    get:
+      tags: [tags]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/search:
+    get:
+      tags: [search]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/graph:
+    get:
+      tags: [graph]
+      summary: Force-directed graph payload (Phase 5).
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/command-palette:
+    get:
+      tags: [search]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/upload:
+    post:
+      tags: [notes]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/attach:
+    post:
+      tags: [notes]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/settings:
+    get:
+      tags: [settings]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+    put:
+      tags: [settings]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/trash:
+    get:
+      tags: [trash]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/admin/tokens:
+    get:
+      tags: [admin]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/admin/users:
+    get:
+      tags: [admin]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"
+
+  /api/v1/admin/audit:
+    get:
+      tags: [admin]
+      responses:
+        "501":
+          $ref: "#/components/responses/NotImplemented"

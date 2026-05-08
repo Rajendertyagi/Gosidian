@@ -23,6 +23,7 @@ import (
 
 	"github.com/gosidian/gosidian/internal/config"
 	"github.com/gosidian/gosidian/internal/metrics"
+	"github.com/gosidian/gosidian/internal/projects"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -35,6 +36,16 @@ var statusGauge prometheus.Gauge = metrics.GitSyncStatus
 type Sync struct {
 	vaultDir string
 	cfg      config.GitConfig
+
+	// projects (optional) drives the per-project skip_git_sync flag: when set,
+	// refreshGitignore renders the managed block of .gitignore with one
+	// `<name>/` line per skipped project. nil = no per-project filtering.
+	projects *projects.Store
+
+	// tokens (optional) is the on-disk token fallback used by authToken when
+	// the env var is unset. Allows the operator to rotate the PAT from the
+	// web UI without restarting the container.
+	tokens *TokenStore
 
 	mu      sync.Mutex
 	timer   *time.Timer
@@ -79,6 +90,25 @@ const (
 // using TriggerCommit; on first call Start ensures the repo is initialized.
 func New(vaultDir string, cfg config.GitConfig) *Sync {
 	return &Sync{vaultDir: vaultDir, cfg: cfg}
+}
+
+// SetProjects wires the per-project flag store. When non-nil, refreshGitignore
+// renders one `<name>/` line per project marked SkipGitSync inside the
+// managed block of .gitignore. Safe to call before Start; ignored if the
+// store is nil (current behaviour preserved).
+func (s *Sync) SetProjects(p *projects.Store) {
+	s.mu.Lock()
+	s.projects = p
+	s.mu.Unlock()
+}
+
+// SetTokenStore wires the on-disk token fallback. authToken consults the
+// env var first (cfg.TokenEnv), then the store. nil keeps the legacy
+// env-only behaviour.
+func (s *Sync) SetTokenStore(t *TokenStore) {
+	s.mu.Lock()
+	s.tokens = t
+	s.mu.Unlock()
 }
 
 // Start initializes the repository if needed and launches a background
@@ -227,7 +257,7 @@ func (s *Sync) ensureRepo() error {
 		}
 		fresh = true
 	}
-	if err := s.ensureGitignore(); err != nil {
+	if err := s.refreshGitignore(); err != nil {
 		return err
 	}
 	if err := s.ensureConfig(); err != nil {
@@ -267,20 +297,83 @@ func (s *Sync) ensureRemote() error {
 	return s.run("git", "remote", "set-url", "origin", s.cfg.Remote)
 }
 
-// ensureGitignore writes a default .gitignore excluding gosidian's runtime
-// state so auto-commits never pick it up. Leaves any existing file untouched.
-func (s *Sync) ensureGitignore() error {
+// gitignoreManagedBegin and gitignoreManagedEnd bracket the lines this package
+// owns inside the vault's .gitignore. Anything outside the markers is
+// preserved verbatim so the user can hand-edit additional patterns.
+const (
+	gitignoreManagedBegin = "# gosidian-managed-begin"
+	gitignoreManagedEnd   = "# gosidian-managed-end"
+)
+
+// refreshGitignore rewrites the managed block of <vault>/.gitignore so it
+// always reflects (a) gosidian's runtime state exclusions and (b) any
+// project flagged SkipGitSync via the projects.Store. Idempotent — safe to
+// call on every sync. User-added lines outside the markers survive.
+func (s *Sync) refreshGitignore() error {
 	path := filepath.Join(s.vaultDir, ".gitignore")
-	if _, err := os.Stat(path); err == nil {
-		return nil
+	old, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return err
 	}
-	content := `# Managed by gosidian — runtime state should never be versioned.
-.gosidian/
-*.tmp
-*.swp
-.DS_Store
-`
-	return os.WriteFile(path, []byte(content), 0o644)
+
+	var managedLines []string
+	managedLines = append(managedLines,
+		gitignoreManagedBegin,
+		"# Managed by gosidian — do not edit between these markers.",
+		".gosidian/",
+		"*.tmp",
+		"*.swp",
+		".DS_Store",
+	)
+	if s.projects != nil {
+		for _, name := range s.projects.SkipNamesForGit() {
+			managedLines = append(managedLines, name+"/")
+		}
+	}
+	managedLines = append(managedLines, gitignoreManagedEnd)
+
+	managed := strings.Join(managedLines, "\n") + "\n"
+
+	// Strip any existing managed block from the old file content so we can
+	// regenerate it. Lines outside the markers are preserved.
+	user := stripManagedBlock(string(old))
+	user = strings.TrimSpace(user)
+
+	var combined string
+	if user == "" {
+		combined = managed
+	} else {
+		combined = managed + "\n" + user + "\n"
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(combined), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// stripManagedBlock removes the gosidian-managed marker block (and everything
+// between the markers) from a .gitignore body. Returns the user-managed
+// remainder, possibly empty. Tolerant of mismatched markers: a stray begin
+// without end (or vice versa) returns the input unchanged.
+func stripManagedBlock(s string) string {
+	lines := strings.Split(s, "\n")
+	begin := -1
+	end := -1
+	for i, l := range lines {
+		t := strings.TrimSpace(l)
+		if t == gitignoreManagedBegin && begin == -1 {
+			begin = i
+		} else if t == gitignoreManagedEnd && begin != -1 && end == -1 {
+			end = i
+		}
+	}
+	if begin == -1 || end == -1 || end < begin {
+		return s
+	}
+	out := append([]string{}, lines[:begin]...)
+	out = append(out, lines[end+1:]...)
+	return strings.Join(out, "\n")
 }
 
 func (s *Sync) ensureConfig() error {
@@ -294,6 +387,14 @@ func (s *Sync) ensureConfig() error {
 }
 
 func (s *Sync) commitAndPush() error {
+	// Refresh the managed block of .gitignore from the current projects state
+	// before staging, so newly skipped projects are excluded from the next
+	// commit (and ones unchecked become trackable again). Caller already
+	// holds Sync.mu.
+	if err := s.refreshGitignore(); err != nil {
+		return fmt.Errorf("refresh gitignore: %w", err)
+	}
+
 	// Detect whether there is anything to commit.
 	out, err := s.capture("git", "status", "--porcelain")
 	if err != nil {
@@ -333,11 +434,26 @@ func (s *Sync) push() error {
 	return nil
 }
 
+// authToken resolves the PAT for `git push`. Precedence aligns with the
+// gosidian convention `CLI > env > file > default`:
+//  1. The env var named by cfg.TokenEnv, when non-empty. This preserves the
+//     original behaviour and gives operators a one-shot override for
+//     debugging or CI without touching the on-disk file.
+//  2. The TokenStore on-disk value (file under <vault>/.gosidian), when
+//     wired. Lets the web UI settings rotate the token without a restart.
+//
+// Empty result = unauthenticated push (let git fail naturally so the user
+// sees a clear "credentials required" rather than a silent skip).
 func (s *Sync) authToken() string {
-	if s.cfg.TokenEnv == "" {
-		return ""
+	if s.cfg.TokenEnv != "" {
+		if v := strings.TrimSpace(os.Getenv(s.cfg.TokenEnv)); v != "" {
+			return v
+		}
 	}
-	return strings.TrimSpace(os.Getenv(s.cfg.TokenEnv))
+	if s.tokens != nil {
+		return strings.TrimSpace(s.tokens.Get())
+	}
+	return ""
 }
 
 // run executes a git command in the vault dir, propagating stdout/stderr

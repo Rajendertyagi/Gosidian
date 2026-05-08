@@ -1,212 +1,90 @@
+// Package server wires the v2.0 HTTP surface: the Vue SPA shell at /,
+// the embedded Vite assets at /static/dist/*, the REST API under
+// /api/v1/*, and the MCP SSE bridge at /mcp/*. The legacy HTMX
+// templates + per-page handlers were retired at the v2.0 cutover;
+// see docs/migration-v2.md for the downgrade path.
 package server
 
 import (
-	"embed"
-	"html/template"
-	"io/fs"
 	"net/http"
+	"path/filepath"
 	"strings"
-
 	"time"
 
-	"github.com/gosidian/gosidian/internal/audit"
-	"github.com/gosidian/gosidian/internal/auth"
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/gitsync"
-	"github.com/gosidian/gosidian/internal/i18n"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/metrics"
-	"github.com/gosidian/gosidian/internal/parser"
-	"github.com/gosidian/gosidian/internal/trash"
 	"github.com/gosidian/gosidian/internal/vault"
-	"github.com/gosidian/gosidian/internal/webauth"
 )
 
-//go:embed templates/*.html
-var templatesFS embed.FS
-
-//go:embed static/*
-var staticFS embed.FS
-
 type Server struct {
-	vault      *vault.Vault
-	index      *index.Index
-	tokens     *auth.Store
-	webauth    *webauth.Store
-	configPath string
-	audit      *audit.Log
-	gitSync    *gitsync.Sync
-	trash      *trash.Bin
-	renderer   *parser.Renderer
-	tpls       map[string]*template.Template // template name -> layout+file set
-	mux        *http.ServeMux
-
-	// i18n: catalogue + default lang, both optional. When catalog is nil, the
-	// template helper returns the key itself (dev-friendly).
-	catalog     *i18n.Catalog
-	defaultLang string
+	vault   *vault.Vault
+	index   *index.Index
+	mux     *http.ServeMux
+	gitSync *gitsync.Sync
 
 	// Build + runtime info, populated by SetBuildInfo for /healthz.
 	version   string
 	gitSyncOn bool
-
-	// Login rate limiter: IP → recent failed attempts.
-	loginFails loginLimiter
 }
 
-// SetI18n wires the translation catalogue + default language. Called by main
-// at startup. Safe to skip when the binary ships without translations.
-func (s *Server) SetI18n(cat *i18n.Catalog, defaultLang string) {
-	s.catalog = cat
-	if defaultLang == "" {
-		defaultLang = "en"
+// New wires the minimal HTTP surface for v2.0. Only the SPA shell,
+// Vite-fingerprinted assets, /healthz, /metrics, /vault-files/, and
+// /api/download-vault are registered up front; /api/v1/* and /mcp/*
+// arrive through MountAPIv1 / MountMCP after the dependencies are
+// built in cmd/gosidian/main.go.
+//
+// Earlier signatures took (tokens, configPath, webauth) for the HTML
+// flows; those parameters were dropped at the v2.0 cutover because
+// the SPA carries Bearer-token auth on /api/v1/* and MCP runs its
+// own auth. We keep the (vault, idx) pair so /healthz can report
+// note counts and /vault-files/ can resolve attachment paths.
+func New(v *vault.Vault, idx *index.Index) *Server {
+	s := &Server{
+		vault: v,
+		index: idx,
+		mux:   http.NewServeMux(),
 	}
-	s.defaultLang = defaultLang
+
+	s.mux.HandleFunc("/healthz", s.handleHealth)
+	s.mux.Handle("/metrics", metrics.Handler())
+	s.mux.HandleFunc("/static/dist/", s.handleSpaStatic)
+	s.mux.HandleFunc("/vault-files/", s.handleVaultFile)
+	// SPA catch-all on `/` — handles every unmatched route so Vue
+	// Router (history mode) can take over: refreshing /notes/foo or
+	// /admin/users returns the shell HTML, the client-side router
+	// resolves the route, and the matching view paints.
+	s.mux.HandleFunc("/", s.handleSPA)
+	return s
 }
 
-// userLang resolves the preferred language for the current request using the
-// chain: cookie `gosidian_lang` > Accept-Language > default.
-func (s *Server) userLang(r *http.Request) string {
-	if s == nil {
-		return "en"
-	}
-	if c, err := r.Cookie("gosidian_lang"); err == nil && c.Value != "" {
-		return c.Value
-	}
-	if h := r.Header.Get("Accept-Language"); h != "" {
-		return h
-	}
-	if s.defaultLang != "" {
-		return s.defaultLang
-	}
-	return "en"
-}
-
-// langCookieName is the canonical name used by the language switcher.
-const langCookieName = "gosidian_lang"
-
-// SetBuildInfo records metadata exposed through the /healthz endpoint. Called
-// by main after construction.
+// SetBuildInfo records metadata exposed through /healthz. Called by
+// main after construction.
 func (s *Server) SetBuildInfo(version string, gitSyncEnabled bool) {
 	s.version = version
 	s.gitSyncOn = gitSyncEnabled
 }
 
-// SetAuditLog wires the audit log used by mutating handlers.
-func (s *Server) SetAuditLog(a *audit.Log) {
-	s.audit = a
-}
-
-// SetGitSync wires the git sync helper used by the per-note history page.
+// SetGitSync wires the git-sync helper used by /healthz to report
+// pull/commit health.
 func (s *Server) SetGitSync(g *gitsync.Sync) {
 	s.gitSync = g
 }
 
-// SetTrash enables the soft-delete bin for HTTP delete handlers. nil keeps
-// the legacy hard delete behavior.
-func (s *Server) SetTrash(t *trash.Bin) {
-	s.trash = t
+// MountAPIv1 wires the REST API under /api/v1/. Called once at
+// startup with a fully-built apiv1.Router.
+func (s *Server) MountAPIv1(handler http.Handler) {
+	s.mux.Handle("/api/v1/", handler)
 }
 
-// MountMCP registers an MCP SSE handler under /mcp/* on the web mux for
-// single-port deployments. The handler MUST be configured with a basePath
-// that matches the mount prefix (see *internal/mcp.Server.Handler) so that
-// (a) the SSEServer's exact-path router accepts /mcp/sse and /mcp/message,
-// and (b) the URL it announces in the initial "endpoint" SSE event is the
-// public-facing /mcp/message — otherwise clients fall back to "SSE
-// streaming not supported" because their POST to the announced endpoint
-// 404s on the mux. No StripPrefix here for the same reason.
-//
-// The /mcp/ prefix is in isOpenPath so the web-auth redirect middleware
-// leaves it alone — MCP carries its own Bearer-token auth at the SSE
-// handshake. Agents talk to it directly, never through the cookie
-// session that the browser-facing routes rely on.
+// MountMCP wires the MCP SSE bridge under /mcp/. The handler must
+// be configured with a basePath that matches the mount prefix (see
+// internal/mcp.Server.Handler) so the SSE handshake announces the
+// correct /mcp/message URL — otherwise clients fall back to "SSE
+// streaming not supported" because their POST 404s on the mux.
 func (s *Server) MountMCP(handler http.Handler) {
 	s.mux.Handle("/mcp/", handler)
-}
-
-// templateFiles lists all templates (pages + partial-only) that should be
-// parsed as their own isolated set combining layout.html + the file itself.
-// Isolated sets avoid cross-contamination of the `body` block across files.
-var templateFiles = []string{
-	"note_view.html",
-	"note_edit.html",
-	"search_results.html",
-	"tags.html",
-	"tag_notes.html",
-	"graph.html",
-	"index.html",
-	"tree.html",
-	"backlinks.html",
-	"projects.html",
-	"project_detail.html",
-	"project_dashboard.html",
-	"settings.html",
-	"login.html",
-	"audit.html",
-	"history.html",
-	"trash.html",
-	"tokens.html",
-	"users.html",
-	"signup.html",
-}
-
-func New(v *vault.Vault, idx *index.Index, tokens *auth.Store, configPath string, webauthStore *webauth.Store) *Server {
-	tpls := make(map[string]*template.Template, len(templateFiles))
-	for _, name := range templateFiles {
-		t := template.Must(
-			template.New("layout.html").Funcs(funcMap()).
-				ParseFS(templatesFS, "templates/layout.html", "templates/"+name),
-		)
-		tpls[name] = t
-	}
-
-	s := &Server{
-		vault:      v,
-		index:      idx,
-		tokens:     tokens,
-		webauth:    webauthStore,
-		configPath: configPath,
-		renderer:   parser.NewRenderer(),
-		tpls:       tpls,
-		mux:        http.NewServeMux(),
-	}
-
-	sub, _ := fs.Sub(staticFS, "static")
-	s.mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
-
-	s.mux.HandleFunc("/theme.css", s.handleThemeCSS)
-	s.mux.HandleFunc("/healthz", s.handleHealth)
-	s.mux.Handle("/metrics", metrics.Handler())
-	s.mux.HandleFunc("/login", s.handleLogin)
-	s.mux.HandleFunc("/logout", s.handleLogout)
-	s.mux.HandleFunc("/", s.handleRoot)
-	s.mux.HandleFunc("/notes/", s.handleNotes)
-	s.mux.HandleFunc("/notes/new", s.handleNewNote)
-	s.mux.HandleFunc("/api/tree", s.handleTree)
-	s.mux.HandleFunc("/api/backlinks", s.handleBacklinks)
-	s.mux.HandleFunc("/api/graph", s.handleGraphJSON)
-	s.mux.HandleFunc("/api/preview", s.handlePreview)
-	s.mux.HandleFunc("/api/note-excerpt", s.handleNoteExcerpt)
-	s.mux.HandleFunc("/api/command-palette", s.handleCommandPalette)
-	s.mux.HandleFunc("/api/attach", s.handleAttach)
-	s.mux.HandleFunc("/api/upload", s.handleUpload)
-	s.mux.HandleFunc("/vault-files/", s.handleVaultFile)
-	s.mux.HandleFunc("/search", s.handleSearch)
-	s.mux.HandleFunc("/tags", s.handleTags)
-	s.mux.HandleFunc("/tags/", s.handleTagsByName)
-	s.mux.HandleFunc("/graph", s.handleGraphPage)
-	s.mux.HandleFunc("/projects", s.handleProjects)
-	s.mux.HandleFunc("/projects/", s.handleProjectDetail)
-	s.mux.HandleFunc("/settings", s.handleSettings)
-	s.mux.HandleFunc("/admin/tokens", s.handleTokens)
-	s.mux.HandleFunc("/admin/users", s.handleUsers)
-	s.mux.HandleFunc("/signup", s.handleSignup)
-	s.mux.HandleFunc("/api/i18n", s.handleI18nSet)
-	s.mux.HandleFunc("/audit", s.handleAudit)
-	s.mux.HandleFunc("/trash", s.handleTrash)
-	s.mux.HandleFunc("/trash/", s.handleTrashAction)
-
-	return s
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -216,34 +94,55 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metrics.ObserveHTTP(r.Method, routeLabel(r.URL.Path), rw.status, started)
 	}()
 	w = rw
-
-	// Web UI auth middleware: when a webauth account is provisioned, every
-	// request except the open paths must carry a valid session cookie.
-	if s.webauth != nil && s.webauth.Enabled() && !isOpenPath(r.URL.Path) {
-		if !s.isAuthenticated(r) {
-			// HTMX requests should stay on the page with a 401 so they don't
-			// redirect inside a partial swap.
-			if r.Header.Get("HX-Request") == "true" {
-				w.Header().Set("HX-Redirect", "/login?next="+r.URL.Path)
-				w.WriteHeader(http.StatusUnauthorized)
-				return
-			}
-			http.Redirect(w, r, "/login?next="+r.URL.Path, http.StatusSeeOther)
-			return
-		}
-	}
 	s.mux.ServeHTTP(w, r)
 }
 
-// statusRecorder lets the metrics middleware observe the final status code.
-//
-// It also forwards http.Flusher / http.Hijacker / Unwrap so that handlers
-// downstream (notably the MCP SSE transport, which type-asserts the writer
-// to http.Flusher and returns 500 "Streaming unsupported" otherwise) keep
-// working when wrapped. Without these, mounting the MCP handler on the web
-// mux breaks SSE streaming because Go's interface promotion does not
-// propagate methods through an embedded interface field — only the
-// concrete *http.response provides Flush(), and the wrapper hides it.
+// handleVaultFile serves attachments under attachments/ subpaths from
+// the vault. Restricted to those subpaths: the rest of the vault
+// stays opaque from this endpoint to avoid accidental disclosure of
+// arbitrary notes. Auth on this surface is handled by the same
+// browser session that drives the SPA — attachments are referenced
+// from inside the vault content the user already has access to, so
+// the access bar is "you're on the page".
+func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
+	rel := strings.TrimPrefix(r.URL.Path, "/vault-files/")
+	if rel == "" {
+		http.NotFound(w, r)
+		return
+	}
+	clean, err := s.vault.Rel(rel)
+	if err != nil {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	if !strings.Contains("/"+clean, "/attachments/") {
+		http.NotFound(w, r)
+		return
+	}
+	abs, err := s.vault.Abs(clean)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	ext := strings.ToLower(filepath.Ext(clean))
+	ct := "application/octet-stream"
+	if info, ok := attach.AllowedExt[ext]; ok {
+		ct = info.MIME
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	http.ServeFile(w, r, abs)
+}
+
+// statusRecorder lets the metrics middleware observe the final status
+// code. It also forwards http.Flusher / Unwrap so handlers downstream
+// (notably the MCP SSE transport, which type-asserts the writer to
+// http.Flusher and returns 500 "Streaming unsupported" otherwise)
+// keep working when wrapped. Without these, mounting the MCP handler
+// on the web mux breaks SSE streaming because Go's interface
+// promotion does not propagate methods through an embedded interface
+// field — only the concrete *http.response provides Flush(), and the
+// wrapper hides it.
 type statusRecorder struct {
 	http.ResponseWriter
 	status int
@@ -260,118 +159,24 @@ func (s *statusRecorder) Flush() {
 	}
 }
 
-// Unwrap exposes the inner ResponseWriter to http.NewResponseController
-// (Go 1.20+) and any helper that walks wrapper chains.
 func (s *statusRecorder) Unwrap() http.ResponseWriter {
 	return s.ResponseWriter
 }
 
 // routeLabel collapses URL paths into bounded label values so metrics
-// cardinality stays manageable. Group anything under /notes/ as one route,
-// likewise /projects/ etc.
+// cardinality stays manageable.
 func routeLabel(p string) string {
 	switch {
-	case p == "/" || p == "/healthz" || p == "/metrics" || p == "/login" || p == "/logout":
+	case p == "/" || p == "/healthz" || p == "/metrics":
 		return p
-	case strings.HasPrefix(p, "/notes/"):
-		return "/notes/*"
-	case strings.HasPrefix(p, "/projects/"):
-		return "/projects/*"
-	case strings.HasPrefix(p, "/tags/"):
-		return "/tags/*"
-	case strings.HasPrefix(p, "/api/"):
+	case strings.HasPrefix(p, "/api/v1/"):
 		return p
+	case strings.HasPrefix(p, "/mcp/"):
+		return "/mcp/*"
 	case strings.HasPrefix(p, "/static/"):
 		return "/static/*"
 	case strings.HasPrefix(p, "/vault-files/"):
 		return "/vault-files/*"
-	case strings.HasPrefix(p, "/trash/"):
-		return "/trash/*"
 	}
 	return p
-}
-
-// isOpenPath lists routes that never require authentication: the login
-// endpoints themselves, the liveness probe, static assets, and the signup
-// page (which is gated by the invite token inside the query string instead).
-//
-// Note: vault attachments (/vault-files/*) are NOT open — they live in the
-// vault and are part of the user's content, so they require login when web
-// auth is on.
-func isOpenPath(p string) bool {
-	switch p {
-	case "/login", "/logout", "/healthz", "/metrics", "/theme.css", "/signup":
-		return true
-	}
-	if strings.HasPrefix(p, "/static/") {
-		return true
-	}
-	// MCP transport carries its own Bearer-token auth at the SSE handshake;
-	// it must not be redirected to /login by the web-auth middleware.
-	return strings.HasPrefix(p, "/mcp/")
-}
-
-// isAuthenticated returns true if r carries a live session cookie.
-func (s *Server) isAuthenticated(r *http.Request) bool {
-	if s.webauth == nil {
-		return true
-	}
-	c, err := r.Cookie(webauth.SessionCookieName)
-	if err != nil {
-		return false
-	}
-	return s.webauth.ValidateSession(c.Value)
-}
-
-// currentUser returns the webauth user behind the session cookie on r, or
-// nil when web auth is disabled or the request is unauthenticated. Handlers
-// sitting behind the auth middleware can rely on this to scope behavior by
-// user id / role without re-parsing the cookie.
-func (s *Server) currentUser(r *http.Request) *webauth.User {
-	if s.webauth == nil || !s.webauth.Enabled() {
-		return nil
-	}
-	c, err := r.Cookie(webauth.SessionCookieName)
-	if err != nil {
-		return nil
-	}
-	u, ok := s.webauth.UserBySession(c.Value)
-	if !ok {
-		return nil
-	}
-	return u
-}
-
-// resolver bridges parser.Resolver to the index.
-func (s *Server) resolver() parser.Resolver {
-	return parser.ResolverFunc(func(target string) string {
-		// re-use index resolution logic by trying exact/title/basename match.
-		return s.indexResolve(target)
-	})
-}
-
-func (s *Server) indexResolve(target string) string {
-	notes, err := s.index.AllNotes()
-	if err != nil {
-		return ""
-	}
-	// 1. exact path
-	for _, n := range notes {
-		if n.Path == target || n.Path == target+".md" {
-			return n.Path
-		}
-	}
-	// 2. title (case-insensitive)
-	for _, n := range notes {
-		if equalFold(n.Title, target) {
-			return n.Path
-		}
-	}
-	// 3. basename
-	for _, n := range notes {
-		if basenameMatch(n.Path, target) {
-			return n.Path
-		}
-	}
-	return ""
 }

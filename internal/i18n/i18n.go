@@ -24,6 +24,12 @@ import (
 //go:embed catalogs/*.json
 var catalogFS embed.FS
 
+// CatalogFS returns the embedded catalogs filesystem so other packages
+// (e.g. internal/api/v1) can serve raw JSON files to clients without
+// going through the flattened in-memory Catalog. Files are named
+// `<scope>.<lang>.json`. Read-only.
+func CatalogFS() embed.FS { return catalogFS }
+
 // Catalog is the in-memory representation of all loaded translation files.
 // Keys are namespaced as "<scope>.<dotted.key>" so both the scope and the
 // JSON tree walk are done at Load time once.

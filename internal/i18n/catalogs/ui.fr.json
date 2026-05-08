@@ -28,12 +28,16 @@
     "revoke_button": "Révoquer",
     "disable_button": "Désactiver",
     "loading": "Chargement…",
-    "vault": "Vault"
+    "vault": "Vault",
+    "back": "Back"
   },
   "tree": {
     "filter_placeholder": "Filtrer les notes…",
     "expand_all": "Tout développer",
-    "collapse_all": "Tout réduire"
+    "collapse_all": "Tout réduire",
+    "download_project": "Download project as zip",
+    "download_vault": "Download whole vault",
+    "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
   },
   "nav": {
     "projects": "Projets",
@@ -133,7 +137,8 @@
     "dashboard_link": "Tableau de bord",
     "rename_button": "Renommer le projet",
     "delete_button": "Supprimer le projet",
-    "no_notes": "Aucune note dans ce projet."
+    "no_notes": "Aucune note dans ce projet.",
+    "settings_link": "Settings"
   },
   "project_dashboard": {
     "subtitle": "tableau de bord",
@@ -163,7 +168,13 @@
     "git_legend": "Git sync",
     "theme_legend": "Thème",
     "theme_hint": "Choisissez un preset ou passez à Custom pour éditer les 5 couleurs racine manuellement. Les autres tokens sont dérivés automatiquement. Les changements s'appliquent au prochain rafraîchissement — pas de redémarrage.",
-    "token_not_persisted": "Le token n'est jamais persisté dans un fichier ; il doit être exporté dans l'environnement de gosidian."
+    "token_not_persisted": "Le token n'est jamais persisté dans un fichier ; il doit être exporté dans l'environnement de gosidian.",
+    "token_env_help": "Name of the env var holding the PAT (read at runtime, overrides the saved token).",
+    "token_field_label": "Git token (rotate at runtime)",
+    "token_status": "Current state:",
+    "token_field_help": "Leave empty to keep it as-is. Paste a plaintext PAT to rotate. The env var (above) takes precedence.",
+    "token_clear_confirm": "Remove the saved git token?",
+    "token_clear_button": "Remove token"
   },
   "tag_notes": {
     "filter_all_projects": "tous les projets"
@@ -244,5 +255,13 @@
     "col_expires": "Expiration",
     "confirm_disable": "Désactiver %s ? Tous leurs tokens MCP seront révoqués.",
     "disable_button": "Désactiver"
+  },
+  "project_settings": {
+    "title": "Project settings",
+    "legend": "Visibility and synchronization",
+    "skip_git_sync": "Exclude from git sync",
+    "skip_git_sync_help": "When enabled, this project is not included in auto-commits. It stays in the vault and visible in the web UI.",
+    "hidden_from_mcp": "Hide from MCP server",
+    "hidden_from_mcp_help": "When enabled, MCP agents do not see this project in lists and receive an error when naming it explicitly."
   }
 }

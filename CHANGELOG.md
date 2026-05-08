@@ -4,6 +4,152 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.0.0] — 2026-05-08 — "SPA cutover + REST API v1"
+
+**MAJOR.** The HTMX-rendered web UI is gone; gosidian now ships a
+Vue 3 single-page application backed by a versioned REST API at
+`/api/v1/*`. End-user URLs (`/notes/<path>`, `/projects/<slug>`,
+`/graph`, `/search`, ...) keep working unchanged thanks to
+Vue Router history mode + the SPA shell catch-all. The MCP transport
+at `/mcp/sse` and the file upload pipeline are unchanged.
+
+This is breaking for callers that hit legacy HTMX endpoints
+directly. See `docs/migration-v2.md` and the **Migration from v1.x**
+section below.
+
+### Added
+
+- **Vue 3 SPA** (`web/`) — production-grade single-page application
+  served as `go:embed all:dist` from the Go binary. Stack: Vue 3.5 +
+  TypeScript 5.5 (strict) + Vite 5 + Pinia 2 + vue-router 4 +
+  Tailwind 3.4. AppShell + TopBar + sidebar tree, 4-mode editor
+  (preview / split / stacked / edit-only) on CodeMirror 6, optimistic
+  locking with conflict dialog (ETag + `If-Match` → 412),
+  DOMPurify-sanitised markdown, axios + EventSource SSE, Pinia state
+  with `pinia-plugin-persistedstate`. Lighthouse 100/100/100 on
+  Login / Note / Graph.
+- **REST API v1** at `/api/v1/*` — versioned, stable, fully
+  documented. New `internal/api/v1/` package replaces the per-page
+  Go handlers under `internal/server/handlers_*`. Endpoints cover
+  the full v1.x surface plus the SPA-specific shapes (see
+  `docs/migration-v2.md` for the full v1.x → v2.0 route mapping).
+  Bearer-token authentication, rate-limited, JSON error envelope.
+- **Strict Content-Security-Policy** attached to the SPA shell:
+  `default-src 'self'`, `script-src 'self'` (no `unsafe-eval`,
+  no `unsafe-inline`), `frame-ancestors 'none'`, `object-src 'none'`.
+  Defence in depth: `X-Content-Type-Options nosniff`,
+  `X-Frame-Options DENY`,
+  `Referrer-Policy strict-origin-when-cross-origin`, minimal
+  `Permissions-Policy`.
+- **Theme presets** (4) — Catppuccin Mocha (default dark),
+  Catppuccin Latte (light), Tokyo Night (dark blue),
+  Solarized Light. Switchable at runtime via `/settings`. Each
+  theme uses semantic CSS variable tokens; the Cytoscape graph
+  resolves them to comma-form `rgb()`.
+- **i18n** (5 languages: IT, EN, ES, FR, DE) — AOT-precompiled at
+  build time via `@intlify/unplugin-vue-i18n` so vue-i18n's
+  runtime message compiler never reaches `new Function()`. The
+  SPA honours the server's `default_lang` from
+  `GET /api/v1/version` on first boot.
+- **Graph view** rewrite — Cytoscape 3.30 + fcose layout, three
+  searchable comboboxes (Project / Tag / Focus) with sensible
+  default sort orders (mtime desc, count desc, recent edits desc).
+  Hover bring-forward highlights the focused node and dims the
+  complement; full title shown on hover.
+- **Playwright canary** (chromium + firefox) — regression guard
+  for the runtime-eval / CSP-blocked-script class of incidents.
+- **`docs/migration-v2.md`** — single source of truth for the
+  upgrade path from v1.x, including the full v1.x → v2.0 route
+  mapping table.
+
+### Changed
+
+- **Frontend bundle** is now `go:embed`ed from the SPA Vite build
+  (`internal/server/web/dist/*`). Single binary, no separate static
+  asset deployment. SPA shell catch-all serves `/notes/<path>`-style
+  URLs to the Vue Router.
+- **Login flow** — JWT-style bearer token (`gsp_<base64url>`)
+  returned by `POST /api/v1/login`, persisted in the SPA under
+  `localStorage["gosidian.auth"]` via Pinia persistedstate. The old
+  cookie-session HTMX flow is gone.
+- **Graph endpoint** payload includes server-side `tag`, `focus`,
+  `depth`, `min_degree`, `limit` filters; the client now sends
+  these as query params instead of computing on the fly.
+
+### Removed
+
+- **HTMX UI**: 21 Go HTML templates under
+  `internal/server/templates/`, the per-page Go handlers
+  (`internal/server/handlers_*.go`, `internal/server/render.go`),
+  and the ~1 KLOC of custom JS / icons / CSS under
+  `internal/server/static/{js,css,icons}/`. The new SPA + REST
+  equivalent at `/api/v1/*` covers the same surface.
+- **`gosidian_session` cookie auth** — replaced by Bearer tokens.
+- **`GOSIDIAN_SPA_MODE` env var** — was a feature flag during the
+  v2-spa development branch. With the cutover complete, the SPA is
+  the only frontend and the flag is gone. Operators who set it
+  explicitly can drop it from their env files.
+
+### Fixed
+
+- **Cytoscape theme rendering** — Cytoscape doesn't accept the
+  `rgb(R G B)` space-separated form some Tailwind builds emit.
+  The theme resolver now emits comma-form `rgb(R, G, B)` for graph
+  styling. Fixes the blank/black graph nodes some users saw on
+  initial paint after a theme switch.
+- **i18n CSP failure** — vue-i18n's default runtime compiler used
+  `new Function()`, which strict CSP blocks. Switched to AOT
+  precompile via `@intlify/unplugin-vue-i18n`; the runtime carries
+  no eval surface.
+- **UI store hydration race** — `pinia-plugin-persistedstate`
+  re-hydrated after `main.ts` had already read the store, causing
+  themes to flash to the default on first paint. Hydration now
+  happens inside `App.vue setup`.
+
+### Security
+
+- **`script-src 'self'`** strictly enforced. No `unsafe-eval`,
+  no `unsafe-inline`. Verified end-to-end via Playwright canary
+  in chromium + firefox at every CI run.
+- **CSP defence in depth**: 4 additional headers
+  (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`,
+  `Permissions-Policy`).
+- **Bearer-token rotation** on every login; server-side validation
+  on every `/api/v1/*` request.
+
+### Migration from v1.x
+
+If you were on v1.1.0 or earlier:
+
+1. **End-user URLs** keep working. Bookmarks survive.
+2. **Legacy HTMX endpoints** (`/api/preview`, `/api/render`,
+   `/api/tree`, `/api/backlinks`, `/api/note-excerpt`,
+   `/api/command-palette`, `/api/attach`, `/api/upload`,
+   `/api/i18n`) are gone (404). Migrate clients to the
+   namespaced equivalents under `/api/v1/*`. See
+   `docs/migration-v2.md` for the full mapping.
+3. **Login flow** is JWT REST POST instead of cookie session.
+   Bookmarklets / scripts that POSTed to `/login` should target
+   `POST /api/v1/login` and use the returned `token` as
+   `Authorization: Bearer <token>`.
+4. **`GOSIDIAN_SPA_MODE`** — drop from env / compose. Removed.
+5. **Database / vault format** — no migration. SQLite vault
+   format is unchanged.
+6. **MCP transport at `/mcp/sse`** — unchanged. MCP clients keep
+   working without reconfiguration.
+7. **Containers** — pull `ghcr.io/daniele-chiappa/gosidian:v2.0.0`,
+   recreate the container, no volume changes.
+
+### Notes
+
+- Internal release counterpart: aggregates private `v2.0.0-beta`
+  (Phase 0–8 cutover, 2026-05-01) plus 10 post-beta commits
+  stabilising the SPA in production. Production deployment date:
+  2026-05-05. Soak: 7 days on the beta tag, 3 days on prod, zero
+  incident reports.
+- New `docs/demo.gif` recorded against the v2.0 SPA via Playwright
+  on a synthetic vault, replacing the v1.0 capture.
+
 ## [1.1.0] — 2026-04-29 — "Agent workflow + single-port"
 
 Two-bundle MINOR. MCP transport now co-locates with the web UI on a
