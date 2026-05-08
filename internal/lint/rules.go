@@ -209,12 +209,18 @@ var knownTagValues = map[string]map[string]struct{}{
 
 // isKnownTag reports whether tag is part of the closed vocabulary. The
 // project name itself is always considered valid (each project tags its
-// own notes with its top-level folder name).
-func isKnownTag(tag, project string) bool {
+// own notes with its top-level folder name). When the linter has been
+// extended via WithExtraAllowedTags (e.g. from
+// .gosidian/config.toml [lint.frontmatter_tag_vocabulary]), those extra
+// entries are also accepted in addition to the built-in vocabulary.
+func (l *Linter) isKnownTag(tag, project string) bool {
 	if tag == project {
 		return true
 	}
 	if _, ok := knownBareTags[tag]; ok {
+		return true
+	}
+	if _, ok := l.extraAllowedTags[tag]; ok {
 		return true
 	}
 	if i := strings.IndexByte(tag, ':'); i > 0 {
@@ -227,6 +233,35 @@ func isKnownTag(tag, project string) bool {
 		}
 	}
 	return false
+}
+
+// trimTag strips surrounding whitespace from a vocabulary entry. Used for
+// extra_allowed entries from TOML where YAML/TOML round-trips can leave
+// stray spaces.
+func trimTag(s string) string {
+	return strings.TrimSpace(s)
+}
+
+// validExtraTag reports whether s is a well-formed entry for the extra
+// vocabulary. A valid entry is either a non-empty bare token (no ':') or
+// a "<namespace>:<value>" pair where both halves are non-empty. Malformed
+// entries (empty, leading/trailing colon, internal whitespace) are
+// rejected so they can be skipped silently at load time without crashing
+// the lint or producing surprising matches.
+func validExtraTag(s string) bool {
+	if s == "" {
+		return false
+	}
+	if strings.ContainsAny(s, " \t\n") {
+		return false
+	}
+	i := strings.IndexByte(s, ':')
+	if i < 0 {
+		return true
+	}
+	ns := s[:i]
+	val := s[i+1:]
+	return ns != "" && val != "" && !strings.Contains(val, ":")
 }
 
 func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) ([]Issue, error) {
@@ -246,7 +281,7 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 			continue
 		}
 		for _, tag := range tags {
-			if isKnownTag(tag, project) {
+			if l.isKnownTag(tag, project) {
 				continue
 			}
 			issues = append(issues, Issue{

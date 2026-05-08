@@ -50,7 +50,7 @@ func (s *Server) handleLint(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 		}
 	}
 
-	linter := lint.New(s.vault, s.index)
+	linter := lint.New(s.vault, s.index).WithExtraAllowedTags(s.lintExtraAllowedTags)
 	issues, err := linter.Run(ctx, project, rules, minSeverity)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("lint run failed", err), nil

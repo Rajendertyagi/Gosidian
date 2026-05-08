@@ -325,6 +325,7 @@ func main() {
 	// MCP write handlers publish on the SSE hub so SPA subscribers
 	// see external-tab + agent edits in real time.
 	mcpServer.SetEvents(eventsHub)
+	mcpServer.SetLintExtraAllowedTags(cfg.Lint.FrontmatterTagVocabulary.ExtraAllowed)
 
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.

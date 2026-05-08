@@ -141,6 +141,78 @@ func TestLint_FrontmatterTagUnknown(t *testing.T) {
 	}
 }
 
+func TestLint_FrontmatterTagUnknown_ExtraAllowed(t *testing.T) {
+	// Same vault as TestLint_FrontmatterTagUnknown, but the linter has
+	// been extended via WithExtraAllowedTags. The 3 tags that were
+	// flagged before must now be silenced — built-in vocabulary stays
+	// untouched, the extension is purely additive.
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, type:memory, random, topic:bogus, status:invented]\n---\n\n# n\n")
+
+	l = l.WithExtraAllowedTags([]string{
+		"random",
+		"topic:bogus",
+		"status:invented",
+	})
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues with extra-allowed configured, got %d: %+v", len(issues), issues)
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_ExtraAllowedSkipsMalformed(t *testing.T) {
+	// Malformed extra entries (empty, leading colon, internal whitespace)
+	// must be skipped silently. Valid entries from the same list still
+	// take effect — a single bad entry doesn't poison the rest.
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, mytag, topic:fine]\n---\n\n# n\n")
+
+	l = l.WithExtraAllowedTags([]string{
+		"",                // empty — skip
+		":missingns",      // leading colon — skip
+		"missingval:",     // trailing colon — skip
+		"with space:bad",  // whitespace in ns — skip
+		"ns:with space",   // whitespace in val — skip
+		"ns:val:extra",    // double colon — skip
+		"mytag",           // valid bare → applies
+		"topic:fine",      // valid namespaced → applies
+	})
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues — malformed entries skipped, valid ones honoured. got %d: %+v", len(issues), issues)
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_ExtraAllowedNotMaskingOtherUnknown(t *testing.T) {
+	// Belt-and-braces: configuring extras for some tags must not
+	// suppress warnings for tags that are still unknown. Tag isolation.
+	l, v, idx := newTestLinter(t)
+
+	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, allowed-extra, still-unknown, topic:another-unknown]\n---\n\n# n\n")
+
+	l = l.WithExtraAllowedTags([]string{"allowed-extra"})
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// "allowed-extra" silenced. "still-unknown" + "topic:another-unknown"
+	// still flagged.
+	if len(issues) != 2 {
+		t.Fatalf("expected 2 issues (still-unknown + topic:another-unknown), got %d: %+v", len(issues), issues)
+	}
+}
+
 func TestLint_StatusIncoherent(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 

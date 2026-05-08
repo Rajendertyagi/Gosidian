@@ -77,11 +77,40 @@ type ruleSpec struct {
 type Linter struct {
 	vault *vault.Vault
 	index *index.Index
+	// extraAllowedTags expands the closed vocabulary checked by
+	// frontmatter-tag-unknown. nil/empty means "use built-in only".
+	// Populated via WithExtraAllowedTags from a vault's
+	// .gosidian/config.toml [lint.frontmatter_tag_vocabulary].
+	extraAllowedTags map[string]struct{}
 }
 
 // New wires a Linter against a live vault + index.
 func New(v *vault.Vault, idx *index.Index) *Linter {
 	return &Linter{vault: v, index: idx}
+}
+
+// WithExtraAllowedTags adds tags to the closed vocabulary the
+// frontmatter-tag-unknown rule accepts. Format of each entry is the same
+// as a frontmatter tag: "<namespace>:<value>" (e.g. "status:reference") or
+// a bare tag name. Malformed entries (empty namespace, empty value) are
+// skipped silently — a typo in the config should not crash the lint.
+//
+// Returns the receiver for chaining (`lint.New(v, idx).WithExtraAllowedTags(extras)`).
+func (l *Linter) WithExtraAllowedTags(extra []string) *Linter {
+	if len(extra) == 0 {
+		return l
+	}
+	if l.extraAllowedTags == nil {
+		l.extraAllowedTags = make(map[string]struct{}, len(extra))
+	}
+	for _, t := range extra {
+		t = trimTag(t)
+		if !validExtraTag(t) {
+			continue
+		}
+		l.extraAllowedTags[t] = struct{}{}
+	}
+	return l
 }
 
 // DefaultRules returns the baseline v1.9 rules in a stable order.

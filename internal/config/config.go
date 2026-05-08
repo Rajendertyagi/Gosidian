@@ -26,6 +26,26 @@ type Config struct {
 	Webauth WebauthConfig `toml:"webauth"`
 	Vault   VaultConfig   `toml:"vault"`
 	I18n    I18nConfig    `toml:"i18n"`
+	Lint    LintConfig    `toml:"lint"`
+}
+
+// LintConfig tunes the structural health checks. All fields default to the
+// built-in behaviour — gosidian works the same with no [lint] section in
+// .gosidian/config.toml.
+type LintConfig struct {
+	FrontmatterTagVocabulary FrontmatterTagVocabulary `toml:"frontmatter_tag_vocabulary"`
+}
+
+// FrontmatterTagVocabulary lets a vault add tags to the closed vocabulary
+// the frontmatter-tag-unknown rule checks against. Built-in namespaces
+// (type/topic/status, plus the bare "pinned" tag and the project name) are
+// always allowed; ExtraAllowed is purely additive — a vault never weakens
+// its own discipline by setting this.
+//
+// Format of each entry: "<namespace>:<value>" (e.g. "status:reference") or
+// the bare tag name. Malformed entries are skipped silently at load time.
+type FrontmatterTagVocabulary struct {
+	ExtraAllowed []string `toml:"extra_allowed"`
 }
 
 // WebauthConfig tunes the web login behaviour. All fields have sane defaults

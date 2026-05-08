@@ -46,6 +46,44 @@ The `config.toml` at `<vault>/.gosidian/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at
 `/settings`. Env vars override the file on every start.
 
+## Lint vocabulary extension
+
+The `frontmatter-tag-unknown` lint rule (run via the `memory_lint`
+MCP tool) checks every note's frontmatter `tags` against a closed
+built-in vocabulary: the `type:` / `topic:` / `status:` namespaces,
+the bare `pinned` tag, and the project name itself. Tags outside
+that vocabulary are reported as warnings — typos surface immediately,
+and a vault gradually accumulates a coherent metadata language.
+
+Some vaults legitimately use additional tags that are part of their
+own structural conventions. To keep those tags warning-free without
+weakening the rule for everyone, add them under
+`[lint.frontmatter_tag_vocabulary]` in `<vault>/.gosidian/config.toml`:
+
+```toml
+[lint.frontmatter_tag_vocabulary]
+extra_allowed = [
+  "status:reference",       # for reference notes that aren't snapshot/draft/done/archived
+  "topic:agent-template",   # for an agent-template index folder
+  "topic:bootstrap",        # bootstrap kit notes
+]
+```
+
+Behaviour:
+
+- **Additive only**. Built-in tags are always allowed; the entries
+  here are merged on top.
+- **Format**: each entry is either a bare token (e.g. `mytag`) or a
+  `<namespace>:<value>` pair where both halves are non-empty.
+  Malformed entries (empty, leading/trailing colon, internal
+  whitespace) are skipped silently — a typo in the config doesn't
+  crash the lint.
+- **Per-vault scope**: the file is loaded at server startup; the
+  lint runner passes the list to the rule. Restart gosidian after
+  editing.
+- **No file = no change**: vaults without `[lint]` keep the
+  baseline behaviour identically.
+
 ## CLI reference
 
 ```

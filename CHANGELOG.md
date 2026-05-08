@@ -4,6 +4,52 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.1.0] — 2026-05-08 — "lint vocabulary extension"
+
+MINOR. Extends the `frontmatter-tag-unknown` lint rule with a
+config-driven allow-list, so vaults can document their structural
+tag patterns without weakening the rule for everyone. No behaviour
+change for vaults that do not configure it.
+
+### Added
+
+- **`[lint.frontmatter_tag_vocabulary] extra_allowed`** in
+  `<vault>/.gosidian/config.toml` — additive allow-list for the
+  closed vocabulary checked by the `frontmatter-tag-unknown` rule.
+  Format: `<namespace>:<value>` or bare token. Built-in namespaces
+  (type/topic/status/pinned/project-name) are always honoured;
+  the extension is purely additive — a vault never weakens its own
+  discipline by setting this. Malformed entries (empty,
+  leading/trailing colon, internal whitespace, double colon) are
+  skipped silently at load time so a typo in the config does not
+  crash the lint. See `docs/configuration.md#lint-vocabulary-extension`.
+- New chainable setter `Linter.WithExtraAllowedTags(extra)` in the
+  `internal/lint` package; `isKnownTag` is now a method so each
+  Linter instance carries its own per-vault vocabulary extension.
+- New `Server.SetLintExtraAllowedTags()` setter in the MCP package;
+  `memory_lint` wires the per-vault config into each run.
+- Three new unit tests covering the extension behaviour: extras
+  silence configured tags, malformed entries are skipped silently,
+  extras don't mask other unknowns.
+
+### Changed
+
+- `cmd/gosidian/main.go` reads `cfg.Lint.FrontmatterTagVocabulary.ExtraAllowed`
+  at startup and passes it to the MCP server. Vaults without a
+  `[lint]` section get the same behaviour as before.
+
+### Notes
+
+- **Backward-compatible**. Vaults without `[lint.frontmatter_tag_vocabulary]`
+  see the built-in vocabulary unchanged. No migration, no schema
+  delta, no runtime impact for existing deploys.
+- Use case: a vault that legitimately uses tags outside the built-in
+  namespaces (e.g. `status:reference` for reference notes that
+  aren't snapshot/draft/done/archived, `topic:agent-template` for
+  template-folder index notes) can document those tags in
+  `.gosidian/config.toml` instead of accumulating warnings on every
+  `memory_lint` run.
+
 ## [2.0.1] — 2026-05-08 — "deps cleanup"
 
 PATCH bundle. Closes the two open Dependabot Go-module PRs and three

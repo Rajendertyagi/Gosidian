@@ -68,6 +68,13 @@ type Server struct {
 	// SPA SSE stream can invalidate caches in real time. nil keeps
 	// the legacy behaviour (no announcements, the SPA polls).
 	events *events.Hub
+	// lintExtraAllowedTags extends the closed vocabulary checked by
+	// the frontmatter-tag-unknown rule, sourced from a vault's
+	// .gosidian/config.toml [lint.frontmatter_tag_vocabulary]. Empty
+	// or nil means "use built-in vocabulary only" — no behaviour
+	// change for vaults that do not configure it. Wired by main at
+	// startup via SetLintExtraAllowedTags.
+	lintExtraAllowedTags []string
 }
 
 // SetEvents wires the SSE hub used to broadcast note/tree changes
@@ -76,6 +83,14 @@ type Server struct {
 // drop-oldest policy rather than back-pressuring the writer.
 func (s *Server) SetEvents(h *events.Hub) {
 	s.events = h
+}
+
+// SetLintExtraAllowedTags installs the per-vault extension to the
+// frontmatter-tag-unknown rule's closed vocabulary. The list is the raw
+// extra_allowed entries from the vault's config; the lint package
+// validates and dedupes them. Pass nil to revert to built-in only.
+func (s *Server) SetLintExtraAllowedTags(extra []string) {
+	s.lintExtraAllowedTags = extra
 }
 
 // publishNoteChange broadcasts a note-level write (create/update/
