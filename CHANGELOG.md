@@ -4,6 +4,46 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.0.1] — 2026-05-08 — "deps cleanup"
+
+PATCH bundle. Closes the two open Dependabot Go-module PRs and three
+high+critical Dependabot npm advisories on dev dependencies. No
+runtime behaviour change — the SPA bundle output is byte-identical
+to v2.0.0.
+
+### Changed
+
+- **`github.com/mark3labs/mcp-go`** 0.47.1 → 0.50.0. Closes #12.
+- **`github.com/fsnotify/fsnotify`** 1.7.0 → 1.10.0. Closes #13.
+- **`web/` devDependencies**:
+  - `happy-dom` 15.0.0 → 20.9.0 — closes GHSA-37j7-fg3j-429f
+    (critical, VM Context Escape RCE), GHSA-w4gp-fjgq-3q4g (high,
+    fetch credentials sourced from page origin), GHSA-6q6h-j7hj-3r64
+    (high, ECMAScript module compiler unsanitised export names).
+  - `playwright` + `@playwright/test` 1.47.0 → 1.59.1 — closes
+    GHSA-7mvr-c777-76hp (high, browsers downloaded without integrity
+    verification).
+- **Go toolchain directive** auto-bumped 1.25.0 → 1.25.5 (side-effect
+  of `go get`). Build target still pinned to `golang:1.25-alpine` in
+  `Dockerfile`.
+
+### Notes
+
+- **Vite 5 → 6** (GHSA-4w7w-66w2-5vf9 medium, path traversal in dev
+  server `.map` handling) and **esbuild 0.21 → 0.25**
+  (GHSA-67mh-4wv8-2f99 medium, dev-server CSRF) **deliberately
+  deferred**: dev-only attack paths (production build pipeline never
+  exposes either dev server), GitHub-hosted CI runner is the only
+  consumer, and Vite 6 is a major upgrade with a cascading plugin
+  refresh cost (Vue plugin, intlify, Tailwind). Tracked for the v2.1
+  cycle when the broader bundle modernisation lands.
+- `vite build` produces a byte-identical SPA `dist/` post-bump — the
+  upgraded dev tooling does not change the bundle. End users see no
+  behavioural delta vs v2.0.0.
+- Vitest unit suite 16/16 green with happy-dom 20. `go test ./...`
+  green across all 16 packages. `npm audit --omit=dev` =
+  0 vulnerabilities.
+
 ## [2.0.0] — 2026-05-08 — "SPA cutover + REST API v1"
 
 **MAJOR.** The HTMX-rendered web UI is gone; gosidian now ships a
