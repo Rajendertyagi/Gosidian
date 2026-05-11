@@ -4,6 +4,55 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.1.1] — 2026-05-11 — "deps cleanup #2"
+
+PATCH bundle. Closes 4 open Dependabot Go-module PRs and overrides
+the Node 22 → 26 (Current) proposal with Node 22 → 24 (LTS) for
+stability long-term. No runtime behaviour change — the SPA bundle is
+unaffected (only Go deps + Docker base modified).
+
+### Changed
+
+- **`github.com/fsnotify/fsnotify`** 1.10.0 → 1.10.1 (closes #17).
+- **`golang.org/x/term`** 0.42.0 → 0.43.0 (closes #18).
+- **`golang.org/x/crypto`** 0.50.0 → 0.51.0 (closes #19).
+- **`github.com/mark3labs/mcp-go`** 0.50.0 → 0.52.0 (closes #20).
+  Includes upstream fix mark3labs/mcp-go#830
+  *"setTools may resulted in an empty tools"* (v0.51.0) — defensive
+  improvement to the pattern gosidian uses in `internal/mcp/tools.go`.
+- **`Dockerfile`** builder stage: `node:22-alpine` → `node:24-alpine`
+  (overrides Dependabot PR #16 which proposed `node:26-alpine`).
+  Node 24 is the current LTS line (support through October 2027),
+  Node 26 is the Current release with a shorter support window. The
+  override prioritises stability over latest.
+- Transitive bumps via `go mod tidy`: `golang.org/x/sys` 0.43 → 0.44,
+  `golang.org/x/text` 0.36 → 0.37.
+
+### Deferred
+
+- **PR #15 vite 5.4.21 → 8.0.11 + esbuild removal + vitest major**
+  is closed without merging. The jump spans 3 major versions of
+  Vite (5 → 6 → 7 → 8) and removes esbuild as a direct dependency.
+  CI build is green but the runtime SPA behaviour under strict CSP +
+  plugin compatibility (@vitejs/plugin-vue, @intlify/unplugin-vue-i18n,
+  Tailwind 3.4) was not validated. A dedicated upgrade plan with
+  incremental 5 → 6 → 7 → 8 steps and runtime testing per step is
+  tracked for the v2.2.x cycle. The two related Dependabot alerts
+  (vite GHSA-4w7w-66w2-5vf9 medium, esbuild GHSA-67mh-4wv8-2f99
+  medium) remain `dismissed: tolerable_risk` — dev-only attack
+  surface, GitHub-hosted CI runner is the only consumer of `vite
+  dev`.
+
+### Notes
+
+- **No behaviour change for end users**. The SPA `dist/` bundle is
+  not rebuilt by this PATCH — the embedded assets match v2.1.0
+  byte-for-byte. Only the Go binary and the builder image base
+  change.
+- `go vet ./...`, `go test ./...` 16/16 packages green
+- `npm audit --omit=dev` = 0 vulnerabilities (unchanged from v2.0.1)
+- Vitest 16/16 green
+
 ## [2.1.0] — 2026-05-08 — "lint vocabulary extension"
 
 MINOR. Extends the `frontmatter-tag-unknown` lint rule with a

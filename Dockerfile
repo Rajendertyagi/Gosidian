@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.6
 #
 # Multi-stage build for gosidian v2.0:
-#   1. node:22-alpine builds the Vue 3 SPA (`npm run build`).
+#   1. node:24-alpine builds the Vue 3 SPA (`npm run build`).
 #   2. golang:1.25-alpine compiles the binary, embedding the dist/.
 #   3. alpine:3.20 runtime with git on PATH for gitsync.
 #
@@ -12,7 +12,7 @@
 # -----------------------------------------------------------------
 # 1. SPA build
 # -----------------------------------------------------------------
-FROM node:22-alpine AS web-builder
+FROM node:24-alpine AS web-builder
 WORKDIR /web
 
 # Cache `npm ci` against the lockfile.
