@@ -5,6 +5,10 @@ export interface Project {
   note_count: number
   hidden_from_mcp: boolean
   skip_git_sync: boolean
+  /** Public projects are readable by guest-role users; private (default) are
+   *  visible to owner/member only. "Public" = visible to all authenticated
+   *  users including guests, not anonymous. */
+  public: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -20,6 +24,7 @@ export interface UpdateProjectRequest {
   new_name?: string
   hidden_from_mcp?: boolean
   skip_git_sync?: boolean
+  public?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

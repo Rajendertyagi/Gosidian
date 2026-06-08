@@ -2,7 +2,10 @@ package v1
 
 import (
 	"net/http"
+	"sort"
 	"strings"
+
+	"github.com/gosidian/gosidian/internal/authz"
 )
 
 type tagView struct {
@@ -22,20 +25,23 @@ func (r *Router) handleTags(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
+	p := principalFromContext(req)
 	var rows []indexTagCount
 	var err error
-	if project != "" {
+	switch {
+	case project != "":
+		if !p.CanAccessProject(project, r.isPublic) {
+			WriteJSON(w, http.StatusOK, map[string]any{"items": []tagView{}, "total": 0})
+			return
+		}
 		raw, e := r.deps.Index.TagsByProject(project)
 		err = e
 		for _, t := range raw {
 			rows = append(rows, indexTagCount{Tag: t.Tag, Count: t.Count})
 		}
-	} else {
-		raw, e := r.deps.Index.Tags()
-		err = e
-		for _, t := range raw {
-			rows = append(rows, indexTagCount{Tag: t.Tag, Count: t.Count})
-		}
+	default:
+		// Owner/member: full vault tag set. Guest: public projects only.
+		rows, err = r.visibleTags(p)
 	}
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -73,9 +79,13 @@ func (r *Router) handleTagByName(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
+	p := principalFromContext(req)
 	out := make([]noteSummary, 0, len(rows))
 	for _, n := range rows {
 		if project != "" && !strings.HasPrefix(n.Path, project+"/") && n.Path != project {
+			continue
+		}
+		if !r.canSee(p, n.Path) {
 			continue
 		}
 		out = append(out, noteSummary{Path: n.Path, Title: n.Title})
@@ -88,4 +98,39 @@ func (r *Router) handleTagByName(w http.ResponseWriter, req *http.Request) {
 type indexTagCount struct {
 	Tag   string
 	Count int
+}
+
+// visibleTags returns the tag counts the principal may see. Owner/member get
+// the full vault tag set; a guest (or unknown role) gets tags aggregated over
+// public projects only, so private tags never leak through the tag list.
+func (r *Router) visibleTags(p authz.Principal) ([]indexTagCount, error) {
+	if p.CanSeeAllProjects() {
+		raw, err := r.deps.Index.Tags()
+		if err != nil {
+			return nil, err
+		}
+		out := make([]indexTagCount, 0, len(raw))
+		for _, t := range raw {
+			out = append(out, indexTagCount{Tag: t.Tag, Count: t.Count})
+		}
+		return out, nil
+	}
+	merged := map[string]int{}
+	if r.deps.Projects != nil {
+		for _, proj := range r.deps.Projects.PublicNames() {
+			raw, err := r.deps.Index.TagsByProject(proj)
+			if err != nil {
+				return nil, err
+			}
+			for _, t := range raw {
+				merged[t.Tag] += t.Count
+			}
+		}
+	}
+	out := make([]indexTagCount, 0, len(merged))
+	for tag, c := range merged {
+		out = append(out, indexTagCount{Tag: tag, Count: c})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Tag < out[j].Tag })
+	return out, nil
 }

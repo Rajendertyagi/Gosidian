@@ -29,6 +29,8 @@ trial, read the [root README](../README.md) first.
 
 - [Overview](web-ui/overview.md) — routes, web login, admin pages
 - [Editor](web-ui/editor.md) — markdown editor, live preview, HTMX
+- [Authentication & roles](web-ui/authentication.md) — owner/member/guest
+  roles, public/private projects, TOTP two-factor, LDAP / Active Directory
 - [Settings](web-ui/settings.md) — theme presets, language selector,
   git sync config
 

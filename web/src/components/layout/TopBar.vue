@@ -34,8 +34,8 @@ async function handleLogout() {
         <RouterLink to="/projects" class="hover:text-text">{{ t('nav.projects') }}</RouterLink>
         <RouterLink to="/tags" class="hover:text-text">{{ t('nav.tags') }}</RouterLink>
         <RouterLink to="/graph" class="hover:text-text">{{ t('nav.graph') }}</RouterLink>
-        <RouterLink to="/trash" class="hover:text-text">{{ t('nav.trash') }}</RouterLink>
-        <RouterLink to="/settings" class="hover:text-text">{{ t('nav.settings') }}</RouterLink>
+        <RouterLink v-if="auth.canWrite" to="/trash" class="hover:text-text">{{ t('nav.trash') }}</RouterLink>
+        <RouterLink v-if="auth.canWrite" to="/settings" class="hover:text-text">{{ t('nav.settings') }}</RouterLink>
         <RouterLink
           v-if="auth.isOwner"
           to="/admin"
@@ -49,6 +49,11 @@ async function handleLogout() {
         v-if="auth.isOwner"
         class="px-2 py-0.5 rounded text-xs bg-accent/20 text-accent"
       >owner</span>
+      <span
+        v-else-if="auth.isGuest"
+        class="px-2 py-0.5 rounded text-xs border border-border text-text-muted"
+        title="Read-only guest — public projects only"
+      >guest</span>
       <button
         type="button"
         class="px-2 py-1 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"

@@ -1,0 +1,42 @@
+# Disposable OpenLDAP for testing gosidian's LDAP login locally.
+#
+#   docker compose -f deploy/ldap-test/docker-compose.yml up -d
+#   ./deploy/ldap-test/seed.sh        # add users alice / bob
+#
+# osixia's auto-bootstrap of custom LDIF is finicky across versions, so we
+# seed deterministically with ldapadd after the directory is up (seed.sh).
+#
+# Then point gosidian at it (config.toml or env — see README.md):
+#   [ldap]
+#   enabled       = true
+#   url           = "ldap://127.0.0.1:1389"
+#   bind_dn       = "cn=admin,dc=example,dc=org"
+#   bind_password = "adminpassword"
+#   user_base_dn  = "ou=users,dc=example,dc=org"
+#   user_filter   = "(uid=%s)"
+#
+# Log in to the SPA as alice / alicepass — a guest account is
+# auto-provisioned on first login.
+services:
+  openldap:
+    image: osixia/openldap:1.5.0
+    container_name: gosidian-ldap-test
+    environment:
+      LDAP_ORGANISATION: "Example"
+      LDAP_DOMAIN: "example.org"
+      LDAP_ADMIN_PASSWORD: "adminpassword"
+      # osixia defaults TLSVerifyClient to "demand": slapd then asks every TLS
+      # client for a certificate and drops the connection (EOF) when a plain
+      # search-then-bind client like gosidian doesn't present one. "never"
+      # makes ldaps:// behave like a normal server-auth-only directory.
+      LDAP_TLS_VERIFY_CLIENT: "never"
+    ports:
+      - "1389:389" # ldap://
+      - "1636:636" # ldaps://
+    volumes:
+      - ldap_data:/var/lib/ldap
+      - ldap_config:/etc/ldap/slapd.d
+
+volumes:
+  ldap_data:
+  ldap_config:

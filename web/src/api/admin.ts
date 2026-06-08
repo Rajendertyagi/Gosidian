@@ -38,6 +38,8 @@ export interface AdminUser {
   id: string
   username: string
   role: string
+  totp_policy?: string // "" inherit | enabled | disabled
+  totp_enrolled?: boolean
   created_at: string
   disabled_at?: string
 }
@@ -117,6 +119,20 @@ export async function listUsers(): Promise<AdminUser[]> {
 
 export async function disableUser(id: string): Promise<void> {
   await client.delete(`/admin/users/${encodeURIComponent(id)}`)
+}
+
+/** Change a user's role between member and guest (owner-only). The owner is
+ *  immutable and cannot be set here. Demoting to guest revokes the user's MCP
+ *  tokens server-side. */
+export async function updateUserRole(id: string, role: 'member' | 'guest'): Promise<AdminUser> {
+  const { data } = await client.patch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { role })
+  return data
+}
+
+/** Set a user's per-user TOTP override: "" (inherit), "enabled", or "disabled". */
+export async function updateUserTOTPPolicy(id: string, totpPolicy: string): Promise<AdminUser> {
+  const { data } = await client.patch<AdminUser>(`/admin/users/${encodeURIComponent(id)}`, { totp_policy: totpPolicy })
+  return data
 }
 
 // Invites

@@ -28,6 +28,11 @@ const depth = ref<number>(numFromQuery('depth', 2))
 const minDegree = ref<number>(numFromQuery('min_degree', 0))
 const limit = ref<number>(numFromQuery('limit', 0))
 
+// Whether the URL already pins a view (deep link / shared graph). When it
+// doesn't, we open on the most-recently-edited project the user can see
+// instead of the whole vault — see onMounted.
+const hadInitialFilter = Boolean(project.value || tag.value || focus.value)
+
 function strFromQuery(key: string): string {
   const v = route.query[key]
   return typeof v === 'string' ? v : ''
@@ -119,9 +124,10 @@ const sortedProjects = computed<Project[]>(() => {
 })
 
 onMounted(async () => {
-  void load()
-  // Fire dataset fetches in parallel; failures degrade to "no
-  // suggestions, free typing still works".
+  // Fetch the picker datasets first so we can pick a sensible default
+  // before the first graph load. Failures degrade to "no suggestions,
+  // free typing still works". listProjects() is already authz-filtered,
+  // so sortedProjects only ever holds projects this user may open.
   const [pRes, tRes, nRes] = await Promise.allSettled([
     listProjects(),
     listTags(),
@@ -130,6 +136,17 @@ onMounted(async () => {
   if (pRes.status === 'fulfilled') projects.value = pRes.value
   if (tRes.status === 'fulfilled') tags.value = tRes.value
   if (nRes.status === 'fulfilled') notes.value = nRes.value
+
+  // No deep-link filter → open on the most recently edited project the
+  // user can see, so a vault with many projects doesn't dump every node
+  // at once. Setting project triggers the params watcher (loads + syncs
+  // the URL). "(all)" stays one click away via the project picker.
+  const mostRecent = sortedProjects.value[0]
+  if (!hadInitialFilter && mostRecent) {
+    project.value = mostRecent.name
+  } else {
+    void load()
+  }
 })
 </script>
 

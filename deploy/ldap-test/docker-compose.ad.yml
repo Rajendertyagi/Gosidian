@@ -1,0 +1,48 @@
+# Disposable Samba Active Directory Domain Controller — simulates a real
+# Windows AD (sAMAccountName, AD object classes, Kerberos) for testing
+# gosidian's LDAP login in AD mode.
+#
+#   docker compose -f deploy/ldap-test/docker-compose.ad.yml up -d
+#   # wait ~90s for the domain to provision, then create a user:
+#   docker exec gosidian-samba-ad samba-tool user create alice 'Passw0rd!alice1'
+#
+# Realm CORP.EXAMPLE.COM → base DC=corp,DC=example,DC=com, users in
+# CN=Users,DC=corp,DC=example,DC=com. Point gosidian at it (AD mode):
+#   [ldap]
+#   enabled       = true
+#   url           = "ldap://127.0.0.1:1390"      # or ldaps://...:1637
+#   bind_dn       = "CN=Administrator,CN=Users,DC=corp,DC=example,DC=com"
+#   bind_password = "Passw0rd!2026"
+#   user_base_dn  = "CN=Users,DC=corp,DC=example,DC=com"
+#   user_filter   = "(sAMAccountName=%s)"
+#
+# Requires privileged (Samba AD provisions Kerberos/DNS). On the shared
+# ldap-test network so a containerised gosidian can reach it by name; start
+# docker-compose.yml first (it creates that network).
+services:
+  samba-ad:
+    image: diegogslomp/samba-ad-dc:latest
+    container_name: gosidian-samba-ad
+    hostname: dc1
+    privileged: true
+    environment:
+      REALM: CORP.EXAMPLE.COM
+      DOMAIN: CORP
+      ADMIN_PASS: "Passw0rd!2026"
+      DNS_FORWARDER: "8.8.8.8"
+      BIND_NETWORK_INTERFACES: "false"
+    ports:
+      - "1390:389" # ldap://
+      - "1637:636" # ldaps://
+    networks:
+      - ldaptest
+    volumes:
+      - samba_data:/usr/local/samba
+
+networks:
+  ldaptest:
+    external: true
+    name: ldap-test_default
+
+volumes:
+  samba_data:

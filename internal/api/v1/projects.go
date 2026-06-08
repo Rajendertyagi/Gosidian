@@ -18,6 +18,8 @@ type projectView struct {
 	NoteCount     int    `json:"note_count"`
 	HiddenFromMCP bool   `json:"hidden_from_mcp"`
 	SkipGitSync   bool   `json:"skip_git_sync"`
+	// Public marks the project as visible to guest-role users (read-only).
+	Public bool `json:"public"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -36,6 +38,7 @@ type updateProjectRequest struct {
 	NewName       *string `json:"new_name,omitempty"`
 	HiddenFromMCP *bool   `json:"hidden_from_mcp,omitempty"`
 	SkipGitSync   *bool   `json:"skip_git_sync,omitempty"`
+	Public        *bool   `json:"public,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -81,19 +84,25 @@ func (r *Router) handleProjectByName(w http.ResponseWriter, req *http.Request) {
 // listProjects walks vault.Projects() and merges flags from the
 // per-project store. Cheap operation — typical vaults have <50
 // top-level dirs.
-func (r *Router) listProjects(w http.ResponseWriter, _ *http.Request) {
+func (r *Router) listProjects(w http.ResponseWriter, req *http.Request) {
 	projs, err := r.deps.Vault.Projects()
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
+	princ := principalFromContext(req)
 	out := make([]projectView, 0, len(projs))
 	for _, p := range projs {
+		if !princ.CanAccessProject(p.Name, r.isPublic) {
+			continue // guests: only public projects
+		}
+		flags := r.projectFlag(p.Name)
 		out = append(out, projectView{
 			Name:          p.Name,
 			NoteCount:     p.NoteCount,
-			HiddenFromMCP: r.projectFlag(p.Name).HiddenFromMCP,
-			SkipGitSync:   r.projectFlag(p.Name).SkipGitSync,
+			HiddenFromMCP: flags.HiddenFromMCP,
+			SkipGitSync:   flags.SkipGitSync,
+			Public:        flags.Public,
 			ModTime:       formatModTime(p.ModTime),
 		})
 	}
@@ -107,7 +116,12 @@ func formatModTime(t time.Time) string {
 	return t.UTC().Format(rfc3339Z)
 }
 
-func (r *Router) getProject(w http.ResponseWriter, _ *http.Request, name string) {
+func (r *Router) getProject(w http.ResponseWriter, req *http.Request, name string) {
+	if !principalFromContext(req).CanAccessProject(name, r.isPublic) {
+		// Guests can't see private projects — 404 hides existence.
+		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
+		return
+	}
 	projs, err := r.deps.Vault.Projects()
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -121,6 +135,7 @@ func (r *Router) getProject(w http.ResponseWriter, _ *http.Request, name string)
 				NoteCount:     p.NoteCount,
 				HiddenFromMCP: f.HiddenFromMCP,
 				SkipGitSync:   f.SkipGitSync,
+				Public:        f.Public,
 			})
 			return
 		}
@@ -132,6 +147,9 @@ func (r *Router) createProject(w http.ResponseWriter, req *http.Request) {
 	user := UserFromContext(req.Context())
 	if user == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if denyGuestWrite(w, user) {
 		return
 	}
 	var body createProjectRequest
@@ -164,6 +182,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
 		return
 	}
+	if denyGuestWrite(w, user) {
+		return
+	}
 	var body updateProjectRequest
 	if err := DecodeJSON(req, &body); err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
@@ -179,13 +200,16 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || body.Public != nil {
 		current := r.projectFlag(name)
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
 		}
 		if body.SkipGitSync != nil {
 			current.SkipGitSync = *body.SkipGitSync
+		}
+		if body.Public != nil {
+			current.Public = *body.Public
 		}
 		if r.deps.Projects != nil {
 			if err := r.deps.Projects.Set(name, current); err != nil {
@@ -234,6 +258,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		NoteCount:     count,
 		HiddenFromMCP: flags.HiddenFromMCP,
 		SkipGitSync:   flags.SkipGitSync,
+		Public:        flags.Public,
 	})
 }
 
@@ -241,6 +266,9 @@ func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name st
 	user := UserFromContext(req.Context())
 	if user == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if denyGuestWrite(w, user) {
 		return
 	}
 	if !r.projectExists(name) {

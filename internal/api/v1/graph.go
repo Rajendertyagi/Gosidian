@@ -50,12 +50,12 @@ type graphStats struct {
 // drop the working set before it hits the wire so the client doesn't
 // need WebGL to handle larger vaults:
 //
-//   ?project=<slug>     — restrict to notes under top-level project
-//   ?tag=<name>         — restrict to notes carrying the tag
-//   ?min_degree=<n>     — drop nodes with fewer than n edges
-//   ?focus=<path>&depth=<n> — ego-graph BFS n hops from focus
-//   ?limit=<n>          — cap total nodes (drops lowest-degree first)
-//   ?include_cross=true — admit cross-project edges (project mode)
+//	?project=<slug>     — restrict to notes under top-level project
+//	?tag=<name>         — restrict to notes carrying the tag
+//	?min_degree=<n>     — drop nodes with fewer than n edges
+//	?focus=<path>&depth=<n> — ego-graph BFS n hops from focus
+//	?limit=<n>          — cap total nodes (drops lowest-degree first)
+//	?include_cross=true — admit cross-project edges (project mode)
 //
 // Response carries an ETag derived from the filtered payload so
 // browsers can short-circuit unchanged graphs (Cache-Control max-age
@@ -95,6 +95,15 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 	// any endpoint outside the kept set are dropped — we don't synthesize
 	// foreign endpoints here (cross_project flag is for project filter).
 	keep := graphNodeSet(rawNodes)
+	// Per-role visibility: guests keep only nodes in public projects. Edges
+	// touching dropped nodes fall away in the materialise step below.
+	if princ := principalFromContext(req); !princ.CanSeeAllProjects() {
+		for path := range keep {
+			if !r.canSee(princ, path) {
+				delete(keep, path)
+			}
+		}
+	}
 	if tag != "" {
 		var paths []string
 		if project != "" {

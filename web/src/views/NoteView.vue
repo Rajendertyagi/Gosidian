@@ -11,8 +11,10 @@ import { getNote, type Note } from '@/api/notes'
 import { renderPreview } from '@/api/preview'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
+const auth = useAuthStore()
 const recents = useRecentlyViewed()
 const note = ref<Note | null>(null)
 const html = ref<string>('')
@@ -59,6 +61,7 @@ watch(path, load)
           class="text-sm text-text-muted hover:text-text"
         >History</RouterLink>
         <RouterLink
+          v-if="auth.canWrite"
           :to="'/notes/' + encodeURIComponent(note.path) + '/edit'"
           class="text-sm px-3 py-1 rounded bg-accent text-accent-fg hover:bg-accent-hover"
         >Edit</RouterLink>

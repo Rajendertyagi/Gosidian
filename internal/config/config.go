@@ -27,6 +27,22 @@ type Config struct {
 	Vault   VaultConfig   `toml:"vault"`
 	I18n    I18nConfig    `toml:"i18n"`
 	Lint    LintConfig    `toml:"lint"`
+	LDAP    LDAPConfig    `toml:"ldap"`
+}
+
+// LDAPConfig enables web-login against an external directory via a
+// search-then-bind flow. Disabled by default. bind_password is a secret —
+// prefer GOSIDIAN_LDAP_BIND_PASSWORD over storing it in the file. It is never
+// surfaced through /api/v1/settings.
+type LDAPConfig struct {
+	Enabled      bool   `toml:"enabled"`
+	URL          string `toml:"url"`                  // ldap://host:389 | ldaps://host:636
+	StartTLS     bool   `toml:"start_tls"`            // upgrade a plaintext ldap:// to TLS
+	SkipVerify   bool   `toml:"insecure_skip_verify"` // dev only; do not use in prod
+	BindDN       string `toml:"bind_dn"`              // service account DN used to search
+	BindPassword string `toml:"bind_password"`        // service account password (prefer env)
+	UserBaseDN   string `toml:"user_base_dn"`         // search base for user entries
+	UserFilter   string `toml:"user_filter"`          // one %s for username; OpenLDAP "(uid=%s)", AD "(sAMAccountName=%s)"
 }
 
 // LintConfig tunes the structural health checks. All fields default to the
@@ -54,6 +70,11 @@ type WebauthConfig struct {
 	SessionTTL       time.Duration `toml:"session_ttl"`        // default 24h
 	LoginWindow      time.Duration `toml:"login_window"`       // default 15m
 	LoginMaxFailures int           `toml:"login_max_failures"` // default 5
+	// TOTPMode is the global two-factor policy: "off" (default; no TOTP, the
+	// login field is hidden), "optional" (users may enrol; enforced for those
+	// who have a secret), or "required" (every non-exempt user must enrol).
+	// Per-user overrides live on the webauth account (TOTPPolicy).
+	TOTPMode string `toml:"totp_mode"`
 }
 
 // VaultConfig tunes the vault read cache.
@@ -97,28 +118,28 @@ func ValidHexColor(s string) bool {
 // instead of removing them from disk. RetentionDays prunes entries older
 // than the cutoff at server startup. Zero retention disables auto-pruning.
 type TrashConfig struct {
-	Enabled       bool          `toml:"enabled"`
-	Retention     time.Duration `toml:"retention"`
+	Enabled   bool          `toml:"enabled"`
+	Retention time.Duration `toml:"retention"`
 }
 
 // MCPConfig caps how aggressively an MCP client may mutate the vault.
 // Both fields are per-token. Zero values mean "use defaults".
 type MCPConfig struct {
-	WritePerMinute     int      `toml:"write_per_minute"`      // default 60
-	MaxNoteBytes       int64    `toml:"max_note_bytes"`        // default 1 MiB
-	AllowedUploadRoots []string `toml:"allowed_upload_roots"`  // fs roots for source_path uploads
+	WritePerMinute     int      `toml:"write_per_minute"`     // default 60
+	MaxNoteBytes       int64    `toml:"max_note_bytes"`       // default 1 MiB
+	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
 type GitConfig struct {
 	Enabled     bool          `toml:"enabled"`
-	Remote      string        `toml:"remote"`         // optional: only used to git init a fresh repo
-	Branch      string        `toml:"branch"`         // default "main"
-	AuthorName  string        `toml:"author_name"`    // default "Gosidian"
-	AuthorEmail string        `toml:"author_email"`   // default "gosidian@localhost"
+	Remote      string        `toml:"remote"`          // optional: only used to git init a fresh repo
+	Branch      string        `toml:"branch"`          // default "main"
+	AuthorName  string        `toml:"author_name"`     // default "Gosidian"
+	AuthorEmail string        `toml:"author_email"`    // default "gosidian@localhost"
 	Debounce    time.Duration `toml:"commit_debounce"` // default 30s
-	Push        bool          `toml:"push"`           // default false: commit locally only unless enabled
-	TokenEnv    string        `toml:"token_env"`      // env var name for push credentials
+	Push        bool          `toml:"push"`            // default false: commit locally only unless enabled
+	TokenEnv    string        `toml:"token_env"`       // env var name for push credentials
 }
 
 // Load reads the config file from path. Missing files return defaults with no
@@ -269,6 +290,9 @@ func (c *Config) ApplyEnv() error {
 		}
 		c.Webauth.LoginMaxFailures = n
 	}
+	if v := os.Getenv("GOSIDIAN_TOTP_MODE"); v != "" {
+		c.Webauth.TOTPMode = v
+	}
 	if v := os.Getenv("GOSIDIAN_VAULT_CACHE_SIZE"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err != nil {
@@ -278,6 +302,30 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_ENABLED"); v != "" {
+		c.LDAP.Enabled = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_URL"); v != "" {
+		c.LDAP.URL = v
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_BIND_DN"); v != "" {
+		c.LDAP.BindDN = v
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_BIND_PASSWORD"); v != "" {
+		c.LDAP.BindPassword = v
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_USER_BASE_DN"); v != "" {
+		c.LDAP.UserBaseDN = v
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_USER_FILTER"); v != "" {
+		c.LDAP.UserFilter = v
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_START_TLS"); v != "" {
+		c.LDAP.StartTLS = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_LDAP_INSECURE_SKIP_VERIFY"); v != "" {
+		c.LDAP.SkipVerify = envBool(v)
 	}
 	return nil
 }
@@ -339,6 +387,9 @@ func (c *Config) applyDefaults() {
 	if c.Webauth.LoginMaxFailures == 0 {
 		c.Webauth.LoginMaxFailures = 5
 	}
+	if c.Webauth.TOTPMode != "optional" && c.Webauth.TOTPMode != "required" {
+		c.Webauth.TOTPMode = "off"
+	}
 	if c.Vault.CacheSize == 0 {
 		c.Vault.CacheSize = 128
 	}
@@ -347,5 +398,8 @@ func (c *Config) applyDefaults() {
 	}
 	if len(c.I18n.EnabledLangs) == 0 {
 		c.I18n.EnabledLangs = []string{"it", "en", "es", "fr", "de"}
+	}
+	if c.LDAP.UserFilter == "" {
+		c.LDAP.UserFilter = "(uid=%s)"
 	}
 }

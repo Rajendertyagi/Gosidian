@@ -1,6 +1,7 @@
 package webauth
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -80,6 +81,10 @@ func TestStore_SetupWithTOTP(t *testing.T) {
 	if !s.TOTPEnabled() {
 		t.Errorf("TOTP should be enabled")
 	}
+	// Under the policy model an enrolled secret is enforced once the global
+	// mode is optional/required ("off" keeps it dormant). Opt in so this test
+	// exercises enforcement.
+	s.SetTOTPMode(TOTPOptional)
 
 	// Extract secret from the store to generate a valid code.
 	s.mu.RLock()
@@ -98,6 +103,77 @@ func TestStore_SetupWithTOTP(t *testing.T) {
 	}
 	if _, err := s.Verify("admin", "longenoughpass", ""); err == nil {
 		t.Errorf("missing TOTP accepted")
+	}
+}
+
+func TestTOTPResolution(t *testing.T) {
+	enrolled := &User{TOTPSec: "SECRET"}
+	bare := &User{}
+	cases := []struct {
+		name   string
+		mode   string
+		u      *User
+		active bool
+	}{
+		{"off+enrolled dormant", TOTPOff, enrolled, false},
+		{"off+bare", TOTPOff, bare, false},
+		{"optional+enrolled", TOTPOptional, enrolled, true},
+		{"optional+bare", TOTPOptional, bare, false},
+		{"required+enrolled", TOTPRequired, enrolled, true},
+		{"required+bare (must enrol)", TOTPRequired, bare, true},
+		{"override enabled dormant under master-off", TOTPOff, &User{TOTPPolicy: TOTPEnabled}, false},
+		{"override disabled exempts", TOTPRequired, &User{TOTPPolicy: TOTPDisabled, TOTPSec: "X"}, false},
+	}
+	for _, c := range cases {
+		if got := totpActive(c.mode, c.u); got != c.active {
+			t.Errorf("%s: totpActive(%q)=%v want %v", c.name, c.mode, got, c.active)
+		}
+	}
+}
+
+type fakeLDAP struct{ ok map[string]string }
+
+func (f *fakeLDAP) Authenticate(username, password string) error {
+	if p, ok := f.ok[username]; ok && p == password {
+		return nil
+	}
+	return errors.New("ldap: invalid credentials")
+}
+
+func TestAuthenticate(t *testing.T) {
+	s := newStore(t)
+	if _, err := s.Setup("owner", "ownerpass1", false, "test"); err != nil {
+		t.Fatal(err)
+	}
+	ld := &fakeLDAP{ok: map[string]string{"alice": "ldappass"}}
+
+	// Unknown user + valid LDAP → auto-provisioned guest.
+	u, err := s.Authenticate("alice", "ldappass", "", ld)
+	if err != nil {
+		t.Fatalf("ldap login: %v", err)
+	}
+	if u.Role != RoleGuest || u.AuthSource != "ldap" {
+		t.Errorf("expected ldap guest, got role=%s src=%q", u.Role, u.AuthSource)
+	}
+	// Second login: existing ldap account, re-checked against LDAP.
+	if _, err := s.Authenticate("alice", "ldappass", "", ld); err != nil {
+		t.Errorf("second ldap login failed: %v", err)
+	}
+	// Wrong LDAP password → rejected.
+	if _, err := s.Authenticate("alice", "wrong", "", ld); err == nil {
+		t.Error("wrong ldap password accepted")
+	}
+	// Local owner shadows LDAP and authenticates locally.
+	if _, err := s.Authenticate("owner", "ownerpass1", "", ld); err != nil {
+		t.Errorf("local owner login failed: %v", err)
+	}
+	// A wrong local password is NOT retried against LDAP.
+	if _, err := s.Authenticate("owner", "nope", "", ld); err == nil {
+		t.Error("wrong local password accepted")
+	}
+	// Unknown user with LDAP disabled → rejected.
+	if _, err := s.Authenticate("ghost", "x", "", nil); err == nil {
+		t.Error("unknown user accepted with nil ldap")
 	}
 }
 

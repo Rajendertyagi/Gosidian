@@ -75,7 +75,11 @@ is a cache — drop it and it rebuilds.
 - MCP server over HTTP + SSE with 44 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
   restriction; cascade-revoke on user disable
-- Multi-user web login (owner + members, invite-only, 24h invite TTL)
+- Multi-user web login with **role-based access** (owner / member /
+  guest), per-project public/private visibility, and invite-only signup
+  (24h TTL)
+- Optional **TOTP two-factor** (global mode + per-user override) and
+  **LDAP / Active Directory** login with guest auto-provisioning
 - Optional git sync (debounced commits, push with token auth)
 - SQLite FTS5 full-text search + ETag optimistic locking
 - Internationalization (IT + EN complete; ES / FR / DE scaffolding)
@@ -90,7 +94,7 @@ is a cache — drop it and it rebuilds.
 |---|---|
 | **Install + configure** | [Getting started](docs/getting-started.md), [Configuration](docs/configuration.md), [Deployment](docs/deployment.md) |
 | **MCP integration** | [Overview](docs/mcp/overview.md), [Tool catalogue](docs/mcp/tools.md), [Authentication](docs/mcp/authentication.md), [Client setup](docs/mcp/client-setup.md), [Agent patterns](docs/mcp/patterns.md) |
-| **Web UI** | [Overview](docs/web-ui/overview.md), [Editor](docs/web-ui/editor.md), [Settings](docs/web-ui/settings.md) |
+| **Web UI** | [Overview](docs/web-ui/overview.md), [Editor](docs/web-ui/editor.md), [Authentication & roles](docs/web-ui/authentication.md), [Settings](docs/web-ui/settings.md) |
 | **Vault** | [Format](docs/vault/format.md), [Conventions](docs/vault/conventions.md), [Multi-project](docs/vault/multi-project.md), [Obsidian compatibility](docs/vault/obsidian-compat.md) |
 | **Internals** | [Architecture](docs/architecture.md), [Development](docs/development.md) |
 | **Common questions** | [FAQ](docs/faq.md) |

@@ -24,6 +24,10 @@ type commitView struct {
 // gitsync subsystem to be wired AND enabled in cfg; otherwise 503.
 // `limit` query param caps results (default 50, max 500).
 func (r *Router) readHistory(w http.ResponseWriter, req *http.Request, notePath string) {
+	if !r.canSee(principalFromContext(req), notePath) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
+		return
+	}
 	if r.deps.GitSync == nil {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "git sync not wired")
 		return

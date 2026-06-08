@@ -27,6 +27,7 @@ export interface Settings {
   trash: TrashSettings
   i18n: I18nSettings
   mcp: MCPSettings
+  totp_mode: string // off | optional | required (global two-factor policy)
 }
 
 export interface UpdateSettings {
@@ -52,6 +53,7 @@ export interface UpdateSettings {
     write_per_minute: number
     max_note_bytes: number
   }>
+  totp_mode?: string
 }
 
 export async function getSettings(): Promise<Settings> {

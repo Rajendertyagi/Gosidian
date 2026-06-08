@@ -3,9 +3,25 @@ import { onMounted, reactive, ref } from 'vue'
 import { getSettings, updateSettings, type Settings } from '@/api/settings'
 import { useAuthStore } from '@/stores/auth'
 import { useUIStore, type LocaleCode, type ThemePreset } from '@/stores/ui'
+import TotpEnroll from '@/components/domain/TotpEnroll.vue'
+import { disenrollTOTP } from '@/api/totp'
 
 const auth = useAuthStore()
 const ui = useUIStore()
+
+const totpError = ref<string | null>(null)
+function onTotpEnrolled() {
+  auth.setEnrolled(true)
+}
+async function disableTotp() {
+  totpError.value = null
+  try {
+    await disenrollTOTP()
+    auth.setEnrolled(false)
+  } catch (e) {
+    totpError.value = e instanceof Error ? e.message : 'Failed to disable two-factor'
+  }
+}
 
 interface PresetOption { value: ThemePreset; label: string; tone: 'dark' | 'light' }
 const presetOptions: PresetOption[] = [
@@ -35,10 +51,12 @@ const draft = reactive<{
   }
   trash: { enabled: boolean; retention_ms: number }
   i18n: { default_lang: string; enabled_langs: string }
+  totp_mode: string
 }>({
   git: { enabled: false, remote: '', branch: '', debounce_ms: 30000, push: false, token_env: '' },
   trash: { enabled: false, retention_ms: 0 },
   i18n: { default_lang: 'en', enabled_langs: 'it,en' },
+  totp_mode: 'off',
 })
 const loading = ref(false)
 const saving = ref(false)
@@ -60,6 +78,7 @@ function hydrate(s: Settings) {
     default_lang: s.i18n.default_lang,
     enabled_langs: (s.i18n.enabled_langs ?? []).join(','),
   }
+  draft.totp_mode = s.totp_mode ?? 'off'
 }
 
 async function load() {
@@ -89,6 +108,7 @@ async function save() {
           .map((s) => s.trim())
           .filter(Boolean),
       },
+      totp_mode: draft.totp_mode,
     })
     hydrate(result)
     message.value = 'Saved.'
@@ -111,6 +131,34 @@ onMounted(load)
     >
       Read-only — only owners can change server settings.
     </p>
+
+    <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
+      <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Two-factor (TOTP)</legend>
+      <label v-if="auth.isOwner" class="block text-sm">
+        <span class="text-text-muted">Global policy</span>
+        <select
+          v-model="draft.totp_mode"
+          class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+          @change="save"
+        >
+          <option value="off">Off — two-factor disabled</option>
+          <option value="optional">Optional — users may enable it</option>
+          <option value="required">Required — all users must enable it</option>
+        </select>
+        <span class="text-xs text-text-muted">Per-user overrides are set in Admin → Users.</span>
+      </label>
+      <hr v-if="auth.isOwner" class="border-border" />
+      <template v-if="auth.user?.totp_enrolled">
+        <p class="text-sm text-success">Two-factor authentication is enabled for your account.</p>
+        <button
+          type="button"
+          class="rounded border border-border px-3 py-2 text-sm hover:bg-surface-hover"
+          @click="disableTotp"
+        >Disable two-factor</button>
+        <p v-if="totpError" class="text-sm text-danger">{{ totpError }}</p>
+      </template>
+      <TotpEnroll v-else @done="onTotpEnrolled" />
+    </fieldset>
 
     <fieldset class="rounded border border-border bg-surface p-4 space-y-3 mb-6">
       <legend class="px-2 text-sm uppercase tracking-wide text-text-muted">Appearance</legend>

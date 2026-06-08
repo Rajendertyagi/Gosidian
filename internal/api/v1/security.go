@@ -44,9 +44,9 @@ var CSPHeader = strings.Join([]string{
 // X-Frame-Options is duplicated by CSP frame-ancestors 'none' but
 // older browsers (pre-Chrome 76, IE) read only XFO; cheap insurance.
 var SecurityHeaders = map[string]string{
-	"X-Content-Type-Options": "nosniff",
-	"X-Frame-Options":        "DENY",
-	"Referrer-Policy":        "strict-origin-when-cross-origin",
+	"X-Content-Type-Options":            "nosniff",
+	"X-Frame-Options":                   "DENY",
+	"Referrer-Policy":                   "strict-origin-when-cross-origin",
 	"X-Permitted-Cross-Domain-Policies": "none",
 }
 

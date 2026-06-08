@@ -80,6 +80,7 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 func (r *Router) registerPublic() {
 	r.mux.HandleFunc("/api/v1/health", r.handleHealth)
 	r.mux.HandleFunc("/api/v1/version", r.handleVersion)
+	r.mux.HandleFunc("/api/v1/auth-config", r.handleAuthConfig)
 	r.mux.HandleFunc("/api/v1/i18n", r.handleI18nCatalog)
 	r.mux.HandleFunc("/api/v1/login", r.handleLogin)
 	r.mux.HandleFunc("/api/v1/signup", r.handleSignup)
@@ -103,6 +104,10 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/me", authed(r.handleMe))
 	r.mux.Handle("/api/v1/refresh", authed(r.handleRefresh))
 	r.mux.Handle("/api/v1/logout", authed(r.handleLogout))
+
+	r.mux.Handle("/api/v1/totp", authed(r.handleTOTPDisenroll))
+	r.mux.Handle("/api/v1/totp/enroll", authed(r.handleTOTPEnroll))
+	r.mux.Handle("/api/v1/totp/confirm", authed(r.handleTOTPConfirm))
 
 	r.mux.Handle("/api/v1/notes", authed(r.handleNotes))
 	r.mux.Handle("/api/v1/notes/", authed(r.handleNoteByPath))
@@ -152,8 +157,8 @@ func notImplemented(w http.ResponseWriter, _ *http.Request) {
 // confirms the v1 mux is wired and reachable.
 func (r *Router) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	WriteJSON(w, http.StatusOK, map[string]any{
-		"api":     "v1",
-		"status":  "ok",
+		"api":      "v1",
+		"status":   "ok",
 		"sse_subs": r.deps.Events.SubCount(),
 	})
 }

@@ -14,14 +14,14 @@ import (
 // `mcpTokenCreatedResponse` so the SPA explicitly handles the
 // "show once, never again" affordance for the freshly minted secret.
 type mcpTokenView struct {
-	ID          string `json:"id"`
-	Name        string `json:"name"`
-	Project     string `json:"project,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Project     string   `json:"project,omitempty"`
 	Scopes      []string `json:"scopes"`
-	OwnerUserID string `json:"owner_user_id,omitempty"`
-	CreatedAt   string `json:"created_at"`
-	ExpiresAt   string `json:"expires_at,omitempty"`
-	Expired     bool   `json:"expired,omitempty"`
+	OwnerUserID string   `json:"owner_user_id,omitempty"`
+	CreatedAt   string   `json:"created_at"`
+	ExpiresAt   string   `json:"expires_at,omitempty"`
+	Expired     bool     `json:"expired,omitempty"`
 }
 
 type mcpTokenCreatedResponse struct {
@@ -31,10 +31,10 @@ type mcpTokenCreatedResponse struct {
 }
 
 type createMCPTokenRequest struct {
-	Name      string   `json:"name"`
-	Project   string   `json:"project,omitempty"`
-	Scopes    []string `json:"scopes"`
-	TTLMS     int64    `json:"ttl_ms,omitempty"`
+	Name    string   `json:"name"`
+	Project string   `json:"project,omitempty"`
+	Scopes  []string `json:"scopes"`
+	TTLMS   int64    `json:"ttl_ms,omitempty"`
 }
 
 func (r *Router) handleAdminTokens(w http.ResponseWriter, req *http.Request) {

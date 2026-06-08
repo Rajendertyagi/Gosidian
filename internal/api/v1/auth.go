@@ -22,6 +22,10 @@ type loginResponse struct {
 	ExpiresAt  string   `json:"expires_at"`
 	HardExpiry string   `json:"hard_expiry"`
 	User       userView `json:"user"`
+	// TOTPEnrollmentRequired is true when the user's effective policy mandates
+	// TOTP but no secret is enrolled yet — the SPA forces the enrolment
+	// interstitial before granting access.
+	TOTPEnrollmentRequired bool `json:"totp_enrollment_required,omitempty"`
 }
 
 type refreshResponse struct {
@@ -34,9 +38,10 @@ type refreshResponse struct {
 // It deliberately omits Hash, TOTPSec, CreatedAt, DisabledAt — none
 // belong on the client.
 type userView struct {
-	ID       string `json:"id"`
-	Username string `json:"username"`
-	Role     string `json:"role"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Role         string `json:"role"`
+	TOTPEnrolled bool   `json:"totp_enrolled"`
 }
 
 // handleLogin implements POST /api/v1/login. Body is JSON; on success
@@ -76,7 +81,7 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	user, verr := r.deps.Auth.WebAuth.Verify(body.Username, body.Password, body.TOTP)
+	user, verr := r.deps.Auth.WebAuth.Authenticate(body.Username, body.Password, body.TOTP, r.deps.Auth.LDAP)
 	if verr != nil {
 		if r.loginLimiter != nil {
 			r.loginLimiter.registerFail(ip)
@@ -123,10 +128,12 @@ func (r *Router) handleLogin(w http.ResponseWriter, req *http.Request) {
 		ExpiresAt:  tok.ExpiresAt.UTC().Format(rfc3339Z),
 		HardExpiry: tok.HardExpiry.UTC().Format(rfc3339Z),
 		User: userView{
-			ID:       user.ID,
-			Username: user.Username,
-			Role:     string(user.Role),
+			ID:           user.ID,
+			Username:     user.Username,
+			Role:         string(user.Role),
+			TOTPEnrolled: user.TOTPSec != "",
 		},
+		TOTPEnrollmentRequired: r.deps.Auth.WebAuth.TOTPEnrollmentRequired(user),
 	})
 }
 
@@ -166,10 +173,15 @@ func (r *Router) handleMe(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
 		return
 	}
+	enrolled := false
+	if full, ok := r.deps.Auth.WebAuth.UserByID(u.ID); ok {
+		enrolled = full.TOTPSec != ""
+	}
 	WriteJSON(w, http.StatusOK, userView{
-		ID:       u.ID,
-		Username: u.Username,
-		Role:     string(u.Role),
+		ID:           u.ID,
+		Username:     u.Username,
+		Role:         string(u.Role),
+		TOTPEnrolled: enrolled,
 	})
 }
 

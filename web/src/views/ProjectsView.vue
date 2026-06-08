@@ -8,12 +8,14 @@ import {
   type Project,
 } from '@/api/projects'
 import { useTreeStore } from '@/stores/tree'
+import { useAuthStore } from '@/stores/auth'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
 const newName = ref('')
 const treeStore = useTreeStore()
+const auth = useAuthStore()
 
 async function load() {
   loading.value = true
@@ -49,6 +51,11 @@ async function toggleSkip(p: Project) {
   await load()
 }
 
+async function togglePublic(p: Project) {
+  await updateProject(p.name, { public: !p.public })
+  await load()
+}
+
 async function rename(p: Project) {
   const newSlug = prompt(`Rename "${p.name}" to:`, p.name)
   if (!newSlug || newSlug === p.name) return
@@ -79,11 +86,13 @@ onMounted(load)
   <div class="p-8 max-w-3xl mx-auto">
     <h1 class="text-2xl font-semibold mb-1">Projects</h1>
     <p class="text-sm text-text-muted mb-6">
-      Top-level vault folders. Toggle <em>skip-git</em> to exclude from auto-commit, or
-      <em>hidden</em> to keep the project invisible to MCP agents.
+      Top-level vault folders. <em>private</em>/<em>public</em> controls guest visibility
+      (public = readable by guest-role users); <em>skip-git</em> excludes from auto-commit;
+      <em>hidden</em> keeps the project invisible to MCP agents.
     </p>
 
     <form
+      v-if="auth.canWrite"
       class="flex gap-2 mb-6"
       @submit.prevent="handleCreate"
     >
@@ -114,31 +123,45 @@ onMounted(load)
         >{{ p.name }}</RouterLink>
         <span class="text-xs text-text-muted">{{ p.note_count }} notes</span>
 
-        <button
-          type="button"
-          class="text-xs px-2 py-1 rounded"
-          :class="p.skip_git_sync ? 'bg-warning/20 text-warning' : 'border border-border'"
-          :title="p.skip_git_sync ? 'Click to re-enable git sync' : 'Click to skip from git sync'"
-          @click="toggleSkip(p)"
-        >skip-git</button>
-        <button
-          type="button"
-          class="text-xs px-2 py-1 rounded"
-          :class="p.hidden_from_mcp ? 'bg-warning/20 text-warning' : 'border border-border'"
-          :title="p.hidden_from_mcp ? 'Click to expose to MCP again' : 'Click to hide from MCP'"
-          @click="toggleHidden(p)"
-        >hidden</button>
+        <template v-if="auth.canWrite">
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="p.public ? 'bg-success/20 text-success' : 'border border-border'"
+            :title="p.public ? 'Public — visible to guest users. Click to make private.' : 'Private. Click to make public (readable by guests).'"
+            @click="togglePublic(p)"
+          >{{ p.public ? 'public' : 'private' }}</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="p.skip_git_sync ? 'bg-warning/20 text-warning' : 'border border-border'"
+            :title="p.skip_git_sync ? 'Click to re-enable git sync' : 'Click to skip from git sync'"
+            @click="toggleSkip(p)"
+          >skip-git</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="p.hidden_from_mcp ? 'bg-warning/20 text-warning' : 'border border-border'"
+            :title="p.hidden_from_mcp ? 'Click to expose to MCP again' : 'Click to hide from MCP'"
+            @click="toggleHidden(p)"
+          >hidden</button>
 
-        <button
-          type="button"
-          class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
-          @click="rename(p)"
-        >Rename</button>
-        <button
-          type="button"
-          class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
-          @click="destroy(p)"
-        >Delete</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded hover:bg-surface-hover"
+            @click="rename(p)"
+          >Rename</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+            @click="destroy(p)"
+          >Delete</button>
+        </template>
+        <span
+          v-else
+          class="text-xs px-2 py-0.5 rounded"
+          :class="p.public ? 'bg-success/20 text-success' : 'border border-border'"
+        >{{ p.public ? 'public' : 'private' }}</span>
       </li>
     </ul>
   </div>

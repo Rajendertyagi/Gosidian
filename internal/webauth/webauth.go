@@ -40,22 +40,65 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-// Role defines the two levels of privilege in v1.4. Owner is singular and
-// manages users + sees all tokens. Member can create notes + their own
-// tokens only.
+// Role defines the levels of privilege. Owner is singular and manages users +
+// sees all tokens. Member can create notes + their own tokens. Guest (v2.2) is
+// read-only and limited to projects flagged public.
 type Role string
 
 const (
 	RoleOwner  Role = "owner"
 	RoleMember Role = "member"
+	// RoleGuest is the restricted, read-only role (v2.2). Guests may only read
+	// notes in projects flagged public; they cannot write, manage anything, or
+	// mint MCP tokens. The first login of an LDAP user auto-provisions a guest.
+	RoleGuest Role = "guest"
+)
+
+// Valid reports whether r is a known role.
+func (r Role) Valid() bool {
+	switch r {
+	case RoleOwner, RoleMember, RoleGuest:
+		return true
+	}
+	return false
+}
+
+// CanAdmin reports whether the role may manage users, tokens, invites, audit,
+// and global settings. Owner only.
+func (r Role) CanAdmin() bool { return r == RoleOwner }
+
+// CanWrite reports whether the role may create/edit/delete notes and projects.
+// Owner and member; guests are read-only.
+func (r Role) CanWrite() bool { return r == RoleOwner || r == RoleMember }
+
+// IsGuest reports whether the role is the restricted guest role.
+func (r Role) IsGuest() bool { return r == RoleGuest }
+
+// TOTP global modes (set via Store.SetTOTPMode from config) and per-user
+// override values (User.TOTPPolicy). Effective enforcement is resolved by
+// totpActive: a per-user override wins over the global mode.
+const (
+	TOTPOff      = "off"
+	TOTPOptional = "optional"
+	TOTPRequired = "required"
+
+	TOTPInherit  = "" // follow the global mode
+	TOTPEnabled  = "enabled"
+	TOTPDisabled = "disabled"
 )
 
 // User is a single account in the accounts file.
 type User struct {
-	ID         string     `json:"id"`
-	Username   string     `json:"username"`
-	Hash       string     `json:"hash"`                 // bcrypt
-	TOTPSec    string     `json:"totp_secret,omitempty"`
+	ID       string `json:"id"`
+	Username string `json:"username"`
+	Hash     string `json:"hash"`                  // bcrypt
+	TOTPSec  string `json:"totp_secret,omitempty"` // base32; empty = not enrolled
+	// TOTPPolicy is the per-user two-factor override: "" (inherit the global
+	// mode), "enabled" (force TOTP on), or "disabled" (exempt this user).
+	TOTPPolicy string `json:"totp_policy,omitempty"`
+	// AuthSource is "" / "local" for password accounts, or "ldap" for accounts
+	// auto-provisioned on first LDAP login (no local password hash).
+	AuthSource string     `json:"auth_source,omitempty"`
 	Role       Role       `json:"role"`
 	CreatedAt  time.Time  `json:"created_at"`
 	DisabledAt *time.Time `json:"disabled_at,omitempty"`
@@ -66,8 +109,8 @@ func (u *User) Enabled() bool { return u != nil && u.DisabledAt == nil }
 
 // Invite is a single-use owner-minted registration ticket.
 type Invite struct {
-	Token      string     `json:"token"`       // plaintext; shown once, stored for lookup
-	CreatedBy  string     `json:"created_by"`  // user id
+	Token      string     `json:"token"`      // plaintext; shown once, stored for lookup
+	CreatedBy  string     `json:"created_by"` // user id
 	CreatedAt  time.Time  `json:"created_at"`
 	ExpiresAt  time.Time  `json:"expires_at"`
 	ConsumedBy string     `json:"consumed_by,omitempty"`
@@ -99,6 +142,7 @@ type Store struct {
 	file     AccountsFile
 	sessions map[string]session
 	mtime    time.Time // mtime observed at last (re)load; zero when file absent
+	totpMode string    // global TOTP policy: off|optional|required (set at startup)
 
 	// onUserDisabled, if set, is called after a user is disabled so callers
 	// can cascade side-effects (e.g. revoke MCP tokens owned by that user).
@@ -382,7 +426,7 @@ func (s *Store) Verify(username, password, totpCode string) (*User, error) {
 		if err := bcrypt.CompareHashAndPassword([]byte(u.Hash), []byte(password)); err != nil {
 			return nil, errors.New("invalid credentials")
 		}
-		if u.TOTPSec != "" {
+		if totpActive(s.totpMode, u) && u.TOTPSec != "" {
 			if !totp.Validate(totpCode, u.TOTPSec) {
 				return nil, errors.New("invalid TOTP code")
 			}
@@ -391,6 +435,125 @@ func (s *Store) Verify(username, password, totpCode string) (*User, error) {
 		return &cp, nil
 	}
 	return nil, errors.New("invalid credentials")
+}
+
+// LDAPAuthenticator verifies a username/password against an external directory.
+// internal/ldap implements it; a nil value passed to Authenticate means LDAP is
+// disabled.
+type LDAPAuthenticator interface {
+	Authenticate(username, password string) error
+}
+
+// UserByUsername returns a copy of the account with the given username.
+func (s *Store) UserByUsername(username string) (*User, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].Username == username {
+			u := s.file.Users[i]
+			return &u, true
+		}
+	}
+	return nil, false
+}
+
+// AddLDAPUser provisions a guest account for an LDAP-authenticated user, with no
+// local password. Fails if the username already exists.
+func (s *Store) AddLDAPUser(username string) (*User, error) {
+	if username == "" {
+		return nil, errors.New("username required")
+	}
+	now := time.Now().UTC()
+	u := User{
+		ID:         deriveUserID(username, now),
+		Username:   username,
+		Role:       RoleGuest,
+		AuthSource: "ldap",
+		CreatedAt:  now,
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, existing := range s.file.Users {
+		if existing.Username == username {
+			return nil, fmt.Errorf("username %q already exists", username)
+		}
+	}
+	s.file.Users = append(s.file.Users, u)
+	if err := s.saveLocked(); err != nil {
+		s.file.Users = s.file.Users[:len(s.file.Users)-1]
+		return nil, err
+	}
+	cp := u
+	return &cp, nil
+}
+
+// checkTOTP validates totpCode when the effective policy is active and a secret
+// is enrolled. Required-but-not-enrolled is reported separately via
+// TOTPEnrollmentRequired (the login handler forces enrolment), so it is not an
+// error here.
+func (s *Store) checkTOTP(u *User, totpCode string) error {
+	s.mu.RLock()
+	mode := s.totpMode
+	s.mu.RUnlock()
+	if totpActive(mode, u) && u.TOTPSec != "" {
+		if !totp.Validate(totpCode, u.TOTPSec) {
+			return errors.New("invalid TOTP code")
+		}
+	}
+	return nil
+}
+
+// Authenticate is the unified web-login entry point. A local username always
+// shadows LDAP (an existing local account is never checked against the
+// directory). ldap may be nil (LDAP disabled).
+//   - local account → bcrypt password + TOTP (delegates to Verify);
+//   - ldap account   → password verified against LDAP, TOTP from local record;
+//   - unknown + LDAP → LDAP bind, then auto-provision a guest account.
+func (s *Store) Authenticate(username, password, totpCode string, ldap LDAPAuthenticator) (*User, error) {
+	if username == "" || password == "" {
+		return nil, errors.New("missing credentials")
+	}
+	existing, found := s.UserByUsername(username)
+	switch {
+	case found && existing.AuthSource == "ldap":
+		if ldap == nil {
+			return nil, errors.New("invalid credentials")
+		}
+		if !existing.Enabled() {
+			return nil, errors.New("account disabled")
+		}
+		if err := ldap.Authenticate(username, password); err != nil {
+			return nil, errors.New("invalid credentials")
+		}
+		if err := s.checkTOTP(existing, totpCode); err != nil {
+			return nil, err
+		}
+		return existing, nil
+
+	case found:
+		return s.Verify(username, password, totpCode)
+
+	default:
+		if ldap == nil {
+			return nil, errors.New("invalid credentials")
+		}
+		if err := ldap.Authenticate(username, password); err != nil {
+			return nil, errors.New("invalid credentials")
+		}
+		u, err := s.AddLDAPUser(username)
+		if err != nil {
+			// Race: a concurrent login provisioned it. Re-fetch.
+			if e, ok := s.UserByUsername(username); ok {
+				u = e
+			} else {
+				return nil, err
+			}
+		}
+		if err := s.checkTOTP(u, totpCode); err != nil {
+			return nil, err
+		}
+		return u, nil
+	}
 }
 
 // CreateSession returns a fresh session cookie value for the given user,
@@ -494,7 +657,7 @@ func (s *Store) AddUser(username, password string, role Role) (*User, error) {
 	if len(password) < 8 {
 		return nil, errors.New("password must be at least 8 characters")
 	}
-	if role != RoleOwner && role != RoleMember {
+	if !role.Valid() {
 		return nil, fmt.Errorf("unknown role %q", role)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
@@ -563,6 +726,175 @@ func (s *Store) DisableUser(id string) error {
 		fn(id)
 	}
 	return nil
+}
+
+// SetRole changes a user's role between member and guest. The owner is a
+// singleton and immutable (its role cannot be changed, nor can the owner role
+// be assigned to another account here), so role must be member or guest and
+// the target must not be the owner. A no-op (role already equal) returns nil.
+func (s *Store) SetRole(id string, role Role) error {
+	if role != RoleMember && role != RoleGuest {
+		return fmt.Errorf("role must be member or guest, got %q", role)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].ID != id {
+			continue
+		}
+		if s.file.Users[i].Role == RoleOwner {
+			return errors.New("cannot change the owner's role")
+		}
+		if s.file.Users[i].Role == role {
+			return nil
+		}
+		s.file.Users[i].Role = role
+		return s.saveLocked()
+	}
+	return fmt.Errorf("user %q not found", id)
+}
+
+// totpActive reports whether TOTP is enforced for u under the global mode. A
+// per-user override wins: "enabled" forces it on, "disabled" exempts the user.
+// Otherwise it follows the global mode: off=never, optional=only when the user
+// has enrolled a secret, required=always.
+func totpActive(mode string, u *User) bool {
+	if mode != TOTPOptional && mode != TOTPRequired {
+		// off / unset is a master switch: overrides dormant, field hidden, no
+		// lockout. Per-user overrides only matter within an enabled global mode.
+		return false
+	}
+	switch u.TOTPPolicy {
+	case TOTPEnabled:
+		return true
+	case TOTPDisabled:
+		return false
+	}
+	return mode == TOTPRequired || u.TOTPSec != ""
+}
+
+// SetTOTPMode sets the global two-factor policy. Unknown values normalize to
+// "off". Wired by main from config at startup.
+func (s *Store) SetTOTPMode(mode string) {
+	switch mode {
+	case TOTPOptional, TOTPRequired:
+	default:
+		mode = TOTPOff
+	}
+	s.mu.Lock()
+	s.totpMode = mode
+	s.mu.Unlock()
+}
+
+// TOTPMode returns the global two-factor policy ("off"|"optional"|"required").
+func (s *Store) TOTPMode() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.totpMode == "" {
+		return TOTPOff
+	}
+	return s.totpMode
+}
+
+// TOTPEnrollmentRequired reports whether u must enrol a TOTP secret but has not
+// yet (effective policy active + no secret). The login handler surfaces this so
+// the SPA forces the enrolment interstitial before granting access.
+func (s *Store) TOTPEnrollmentRequired(u *User) bool {
+	if u == nil {
+		return false
+	}
+	s.mu.RLock()
+	mode := s.totpMode
+	s.mu.RUnlock()
+	return totpActive(mode, u) && u.TOTPSec == ""
+}
+
+// GenerateTOTPSecret produces a fresh secret + otpauth:// URI for username. The
+// secret is NOT persisted: the caller confirms a code against it
+// (ValidateTOTPCode) then activates it via SetTOTPSecret.
+func (s *Store) GenerateTOTPSecret(username, issuer string) (secret, uri string, err error) {
+	if issuer == "" {
+		issuer = "gosidian"
+	}
+	key, err := totp.Generate(totp.GenerateOpts{Issuer: issuer, AccountName: username})
+	if err != nil {
+		return "", "", err
+	}
+	return key.Secret(), key.URL(), nil
+}
+
+// ValidateTOTPCode reports whether code is valid for secret right now. Used by
+// the enrolment confirm step before the secret is persisted.
+func ValidateTOTPCode(secret, code string) bool {
+	return totp.Validate(code, secret)
+}
+
+// SetTOTPSecret activates (secret != "") or clears (secret == "") a user's TOTP
+// secret.
+func (s *Store) SetTOTPSecret(userID, secret string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].ID == userID {
+			s.file.Users[i].TOTPSec = secret
+			return s.saveLocked()
+		}
+	}
+	return fmt.Errorf("user %q not found", userID)
+}
+
+// SetTOTPPolicy sets a user's per-user TOTP override: "" (inherit), "enabled"
+// (force on), or "disabled" (exempt). Unknown values are rejected.
+func (s *Store) SetTOTPPolicy(userID, policy string) error {
+	switch policy {
+	case TOTPInherit, TOTPEnabled, TOTPDisabled:
+	default:
+		return fmt.Errorf("unknown totp policy %q", policy)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].ID == userID {
+			s.file.Users[i].TOTPPolicy = policy
+			return s.saveLocked()
+		}
+	}
+	return fmt.Errorf("user %q not found", userID)
+}
+
+// TOTPRequired reports whether u must keep a TOTP secret enrolled (cannot
+// disenrol): a per-user "enabled" override, or the global "required" mode under
+// inherit. Distinct from totpActive — required is independent of enrolment.
+func (s *Store) TOTPRequired(u *User) bool {
+	if u == nil {
+		return false
+	}
+	s.mu.RLock()
+	mode := s.totpMode
+	s.mu.RUnlock()
+	if mode != TOTPOptional && mode != TOTPRequired {
+		return false // master off: nothing is required
+	}
+	switch u.TOTPPolicy {
+	case TOTPEnabled:
+		return true
+	case TOTPDisabled:
+		return false
+	}
+	return mode == TOTPRequired
+}
+
+// AnyTOTPEnrolled reports whether any account has a TOTP secret. Used by main
+// to decide the backward-compat mode bump at startup.
+func (s *Store) AnyTOTPEnrolled() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range s.file.Users {
+		if s.file.Users[i].TOTPSec != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateInvite generates a single-use registration ticket owned by creator.

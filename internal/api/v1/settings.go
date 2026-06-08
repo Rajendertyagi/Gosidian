@@ -19,10 +19,11 @@ import (
 // translation layer here when fields diverge. Today the mapping is
 // 1:1 minus secrets.
 type settingsView struct {
-	Git   gitSettings   `json:"git"`
-	Trash trashSettings `json:"trash"`
-	I18n  i18nSettings  `json:"i18n"`
-	MCP   mcpSettings   `json:"mcp"`
+	Git      gitSettings   `json:"git"`
+	Trash    trashSettings `json:"trash"`
+	I18n     i18nSettings  `json:"i18n"`
+	MCP      mcpSettings   `json:"mcp"`
+	TOTPMode string        `json:"totp_mode"` // off | optional | required (global two-factor policy)
 }
 
 type gitSettings struct {
@@ -77,6 +78,7 @@ type updateSettingsRequest struct {
 		WritePerMinute *int   `json:"write_per_minute,omitempty"`
 		MaxNoteBytes   *int64 `json:"max_note_bytes,omitempty"`
 	} `json:"mcp,omitempty"`
+	TOTPMode *string `json:"totp_mode,omitempty"`
 }
 
 func (r *Router) handleSettings(w http.ResponseWriter, req *http.Request) {
@@ -93,7 +95,12 @@ func (r *Router) handleSettings(w http.ResponseWriter, req *http.Request) {
 // getSettings is readable by any authenticated user — the SPA needs
 // it to render the settings page even for member roles. Sensitive
 // fields are stripped above.
-func (r *Router) getSettings(w http.ResponseWriter, _ *http.Request) {
+func (r *Router) getSettings(w http.ResponseWriter, req *http.Request) {
+	if !principalFromContext(req).CanSeeAllProjects() {
+		// Settings are a member+ concern; guests have no settings surface.
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "insufficient role")
+		return
+	}
 	cfg, err := r.loadConfig()
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -140,6 +147,11 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "save: "+err.Error())
 		return
 	}
+	// Apply the TOTP mode to the live webauth store so it takes effect without
+	// a restart.
+	if r.deps.Auth != nil && r.deps.Auth.WebAuth != nil {
+		r.deps.Auth.WebAuth.SetTOTPMode(cfg.Webauth.TOTPMode)
+	}
 
 	if r.deps.Audit != nil {
 		_ = r.deps.Audit.Write(audit.Entry{
@@ -185,6 +197,7 @@ func toSettingsView(c *config.Config) settingsView {
 			WritePerMinute: c.MCP.WritePerMinute,
 			MaxNoteBytes:   c.MCP.MaxNoteBytes,
 		},
+		TOTPMode: c.Webauth.TOTPMode,
 	}
 }
 
@@ -265,6 +278,13 @@ func applySettingsPatch(cfg *config.Config, body *updateSettingsRequest) string 
 			}
 			cfg.MCP.MaxNoteBytes = *body.MCP.MaxNoteBytes
 		}
+	}
+	if body.TOTPMode != nil {
+		m := strings.TrimSpace(*body.TOTPMode)
+		if m != "off" && m != "optional" && m != "required" {
+			return "totp_mode must be off, optional, or required"
+		}
+		cfg.Webauth.TOTPMode = m
 	}
 	return ""
 }

@@ -1,0 +1,19 @@
+# Test users for the gosidian LDAP harness. Seeded with ldapadd (see seed.sh)
+# after the directory is up. Passwords are cleartext on purpose — throwaway dir.
+dn: ou=users,dc=example,dc=org
+objectClass: organizationalUnit
+ou: users
+
+dn: uid=alice,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: alice
+cn: Alice Example
+sn: Example
+userPassword: alicepass
+
+dn: uid=bob,ou=users,dc=example,dc=org
+objectClass: inetOrgPerson
+uid: bob
+cn: Bob Example
+sn: Example
+userPassword: bobpass

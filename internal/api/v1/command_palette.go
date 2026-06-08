@@ -42,10 +42,15 @@ func (r *Router) handleCommandPalette(w http.ResponseWriter, req *http.Request) 
 		return
 	}
 
+	princ := principalFromContext(req)
+
 	notes := []paletteNote{}
 	if rows, err := r.deps.Index.AllNotes(); err == nil {
 		notes = make([]paletteNote, 0, len(rows))
 		for _, n := range rows {
+			if !r.canSee(princ, n.Path) {
+				continue
+			}
 			title := n.Title
 			if title == "" {
 				b := path.Base(n.Path)
@@ -59,14 +64,17 @@ func (r *Router) handleCommandPalette(w http.ResponseWriter, req *http.Request) 
 	if r.deps.Vault != nil {
 		if ps, err := r.deps.Vault.Projects(); err == nil {
 			projects = make([]paletteProject, 0, len(ps))
-			for _, p := range ps {
-				projects = append(projects, paletteProject{Name: p.Name, NoteCount: p.NoteCount})
+			for _, prj := range ps {
+				if !princ.CanAccessProject(prj.Name, r.isPublic) {
+					continue
+				}
+				projects = append(projects, paletteProject{Name: prj.Name, NoteCount: prj.NoteCount})
 			}
 		}
 	}
 
 	tags := []paletteTag{}
-	if rows, err := r.deps.Index.Tags(); err == nil {
+	if rows, err := r.visibleTags(princ); err == nil {
 		tags = make([]paletteTag, 0, len(rows))
 		for _, t := range rows {
 			tags = append(tags, paletteTag{Tag: t.Tag, Count: t.Count})

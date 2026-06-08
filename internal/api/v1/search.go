@@ -43,11 +43,12 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 		limit = 20
 	}
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
+	p := principalFromContext(req)
 
-	// Fetch a few extra hits when filtering so the response still has
-	// up to `limit` entries after rejection.
+	// Fetch extra hits when filtering (project scope or guest visibility) so
+	// the response still has up to `limit` entries after rejection.
 	fetchLimit := limit
-	if project != "" {
+	if project != "" || !p.CanSeeAllProjects() {
 		fetchLimit = limit * 4
 		if fetchLimit > 800 {
 			fetchLimit = 800
@@ -62,6 +63,9 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	out := make([]searchHit, 0, len(hits))
 	for _, h := range hits {
 		if project != "" && !strings.HasPrefix(h.Path, project+"/") && h.Path != project {
+			continue
+		}
+		if !r.canSee(p, h.Path) {
 			continue
 		}
 		if len(out) >= limit {

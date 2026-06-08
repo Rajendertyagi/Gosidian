@@ -11,12 +11,13 @@
  */
 import { defineStore } from 'pinia'
 
-export type Role = 'owner' | 'member'
+export type Role = 'owner' | 'member' | 'guest'
 
 export interface User {
   id: string
   username: string
   role: Role
+  totp_enrolled?: boolean
 }
 
 interface AuthState {
@@ -24,6 +25,9 @@ interface AuthState {
   expiresAt: string
   hardExpiry: string
   user: User | null
+  /** Set when login reports the effective policy mandates TOTP but no secret
+   *  is enrolled yet — the AppShell forces the enrolment interstitial. */
+  enrollmentRequired: boolean
 }
 
 interface LoginResponse {
@@ -31,6 +35,7 @@ interface LoginResponse {
   expires_at: string
   hard_expiry: string
   user: User
+  totp_enrollment_required?: boolean
 }
 
 interface RefreshResponse {
@@ -64,11 +69,15 @@ export const useAuthStore = defineStore('auth', {
     expiresAt: '',
     hardExpiry: '',
     user: null,
+    enrollmentRequired: false,
   }),
 
   getters: {
     isAuthenticated: (s) => Boolean(s.token && s.user),
     isOwner: (s) => s.user?.role === 'owner',
+    isGuest: (s) => s.user?.role === 'guest',
+    /** owner or member — may create/edit/delete. Guests are read-only. */
+    canWrite: (s) => s.user?.role === 'owner' || s.user?.role === 'member',
     username: (s) => s.user?.username ?? '',
   },
 
@@ -81,6 +90,15 @@ export const useAuthStore = defineStore('auth', {
       this.expiresAt = data.expires_at
       this.hardExpiry = data.hard_expiry
       this.user = data.user
+      this.enrollmentRequired = Boolean(data.totp_enrollment_required)
+    },
+
+    clearEnrollment() {
+      this.enrollmentRequired = false
+    },
+
+    setEnrolled(v: boolean) {
+      if (this.user) this.user.totp_enrolled = v
     },
 
     async refresh() {
@@ -105,12 +123,13 @@ export const useAuthStore = defineStore('auth', {
       this.expiresAt = ''
       this.hardExpiry = ''
       this.user = null
+      this.enrollmentRequired = false
     },
   },
 
   persist: {
     key: 'gosidian.auth',
     storage: localStorage,
-    paths: ['token', 'expiresAt', 'hardExpiry', 'user'],
+    paths: ['token', 'expiresAt', 'hardExpiry', 'user', 'enrollmentRequired'],
   },
 })

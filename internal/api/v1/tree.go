@@ -31,11 +31,11 @@ type apiTreeNode struct {
 // subtree (still rooted on the project node so the SPA can render
 // breadcrumbs cleanly).
 //
-// Hidden projects (HiddenFromMCP=true) are NOT filtered — the SPA is
-// served only to authenticated owners/members who explicitly went
-// through the SPA login, so the visibility flag is an MCP concern,
-// not a browser one. The flag IS surfaced on the node so the SPA can
-// render an icon hint.
+// HiddenFromMCP is NOT filtered here — it's an MCP-listing concern,
+// orthogonal to web visibility; the flag is surfaced on the node so the
+// SPA can render an icon hint. Guest-role principals, however, see only
+// notes in projects flagged Public (authz.CanAccessProject) — that filter
+// is applied while collecting paths below.
 func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
@@ -55,9 +55,14 @@ func (r *Router) handleTree(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
+	p := principalFromContext(req)
 	paths := make([]string, 0, len(rows))
 	for _, n := range rows {
 		if project != "" && !strings.HasPrefix(n.Path, project+"/") && n.Path != project {
+			continue
+		}
+		// Per-role visibility: guests drop to public-only; owner/member keep all.
+		if !r.canSee(p, n.Path) {
 			continue
 		}
 		paths = append(paths, n.Path)

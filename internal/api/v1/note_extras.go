@@ -20,9 +20,14 @@ type backlinkView struct {
 // list returned (200 + items:[]) when the note exists but has no
 // inbound links — mirrors the HTMX partial which renders an empty
 // state in that case.
-func (r *Router) readBacklinks(w http.ResponseWriter, _ *http.Request, notePath string) {
+func (r *Router) readBacklinks(w http.ResponseWriter, req *http.Request, notePath string) {
 	if r.deps.Index == nil {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "index not configured")
+		return
+	}
+	p := principalFromContext(req)
+	if !r.canSee(p, notePath) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
 		return
 	}
 	// Reject if the note doesn't exist — backlinks for ghost paths
@@ -42,6 +47,9 @@ func (r *Router) readBacklinks(w http.ResponseWriter, _ *http.Request, notePath 
 	}
 	out := make([]backlinkView, 0, len(rows))
 	for _, b := range rows {
+		if !r.canSee(p, b.Path) {
+			continue // don't reveal inbound links from projects the guest can't see
+		}
 		out = append(out, backlinkView{Path: b.Path, Title: b.Title})
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
@@ -59,6 +67,10 @@ type excerptView struct {
 }
 
 func (r *Router) readExcerpt(w http.ResponseWriter, req *http.Request, notePath string) {
+	if !r.canSee(principalFromContext(req), notePath) {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
+		return
+	}
 	note, err := r.deps.Vault.Load(notePath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {

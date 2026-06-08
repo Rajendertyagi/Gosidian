@@ -43,28 +43,46 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 	// the existing index.RecentNotes (used elsewhere by the MCP recent
 	// tool) with empty project + zero `since` to mean "all notes,
 	// limit-many, mtime desc".
+	p := principalFromContext(req)
+	fetch := limit
+	if !p.CanSeeAllProjects() {
+		fetch = limit * 4 // overfetch; the visibility filter drops some
+	}
+
 	if q == "" {
-		rows, err := r.deps.Index.RecentNotes("", 0, limit)
+		rows, err := r.deps.Index.RecentNotes("", 0, fetch)
 		if err != nil {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		out := make([]noteTitleHit, 0, len(rows))
+		out := make([]noteTitleHit, 0, limit)
 		for _, n := range rows {
+			if !r.canSee(p, n.Path) {
+				continue
+			}
 			out = append(out, noteTitleHit{Title: n.Title, Path: n.Path})
+			if len(out) >= limit {
+				break
+			}
 		}
 		WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 		return
 	}
 
-	rows, err := r.deps.Index.Search(q, limit)
+	rows, err := r.deps.Index.Search(q, fetch)
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
-	out := make([]noteTitleHit, 0, len(rows))
+	out := make([]noteTitleHit, 0, limit)
 	for _, h := range rows {
+		if !r.canSee(p, h.Path) {
+			continue
+		}
 		out = append(out, noteTitleHit{Title: h.Title, Path: h.Path})
+		if len(out) >= limit {
+			break
+		}
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out})
 }

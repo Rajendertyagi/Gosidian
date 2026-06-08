@@ -3,6 +3,7 @@ package v1
 import (
 	"net/http"
 
+	"github.com/gosidian/gosidian/internal/authz"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -39,7 +40,7 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	html, err := r.deps.Renderer.Render([]byte(body.Markdown), r.wikilinkResolver())
+	html, err := r.deps.Renderer.Render([]byte(body.Markdown), r.wikilinkResolver(principalFromContext(req)))
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "render: "+err.Error())
 		return
@@ -51,7 +52,7 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 // to translate `[[Note Title]]` into a vault path. The resolver
 // returns "" for unknown targets so the renderer marks them as
 // dangling links — matching the existing HTML view convention.
-func (r *Router) wikilinkResolver() parser.Resolver {
+func (r *Router) wikilinkResolver(p authz.Principal) parser.Resolver {
 	return parser.ResolverFunc(func(target string) string {
 		if r.deps.Index == nil {
 			return ""
@@ -59,15 +60,17 @@ func (r *Router) wikilinkResolver() parser.Resolver {
 		// Try by exact path first (allows wikilinks like [[folder/Note]]).
 		if rows, err := r.deps.Index.NotesByPrefix(target); err == nil {
 			for _, n := range rows {
-				if n.Path == target || n.Path == target+".md" || n.Title == target {
+				if (n.Path == target || n.Path == target+".md" || n.Title == target) && r.canSee(p, n.Path) {
 					return n.Path
 				}
 			}
 		}
-		// Fall back to a title scan via search — bounded result set.
+		// Fall back to a title scan via search — bounded result set. Resolve
+		// only to notes the principal may see, so a guest's preview of a
+		// public note renders private targets as dangling, not as live links.
 		if rows, err := r.deps.Index.Search(target, 5); err == nil {
 			for _, h := range rows {
-				if h.Title == target {
+				if h.Title == target && r.canSee(p, h.Path) {
 					return h.Path
 				}
 			}

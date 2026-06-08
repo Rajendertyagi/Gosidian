@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { getAuthConfig } from '@/api/totp'
 
 const router = useRouter()
 const route = useRoute()
@@ -10,8 +11,20 @@ const auth = useAuthStore()
 const username = ref('')
 const password = ref('')
 const totp = ref('')
+const showTotp = ref(false)
+const ldapEnabled = ref(false)
 const error = ref<string | null>(null)
 const submitting = ref(false)
+
+onMounted(async () => {
+  try {
+    const cfg = await getAuthConfig()
+    showTotp.value = cfg.totp
+    ldapEnabled.value = cfg.ldap
+  } catch {
+    showTotp.value = false
+  }
+})
 
 const nextTarget = computed(() => {
   const raw = route.query.next
@@ -40,6 +53,9 @@ async function handleSubmit() {
       <div class="mb-6 text-center">
         <h1 class="text-2xl font-semibold">gosidian</h1>
         <p class="text-sm text-text-muted">Sign in to continue</p>
+        <p v-if="ldapEnabled" class="mt-1 text-xs text-text-muted">
+          Directory (LDAP) accounts: use your directory username and password.
+        </p>
       </div>
 
       <form
@@ -69,8 +85,8 @@ async function handleSubmit() {
           />
         </label>
 
-        <label class="block text-sm">
-          <span class="text-text-muted">TOTP <span class="opacity-60">(optional)</span></span>
+        <label v-if="showTotp" class="block text-sm">
+          <span class="text-text-muted">TOTP <span class="opacity-60">(if enabled for your account)</span></span>
           <input
             v-model.trim="totp"
             type="text"

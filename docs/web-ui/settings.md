@@ -68,3 +68,12 @@ Push failures surface in `/healthz` (`git_sync.healthy=false` with
 
 Git sync changes apply on the **next server restart**, not
 immediately — a boot-time invariant.
+
+## Two-factor (TOTP)
+
+The **Two-factor** panel lets any user enroll a TOTP authenticator
+(scan the QR code, then confirm a code to activate). Owners additionally
+get a **global TOTP mode** (`off` / `optional` / `required`) here, while
+per-user overrides live in **Admin → Users**. Full policy semantics —
+including how `off` acts as a lockout-proof master switch — are in
+[Authentication & roles](authentication.md#two-factor-authentication-totp).

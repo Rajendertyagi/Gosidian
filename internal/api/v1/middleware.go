@@ -53,7 +53,8 @@ func TokenFromContext(ctx context.Context) string {
 type AuthDeps struct {
 	WebAuth   *webauth.Store
 	SpaAuth   *auth.SpaTokenStore
-	MCPTokens *auth.Store // long-lived MCP credentials, surfaced via /admin/tokens
+	MCPTokens *auth.Store               // long-lived MCP credentials, surfaced via /admin/tokens
+	LDAP      webauth.LDAPAuthenticator // optional; nil = LDAP disabled
 	Logger    *slog.Logger
 }
 

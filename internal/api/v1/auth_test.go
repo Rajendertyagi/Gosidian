@@ -22,14 +22,14 @@ import (
 // webauth + spa-token store. The vault and audit log point at temp
 // dirs so tests can run in parallel without colliding.
 type authFixture struct {
-	t           *testing.T
-	router      *Router
-	webauth     *webauth.Store
-	spaTokens   *auth.SpaTokenStore
-	auditLog    *audit.Log
-	username    string
-	password    string
-	owner       *webauth.User
+	t         *testing.T
+	router    *Router
+	webauth   *webauth.Store
+	spaTokens *auth.SpaTokenStore
+	auditLog  *audit.Log
+	username  string
+	password  string
+	owner     *webauth.User
 }
 
 func newAuthFixture(t *testing.T) *authFixture {
@@ -75,14 +75,14 @@ func newAuthFixture(t *testing.T) *authFixture {
 	})
 
 	return &authFixture{
-		t:           t,
-		router:      router,
-		webauth:     wa,
-		spaTokens:   spa,
-		auditLog:    al,
-		username:    username,
-		password:    password,
-		owner:       owner,
+		t:         t,
+		router:    router,
+		webauth:   wa,
+		spaTokens: spa,
+		auditLog:  al,
+		username:  username,
+		password:  password,
+		owner:     owner,
 	}
 }
 

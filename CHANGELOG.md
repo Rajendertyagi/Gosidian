@@ -4,6 +4,61 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.2.0] — 2026-06-08 — "auth & roles"
+
+MINOR release. Adds role-based access control, two-factor (TOTP), and
+LDAP / Active Directory login on top of the existing multi-user web
+login. Fully backward compatible: TOTP defaults to `off` and LDAP to
+disabled, so existing single-owner / member setups are unaffected and
+need no migration.
+
+### Added
+
+- **Role-based access control.** Three roles — **owner**, **member**,
+  **guest** — enforced by a centralized, fail-closed authorization layer
+  (`internal/authz`). A read the role may not perform returns **404**
+  (the resource's existence is hidden); a forbidden write returns
+  **403**. An unrecognized role degrades to public-read only.
+- **Public / private projects.** Each project carries a `public` flag
+  (default **private**). Public projects are readable by guests; private
+  ones are visible only to owners and members. Guests are filtered
+  consistently across the sidebar, search, tags, note titles, and the
+  graph.
+- **TOTP two-factor authentication.** A global mode — `off` /
+  `optional` / `required` — plus a per-user override (inherit / enabled
+  / disabled). Self-service enrolment with confirm-before-activate;
+  `off` is a lockout-proof master switch. Configurable via
+  `webauth.totp_mode` / `GOSIDIAN_TOTP_MODE`.
+- **LDAP / Active Directory login.** Search-then-bind against an
+  external directory; the first successful login auto-provisions a local
+  **guest** account (no password stored). A local username always
+  shadows LDAP. LDAPS and StartTLS are supported, with a configurable
+  user filter (OpenLDAP `(uid=%s)`, Active Directory
+  `(sAMAccountName=%s)`). New `[ldap]` config block and `GOSIDIAN_LDAP_*`
+  environment variables.
+- **Docs**: a new [Authentication & roles](docs/web-ui/authentication.md)
+  page, plus a disposable LDAP test harness under `deploy/ldap-test/`.
+
+### Changed
+
+- **Graph view** now honours per-role visibility and opens on the most
+  recently edited project the user can see, instead of rendering the
+  entire vault at once.
+- **`modernc.org/sqlite`** 1.51.0 → 1.52.0.
+
+### Security
+
+- Guests can never hold MCP tokens — token creation is owner/member-only
+  and demoting a user to guest cascade-revokes their tokens — so the
+  read-only boundary holds across both the web UI and MCP, with no
+  MCP-layer changes required.
+
+### Notes
+
+- LDAP is validated end-to-end against OpenLDAP over plain LDAP, LDAPS,
+  and StartTLS. The Active Directory path is configuration-only on the
+  same code; validate it against your domain controller.
+
 ## [2.1.2] — 2026-06-08 — "security bundle"
 
 PATCH bundle. Closes six open Dependabot PRs (#23–#28) and resolves

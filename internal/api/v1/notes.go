@@ -162,6 +162,18 @@ func (r *Router) listNotes(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	// Per-role visibility: drop notes the principal can't see (guests →
+	// public-only) before paginating, so total/offset reflect the visible set.
+	if p := principalFromContext(req); !p.CanSeeAllProjects() {
+		visible := rows[:0]
+		for _, n := range rows {
+			if r.canSee(p, n.Path) {
+				visible = append(visible, n)
+			}
+		}
+		rows = visible
+	}
+
 	// Manual pagination — the index helpers don't yet expose
 	// limit/offset natively. Cheap given list endpoints are <100ms
 	// even with full vault scan.
@@ -195,6 +207,9 @@ func (r *Router) createNote(w http.ResponseWriter, req *http.Request) {
 	user := UserFromContext(req.Context())
 	if user == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if denyGuestWrite(w, user) {
 		return
 	}
 	var body createNoteRequest
@@ -239,6 +254,12 @@ func (r *Router) createNote(w http.ResponseWriter, req *http.Request) {
 // readNote handles GET /notes/{path...}. The ETag header carries the
 // version stamp clients pass back as If-Match on PUT.
 func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) {
+	if !r.canSee(principalFromContext(req), rel) {
+		// 404 (not 403) so we don't leak the existence of projects/notes a
+		// guest isn't allowed to see.
+		WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")
+		return
+	}
 	note, err := r.deps.Vault.Load(rel)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -266,6 +287,9 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	user := UserFromContext(req.Context())
 	if user == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if denyGuestWrite(w, user) {
 		return
 	}
 	existing, err := r.deps.Vault.Load(rel)
@@ -317,6 +341,9 @@ func (r *Router) deleteNote(w http.ResponseWriter, req *http.Request, rel string
 	user := UserFromContext(req.Context())
 	if user == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if denyGuestWrite(w, user) {
 		return
 	}
 	if _, err := r.deps.Vault.Load(rel); err != nil {

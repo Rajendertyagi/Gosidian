@@ -39,6 +39,9 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 		return
 	}
+	if denyGuestWrite(w, UserFromContext(req.Context())) {
+		return
+	}
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
 	data, header, errCode, errMsg := r.readAttachUpload(req)
 	if errCode != 0 {
@@ -69,6 +72,9 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 	if req.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+		return
+	}
+	if denyGuestWrite(w, UserFromContext(req.Context())) {
 		return
 	}
 	project := strings.TrimSpace(req.URL.Query().Get("project"))

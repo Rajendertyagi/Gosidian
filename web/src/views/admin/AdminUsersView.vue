@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { listUsers, disableUser, type AdminUser } from '@/api/admin'
+import { listUsers, disableUser, updateUserRole, updateUserTOTPPolicy, type AdminUser } from '@/api/admin'
 
 const users = ref<AdminUser[]>([])
 const loading = ref(false)
@@ -28,6 +28,25 @@ async function disable(u: AdminUser) {
   }
 }
 
+async function changeRole(u: AdminUser, role: string) {
+  if ((role !== 'member' && role !== 'guest') || role === u.role) return
+  try {
+    await updateUserRole(u.id, role)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Role change failed'
+  }
+}
+
+async function changeTotpPolicy(u: AdminUser, policy: string) {
+  try {
+    await updateUserTOTPPolicy(u.id, policy)
+    await load()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'TOTP policy change failed'
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -40,6 +59,7 @@ onMounted(load)
       <tr>
         <th class="text-left py-2 px-3">Username</th>
         <th class="text-left py-2 px-3">Role</th>
+        <th class="text-left py-2 px-3">TOTP</th>
         <th class="text-left py-2 px-3">Created</th>
         <th class="text-left py-2 px-3">Status</th>
         <th class="text-right py-2 px-3">Actions</th>
@@ -54,9 +74,35 @@ onMounted(load)
         <td class="py-2 px-3 font-medium">{{ u.username }}</td>
         <td class="py-2 px-3">
           <span
+            v-if="u.role === 'owner' || u.disabled_at"
             class="text-xs px-2 py-0.5 rounded"
             :class="u.role === 'owner' ? 'bg-accent/20 text-accent' : 'border border-border'"
           >{{ u.role }}</span>
+          <select
+            v-else
+            class="text-xs rounded bg-bg-elevated border border-border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
+            :value="u.role"
+            @change="changeRole(u, ($event.target as HTMLSelectElement).value)"
+          >
+            <option value="member">member</option>
+            <option value="guest">guest</option>
+          </select>
+        </td>
+        <td class="py-2 px-3">
+          <div class="flex items-center gap-2">
+            <select
+              v-if="u.role !== 'owner' && !u.disabled_at"
+              class="text-xs rounded bg-bg-elevated border border-border px-2 py-1 focus:outline-none focus:ring-1 focus:ring-accent"
+              :value="u.totp_policy || ''"
+              @change="changeTotpPolicy(u, ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="">inherit</option>
+              <option value="enabled">required</option>
+              <option value="disabled">exempt</option>
+            </select>
+            <span v-else class="text-xs text-text-muted">{{ u.totp_policy || 'inherit' }}</span>
+            <span v-if="u.totp_enrolled" class="text-xs text-success" title="TOTP enrolled">●</span>
+          </div>
         </td>
         <td class="py-2 px-3 font-mono text-xs">{{ u.created_at }}</td>
         <td class="py-2 px-3">

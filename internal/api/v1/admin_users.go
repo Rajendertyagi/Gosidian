@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/webauth"
 )
 
 // inviteDefaultTTL mirrors the value the v1.x HTML handler used so
@@ -16,11 +17,28 @@ import (
 const inviteDefaultTTL = 24 * time.Hour
 
 type adminUserView struct {
-	ID         string `json:"id"`
-	Username   string `json:"username"`
-	Role       string `json:"role"`
-	CreatedAt  string `json:"created_at"`
-	DisabledAt string `json:"disabled_at,omitempty"`
+	ID           string `json:"id"`
+	Username     string `json:"username"`
+	Role         string `json:"role"`
+	TOTPPolicy   string `json:"totp_policy,omitempty"` // "" inherit | enabled | disabled
+	TOTPEnrolled bool   `json:"totp_enrolled"`
+	CreatedAt    string `json:"created_at"`
+	DisabledAt   string `json:"disabled_at,omitempty"`
+}
+
+func toAdminUserView(u webauth.User) adminUserView {
+	uv := adminUserView{
+		ID:           u.ID,
+		Username:     u.Username,
+		Role:         string(u.Role),
+		TOTPPolicy:   u.TOTPPolicy,
+		TOTPEnrolled: u.TOTPSec != "",
+		CreatedAt:    u.CreatedAt.UTC().Format(rfc3339Z),
+	}
+	if u.DisabledAt != nil {
+		uv.DisabledAt = u.DisabledAt.UTC().Format(rfc3339Z)
+	}
+	return uv
 }
 
 type inviteView struct {
@@ -47,16 +65,7 @@ func (r *Router) handleAdminUsers(w http.ResponseWriter, req *http.Request) {
 	users := r.deps.Auth.WebAuth.ListUsers()
 	out := make([]adminUserView, 0, len(users))
 	for _, u := range users {
-		uv := adminUserView{
-			ID:        u.ID,
-			Username:  u.Username,
-			Role:      string(u.Role),
-			CreatedAt: u.CreatedAt.UTC().Format(rfc3339Z),
-		}
-		if u.DisabledAt != nil {
-			uv.DisabledAt = u.DisabledAt.UTC().Format(rfc3339Z)
-		}
-		out = append(out, uv)
+		out = append(out, toAdminUserView(u))
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
 }
@@ -75,7 +84,13 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/users/{id}")
 		return
 	}
-	if req.Method != http.MethodDelete {
+	switch req.Method {
+	case http.MethodPatch:
+		r.updateUserRole(w, req, id)
+		return
+	case http.MethodDelete:
+		// Disable logic runs below.
+	default:
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
 		return
 	}
@@ -108,6 +123,73 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 			Action: "user_disable",
 			Path:   id,
 		})
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+type updateUserRequest struct {
+	Role       *string `json:"role,omitempty"`
+	TOTPPolicy *string `json:"totp_policy,omitempty"` // "" inherit | enabled | disabled
+}
+
+// updateUserRole changes a user's role (member↔guest) and/or their per-user
+// TOTP override (owner-only, PATCH /admin/users/{id}). The owner is a singleton
+// and immutable; promoting to owner is unsupported. Demoting to guest cascades
+// a revoke of any MCP tokens the user owned — guests hold no agent credentials.
+func (r *Router) updateUserRole(w http.ResponseWriter, req *http.Request, id string) {
+	actor := UserFromContext(req.Context())
+	var body updateUserRequest
+	if err := DecodeJSON(req, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
+	}
+	if body.Role == nil && body.TOTPPolicy == nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "role or totp_policy required")
+		return
+	}
+	if body.Role != nil {
+		role := webauth.Role(strings.TrimSpace(*body.Role))
+		if role != webauth.RoleMember && role != webauth.RoleGuest {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "role must be 'member' or 'guest'")
+			return
+		}
+		if err := r.deps.Auth.WebAuth.SetRole(id, role); err != nil {
+			switch {
+			case strings.Contains(err.Error(), "not found"):
+				WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
+			case strings.Contains(err.Error(), "owner"):
+				WriteError(w, http.StatusForbidden, CodeAuthForbidden, err.Error())
+			default:
+				WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			}
+			return
+		}
+		if role == webauth.RoleGuest && r.deps.Auth.MCPTokens != nil {
+			_ = r.deps.Auth.MCPTokens.RevokeByOwner(id)
+		}
+	}
+	if body.TOTPPolicy != nil {
+		if err := r.deps.Auth.WebAuth.SetTOTPPolicy(id, strings.TrimSpace(*body.TOTPPolicy)); err != nil {
+			if strings.Contains(err.Error(), "not found") {
+				WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
+			} else {
+				WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			}
+			return
+		}
+	}
+	if actor != nil && r.deps.Audit != nil {
+		_ = r.deps.Audit.Write(audit.Entry{
+			Source: audit.SourceHTTP,
+			Actor:  actor.Username,
+			UserID: actor.ID,
+			Action: "user_update",
+			Path:   id,
+		})
+	}
+	if u, ok := r.deps.Auth.WebAuth.UserByID(id); ok {
+		WriteJSON(w, http.StatusOK, toAdminUserView(*u))
+		return
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

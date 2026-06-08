@@ -15,12 +15,12 @@ import (
 // for the `version` package var) plus the static `api` discriminator
 // the OpenAPI spec advertises.
 type versionResponse struct {
-	Version       string   `json:"version"`
-	API           string   `json:"api"`
-	BuildTime     string   `json:"build_time,omitempty"`
-	Commit        string   `json:"commit,omitempty"`
-	DefaultLang   string   `json:"default_lang,omitempty"`
-	EnabledLangs  []string `json:"enabled_langs,omitempty"`
+	Version      string   `json:"version"`
+	API          string   `json:"api"`
+	BuildTime    string   `json:"build_time,omitempty"`
+	Commit       string   `json:"commit,omitempty"`
+	DefaultLang  string   `json:"default_lang,omitempty"`
+	EnabledLangs []string `json:"enabled_langs,omitempty"`
 }
 
 // Version is set by cmd/gosidian/main.go before constructing the

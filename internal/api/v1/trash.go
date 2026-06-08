@@ -29,6 +29,9 @@ func (r *Router) handleTrash(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "trash not enabled in server config")
 		return
 	}
+	if denyGuestWrite(w, UserFromContext(req.Context())) {
+		return // trash management is a member+ feature, not for read-only guests
+	}
 	entries, err := r.deps.Trash.List()
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
@@ -47,8 +50,9 @@ func (r *Router) handleTrash(w http.ResponseWriter, req *http.Request) {
 }
 
 // handleTrashItem dispatches per-entry operations. Subpath structure:
-//   POST   /api/v1/trash/{id}/restore  → restore + reindex
-//   DELETE /api/v1/trash/{id}          → purge (irreversible)
+//
+//	POST   /api/v1/trash/{id}/restore  → restore + reindex
+//	DELETE /api/v1/trash/{id}          → purge (irreversible)
 func (r *Router) handleTrashItem(w http.ResponseWriter, req *http.Request) {
 	if r.deps.Trash == nil {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "trash not enabled in server config")
@@ -57,6 +61,9 @@ func (r *Router) handleTrashItem(w http.ResponseWriter, req *http.Request) {
 	user := UserFromContext(req.Context())
 	if user == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if denyGuestWrite(w, user) {
 		return
 	}
 	rest := strings.TrimPrefix(req.URL.Path, "/api/v1/trash/")

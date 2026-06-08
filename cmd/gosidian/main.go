@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/i18n"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/ldap"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/metrics"
 	"github.com/gosidian/gosidian/internal/parser"
@@ -34,8 +35,9 @@ import (
 
 // initLogger sets up slog as the default logger and bridges the stdlib
 // `log` package output through it. Format and level come from env:
-//   GOSIDIAN_LOG_FORMAT  text (default) | json
-//   GOSIDIAN_LOG_LEVEL   debug | info (default) | warn | error
+//
+//	GOSIDIAN_LOG_FORMAT  text (default) | json
+//	GOSIDIAN_LOG_LEVEL   debug | info (default) | warn | error
 func initLogger() {
 	level := slog.LevelInfo
 	switch strings.ToLower(os.Getenv("GOSIDIAN_LOG_LEVEL")) {
@@ -205,6 +207,39 @@ func main() {
 		log.Fatalf("apply env: %v", err)
 	}
 
+	// v2.2: global TOTP policy from config. Backward-compat: if the mode
+	// resolves to "off" (the default) but an account already has a secret
+	// (e.g. an owner provisioned via `user setup --totp`), bump to "optional"
+	// so their two-factor stays enforced after the upgrade rather than going
+	// silently dormant.
+	totpMode := cfg.Webauth.TOTPMode
+	if (totpMode == "" || totpMode == "off") && webauthStore.AnyTOTPEnrolled() {
+		totpMode = "optional"
+		log.Printf("web auth: TOTP mode bumped off→optional (enrolled account present)")
+	}
+	webauthStore.SetTOTPMode(totpMode)
+	log.Printf("web auth: TOTP mode = %s", webauthStore.TOTPMode())
+
+	// v2.2: optional LDAP auth. When enabled, unknown users that authenticate
+	// against the directory are auto-provisioned as guests (webauth.Authenticate).
+	var ldapAuth webauth.LDAPAuthenticator
+	if cfg.LDAP.Enabled {
+		lc, lerr := ldap.New(ldap.Config{
+			URL:          cfg.LDAP.URL,
+			StartTLS:     cfg.LDAP.StartTLS,
+			SkipVerify:   cfg.LDAP.SkipVerify,
+			BindDN:       cfg.LDAP.BindDN,
+			BindPassword: cfg.LDAP.BindPassword,
+			UserBaseDN:   cfg.LDAP.UserBaseDN,
+			UserFilter:   cfg.LDAP.UserFilter,
+		})
+		if lerr != nil {
+			log.Fatalf("ldap config: %v", lerr)
+		}
+		ldapAuth = lc
+		log.Printf("ldap: enabled (url=%q base=%q filter=%q)", cfg.LDAP.URL, cfg.LDAP.UserBaseDN, cfg.LDAP.UserFilter)
+	}
+
 	if tokenStore.Empty() {
 		log.Printf("auth: token store empty, running in open mode (provision via `gosidian token create`)")
 	} else {
@@ -337,11 +372,12 @@ func main() {
 			WebAuth:   webauthStore,
 			SpaAuth:   spaTokenStore,
 			MCPTokens: tokenStore,
+			LDAP:      ldapAuth,
 			Logger:    slog.Default(),
 		},
-		Audit:    auditLog,
-		Vault:    v,
-		Events:   eventsHub,
+		Audit:      auditLog,
+		Vault:      v,
+		Events:     eventsHub,
 		Index:      idx,
 		Renderer:   parser.NewRenderer(),
 		Trash:      trashBin,

@@ -1,5 +1,5 @@
 // Package projects persists per-project flags (skip git sync, hidden from
-// MCP) in <vault>/.gosidian/projects.json. The store is concurrent-safe and
+// MCP, public/private visibility) in <vault>/.gosidian/projects.json. The store is concurrent-safe and
 // reloads transparently when the underlying file's mtime changes, so flags
 // written from the CLI or another process become effective without a
 // restart (mirrors the pattern of internal/auth.Store).
@@ -26,6 +26,10 @@ import (
 type Flags struct {
 	SkipGitSync   bool `json:"skip_git_sync,omitempty"`
 	HiddenFromMCP bool `json:"hidden_from_mcp,omitempty"`
+	// Public marks a project as visible to guest-role users (read-only).
+	// Default false = private (only owner/member). "Public" here means visible
+	// to all authenticated users including guests — not anonymous/world-readable.
+	Public bool `json:"public,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -211,6 +215,28 @@ func (s *Store) SkipNamesForGit() []string {
 	out := make([]string, 0)
 	for n, f := range s.data {
 		if f.SkipGitSync {
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// IsPublic reports whether the project is flagged Public=true (visible to
+// guests). Unknown projects default to private.
+func (s *Store) IsPublic(name string) bool {
+	return s.Get(name).Public
+}
+
+// PublicNames returns the set of project names flagged Public=true, sorted.
+// Used by the authz layer to compute the guest-visible project set.
+func (s *Store) PublicNames() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	out := make([]string, 0)
+	for n, f := range s.data {
+		if f.Public {
 			out = append(out, n)
 		}
 	}

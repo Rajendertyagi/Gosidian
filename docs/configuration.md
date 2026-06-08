@@ -39,12 +39,27 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LOGIN_SESSION_TTL` | `webauth.session_ttl` | `24h` |
 | `GOSIDIAN_LOGIN_WINDOW` | `webauth.login_window` | `15m` |
 | `GOSIDIAN_LOGIN_MAX_FAILURES` | `webauth.login_max_failures` | `5` |
+| `GOSIDIAN_TOTP_MODE` | `webauth.totp_mode` | `off` (`optional`, `required`) |
+| `GOSIDIAN_LDAP_ENABLED` | `ldap.enabled` | `false` |
+| `GOSIDIAN_LDAP_URL` | `ldap.url` | empty (`ldap://host:389`, `ldaps://host:636`) |
+| `GOSIDIAN_LDAP_START_TLS` | `ldap.start_tls` | `false` |
+| `GOSIDIAN_LDAP_INSECURE_SKIP_VERIFY` | `ldap.insecure_skip_verify` | `false` (dev/self-signed only) |
+| `GOSIDIAN_LDAP_BIND_DN` | `ldap.bind_dn` | empty (anonymous search) |
+| `GOSIDIAN_LDAP_BIND_PASSWORD` | `ldap.bind_password` | empty |
+| `GOSIDIAN_LDAP_USER_BASE_DN` | `ldap.user_base_dn` | empty |
+| `GOSIDIAN_LDAP_USER_FILTER` | `ldap.user_filter` | `(uid=%s)` (AD: `(sAMAccountName=%s)`) |
 | `GOSIDIAN_VAULT_CACHE_SIZE` | `vault.cache_size` | `128` (`0` disables) |
 | `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` |
 
 The `config.toml` at `<vault>/.gosidian/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at
 `/settings`. Env vars override the file on every start.
+
+> **Secrets**: prefer `GOSIDIAN_LDAP_BIND_PASSWORD` (env / Docker secret)
+> over writing `ldap.bind_password` into `config.toml` — the `/settings`
+> UI never reads back the bind password. See
+> [Authentication & roles](web-ui/authentication.md) for the full TOTP and
+> LDAP setup, including Active Directory.
 
 ## Lint vocabulary extension
 

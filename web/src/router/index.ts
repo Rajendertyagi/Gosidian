@@ -22,6 +22,7 @@ const routes: RouteRecordRaw[] = [
         path: 'notes/:path(.*)/edit',
         name: 'note-edit',
         component: () => import('@/views/NoteEditView.vue'),
+        meta: { requiresWrite: true },
       },
       {
         path: 'notes/:path(.*)',
@@ -123,6 +124,7 @@ router.beforeEach((to, _from) => {
   const auth = useAuthStore()
   const requires = to.matched.some((r) => r.meta.requiresAuth !== false)
   const ownerOnly = to.matched.some((r) => r.meta.requiresOwner)
+  const writeOnly = to.matched.some((r) => r.meta.requiresWrite)
 
   if (requires && !auth.isAuthenticated) {
     return {
@@ -131,6 +133,10 @@ router.beforeEach((to, _from) => {
     }
   }
   if (ownerOnly && !auth.isOwner) {
+    return { name: 'home' }
+  }
+  if (writeOnly && !auth.canWrite) {
+    // Guests are read-only — keep them out of the editor.
     return { name: 'home' }
   }
   if (to.name === 'login' && auth.isAuthenticated) {
