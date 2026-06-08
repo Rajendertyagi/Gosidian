@@ -44,6 +44,10 @@ const (
 	// TopicAudit fires on high-signal audit events (login, token
 	// rotation, project rename). Payload mirrors audit.Entry.
 	TopicAudit Topic = "audit"
+	// TopicInsight fires when a self-improvement insight is recorded.
+	// Payload: {action, path, category, confidence, alert, source}. The
+	// owner SPA badge subscribes to live-update the pending count.
+	TopicInsight Topic = "insight"
 )
 
 // Event is the wire shape. ID is a monotonic ULID-like sequence that

@@ -141,6 +141,20 @@ func TestLint_FrontmatterTagUnknown(t *testing.T) {
 	}
 }
 
+func TestLint_FrontmatterTagUnknown_AcceptsInsight(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	// type:insight and status:pending are both in the built-in vocabulary,
+	// so an insight note (self-improve loop) lints clean.
+	seed(t, v, idx, "proj/i.md", "---\ntitle: i\ntags: [proj, type:insight, status:pending]\n---\n\n# i\n")
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues for type:insight + status:pending, got %d: %+v", len(issues), issues)
+	}
+}
+
 func TestLint_FrontmatterTagUnknown_ExtraAllowed(t *testing.T) {
 	// Same vault as TestLint_FrontmatterTagUnknown, but the linter has
 	// been extended via WithExtraAllowedTags. The 3 tags that were
@@ -174,14 +188,14 @@ func TestLint_FrontmatterTagUnknown_ExtraAllowedSkipsMalformed(t *testing.T) {
 	seed(t, v, idx, "proj/n.md", "---\ntitle: n\ntags: [proj, mytag, topic:fine]\n---\n\n# n\n")
 
 	l = l.WithExtraAllowedTags([]string{
-		"",                // empty — skip
-		":missingns",      // leading colon — skip
-		"missingval:",     // trailing colon — skip
-		"with space:bad",  // whitespace in ns — skip
-		"ns:with space",   // whitespace in val — skip
-		"ns:val:extra",    // double colon — skip
-		"mytag",           // valid bare → applies
-		"topic:fine",      // valid namespaced → applies
+		"",               // empty — skip
+		":missingns",     // leading colon — skip
+		"missingval:",    // trailing colon — skip
+		"with space:bad", // whitespace in ns — skip
+		"ns:with space",  // whitespace in val — skip
+		"ns:val:extra",   // double colon — skip
+		"mytag",          // valid bare → applies
+		"topic:fine",     // valid namespaced → applies
 	})
 
 	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")

@@ -1,6 +1,6 @@
 ---
 title: {{PROJECT}} Project Index
-description: Landing page per la memoria persistente del progetto {{PROJECT}}.
+description: Landing page for the persistent memory of the {{PROJECT}} project.
 tags: [{{PROJECT}}, type:index, topic:meta]
 type: index
 updated: {{TODAY}}
@@ -8,22 +8,22 @@ updated: {{TODAY}}
 
 # {{PROJECT}} — Project Memory
 
-Memoria persistente del progetto **{{PROJECT}}**. Pattern Karpathy-Wiki-Stack (stabile, ma aggiornabile incrementalmente).
+Persistent memory for the **{{PROJECT}}** project. Karpathy-Wiki-Stack pattern (stable, but updated incrementally).
 
-## Mappa
+## Map
 
-| Cartella | Scopo |
+| Folder | Purpose |
 |---|---|
-| `memory/` | Conoscenza stabile (architecture, decisions, conventions, glossary, environments) |
-| `agents/` | Ruoli specializzati attivi |
-| `plans/` | Piani di task non banali, `YYYYMMDD-<slug>.md`, con `Outcome` post-esecuzione |
-| `skills/` | Procedure ripetibili |
+| `memory/` | Stable knowledge (architecture, decisions, conventions, glossary, environments) |
+| `agents/` | Active specialised roles |
+| `plans/` | Plans for non-trivial tasks, `YYYYMMDD-<slug>.md`, with a post-execution `Outcome` |
+| `skills/` | Repeatable procedures |
 | `docs/` | Q&A, open questions, improvements, bug tracker |
 | `hot.md` | Session cache |
-| `log.md` | Log append-only |
+| `log.md` | Append-only log |
 
-## Bootstrap di sessione
+## Session bootstrap
 
-1. `memory_bootstrap({project: "{{PROJECT}}"})` — aggregato completo in una call
-2. Se serve, `memory_plans(project, status:"in-progress")` + `memory_skills(project)`
-3. Per task mirati, letture puntuali via `memory_get`
+1. `memory_bootstrap({project: "{{PROJECT}}"})` — full aggregate in one call
+2. If needed, `memory_plans(project, status:"in-progress")` + `memory_skills(project)`
+3. For focused tasks, targeted reads via `memory_get`

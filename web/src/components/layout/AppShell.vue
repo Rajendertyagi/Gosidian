@@ -1,14 +1,20 @@
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
-import ConflictDialog from '@/components/domain/ConflictDialog.vue'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
+import WindowManager from '@/components/plancia/WindowManager.vue'
+import { windowRegistry } from '@/components/plancia/windowRegistry'
+import { usePlanciaSync } from '@/composables/usePlanciaSync'
 import { useSidebarResize } from '@/composables/useSidebarResize'
 import { useAuthStore } from '@/stores/auth'
 
 const { width, startDrag, reset } = useSidebarResize()
 const auth = useAuthStore()
+const plancia = usePlanciaSync()
+
+onMounted(() => plancia.hydrate())
 
 function onEnrolled() {
   auth.setEnrolled(true)
@@ -36,8 +42,8 @@ function onEnrolled() {
         @dblclick="reset"
       />
 
-      <main class="flex-1 overflow-auto">
-        <RouterView />
+      <main class="flex-1 min-w-0 overflow-hidden">
+        <WindowManager :registry="windowRegistry" />
       </main>
     </div>
 
@@ -56,7 +62,6 @@ function onEnrolled() {
       </div>
     </div>
 
-    <ConflictDialog />
     <CommandPalette />
   </div>
 </template>

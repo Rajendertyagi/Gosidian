@@ -1,29 +1,85 @@
 <script setup lang="ts">
-import { onMounted, computed } from 'vue'
+import { onMounted, computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useTreeStore } from '@/stores/tree'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useSSE } from '@/composables/useSSE'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { useAuthStore } from '@/stores/auth'
+import { planciaKey } from '@/composables/usePlanciaSync'
 import TreeNode from '@/components/domain/TreeNode.vue'
-import { RefreshCw } from 'lucide-vue-next'
+import {
+  RefreshCw,
+  ChevronRight,
+  Search,
+  Network,
+  Folder,
+  Tags,
+  Trash2,
+  Settings,
+  Shield,
+} from 'lucide-vue-next'
 
 const { t } = useI18n()
 
 const treeStore = useTreeStore()
 const recents = useRecentlyViewed()
+const windows = useWindowsStore()
+const auth = useAuthStore()
 const sse = useSSE(['tree'])
 
 const root = computed(() => treeStore.byProject[''])
 const loading = computed(() => Boolean(treeStore.loading['']))
 const error = computed(() => treeStore.error[''])
 
+// ── Collapsible menu (req #6): the app menu lives in the sidebar, collapsed by
+// default; expanding it pushes the project tree down. Each entry opens a window
+// instead of navigating. State persisted across reloads.
+const MENU_KEY = 'gosidian.sidebar.menuOpen'
+function loadMenuOpen(): boolean {
+  try {
+    return localStorage.getItem(MENU_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+const menuOpen = ref(loadMenuOpen())
+function toggleMenu() {
+  menuOpen.value = !menuOpen.value
+  try {
+    localStorage.setItem(MENU_KEY, menuOpen.value ? '1' : '0')
+  } catch {
+    /* ignore */
+  }
+}
+
+interface MenuItem { key: string; label: string; icon: unknown; spec: OpenSpec }
+const menuItems = computed<MenuItem[]>(() => {
+  const items: MenuItem[] = [
+    { key: 'search', label: t('nav.search', 'Search'), icon: Search, spec: { type: 'search', key: planciaKey('search') } },
+    { key: 'graph', label: t('nav.graph'), icon: Network, spec: { type: 'graph', key: planciaKey('graph') } },
+    { key: 'projects', label: t('nav.projects'), icon: Folder, spec: { type: 'projects', key: planciaKey('projects') } },
+    { key: 'tags', label: t('nav.tags'), icon: Tags, spec: { type: 'tags', key: planciaKey('tags') } },
+  ]
+  if (auth.canWrite) {
+    items.push({ key: 'trash', label: t('nav.trash'), icon: Trash2, spec: { type: 'trash', key: planciaKey('trash') } })
+    items.push({ key: 'settings', label: t('nav.settings'), icon: Settings, spec: { type: 'settings', key: planciaKey('settings') } })
+  }
+  if (auth.isOwner) {
+    items.push({ key: 'admin', label: t('nav.admin', 'Admin'), icon: Shield, spec: { type: 'admin', key: planciaKey('admin') } })
+  }
+  return items
+})
+function openMenu(spec: OpenSpec) {
+  windows.open(spec)
+}
+
+function openRecent(path: string, title: string) {
+  windows.open({ type: 'note', key: planciaKey('note', path), title, props: { path } })
+}
+
 onMounted(() => {
   void treeStore.load()
-
-  // Real-time invalidation: any tree-topic event from the SSE hub
-  // means the sidebar might be stale. The simplest correct response
-  // is "drop the cache and refetch" — debounce isn't required at
-  // current vault sizes.
   sse.on('tree', () => {
     treeStore.invalidate()
     void treeStore.load()
@@ -33,6 +89,35 @@ onMounted(() => {
 
 <template>
   <aside class="h-full flex flex-col bg-bg overflow-hidden">
+    <!-- Menu (collapsible) -->
+    <div class="border-b border-border">
+      <button
+        type="button"
+        class="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-text-muted hover:text-text"
+        :aria-expanded="menuOpen"
+        @click="toggleMenu"
+      >
+        <ChevronRight
+          class="w-3.5 h-3.5 transition-transform"
+          :class="menuOpen ? 'rotate-90' : ''"
+        />
+        <span>{{ t('nav.menu', 'Menu') }}</span>
+      </button>
+      <ul v-if="menuOpen" class="pb-2">
+        <li v-for="item in menuItems" :key="item.key">
+          <button
+            type="button"
+            class="w-full flex items-center gap-2 px-3 py-1 text-sm text-text-muted hover:text-text hover:bg-surface-hover"
+            @click="openMenu(item.spec)"
+          >
+            <component :is="item.icon" class="w-3.5 h-3.5 shrink-0" />
+            <span class="truncate">{{ item.label }}</span>
+          </button>
+        </li>
+      </ul>
+    </div>
+
+    <!-- Vault tree -->
     <div class="px-3 py-2 border-b border-border flex items-center justify-between">
       <span class="text-xs font-semibold uppercase tracking-wide text-text-muted">
         {{ t('common.vault') }}
@@ -74,10 +159,11 @@ onMounted(() => {
           v-for="entry in recents.entries.value.slice(0, 5)"
           :key="entry.path"
         >
-          <RouterLink
-            :to="'/notes/' + encodeURIComponent(entry.path)"
-            class="block truncate text-text-muted hover:text-text"
-          >{{ entry.title }}</RouterLink>
+          <button
+            type="button"
+            @click="openRecent(entry.path, entry.title)"
+            class="block w-full truncate text-left text-text-muted hover:text-text"
+          >{{ entry.title }}</button>
         </li>
       </ul>
     </div>

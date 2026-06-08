@@ -35,7 +35,7 @@ func (s *Server) handleListBootstrapTemplates(ctx context.Context, req mcp.CallT
 	if _, errRes := s.authorizeRead(ctx); errRes != nil {
 		return errRes, nil
 	}
-	tmpls, err := scaffold.ListTemplates(s.vault.Root)
+	tmpls, err := scaffold.ListTemplatesIn(s.templatesDir())
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("templates list failed", err), nil
 	}

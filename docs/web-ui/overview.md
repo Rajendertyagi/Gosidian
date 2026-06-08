@@ -1,49 +1,77 @@
 # Web UI overview
 
-Routes and capabilities of the built-in HTMX web interface. All pages
-are server-rendered — no JavaScript framework, no build step.
+The built-in web interface is a **Vue 3 single-page app**, built with
+Vite and embedded in the binary via `go:embed` — no separate web server,
+no CDN. It talks to the Go backend over a JSON REST API (`/api/v1/*`)
+and an SSE stream for live updates.
 
-## Primary routes
+## The plancia (window manager)
 
-| Route | Purpose |
+Since v2.3 the UI is a **"plancia"**: a niri-style scrollable tiling
+window manager. Instead of one page at a time, notes, the graph, search,
+and config forms open as **windows** side by side in a horizontally-
+scrollable strip.
+
+- **Open** a note from the sidebar tree, a wikilink, search, or the
+  command palette (`⌘K` / `Ctrl-K`); each opens to the right of the
+  focused window.
+- **Resize** in discrete steps (small → medium → full) with the window's
+  resize button.
+- **Minimize** a window to a horizontally-scrollable footer; click to
+  restore.
+- **Direct links**: the window's link button opens an *ego-graph* — the
+  one-hop neighbourhood of that note — as its own window.
+- **Edit in place**: a note window has a View/Edit toggle; the editor
+  mounts lazily in the same window (hidden for read-only users).
+- **Navigate** focus between windows with `Alt-←` / `Alt-→`.
+
+The open windows + focus are encoded in the URL (`?w=…&f=…`), so a
+workspace is shareable and survives reload; when the URL is empty the
+last workspace is restored from `localStorage`.
+
+## Deep-link routes
+
+These canonical routes still work as entry points — visiting one opens
+the matching window in the plancia (so existing links and bookmarks keep
+working):
+
+| Route | Opens |
 |---|---|
-| `/` | Home (recent + pinned notes) |
-| `/notes/<path>` | Read or edit a note |
-| `/projects` / `/projects/<name>` | Project listing and dashboard |
-| `/tags` / `/tags/<tag>` | Tag explorer (per-project filter) |
+| `/notes/<path>` | the note (view; `…/edit` opens in edit mode) |
+| `/notes/<path>/history` | the note's git history |
+| `/projects` | project listing & admin |
+| `/tags` / `/tags/<tag>` | tag explorer |
 | `/graph` | Cytoscape graph of wiki-link relations |
-| `/search?q=…` | Full-text search |
-| `/settings` | Web UI settings (git sync, theme preset, language) |
-| `/admin/tokens` | MCP token management |
-| `/admin/users` | User & invite management (owner only) |
-| `/audit` | Audit trail (filterable by user, action, date) |
-| `/trash` | Soft-deleted notes (if enabled) |
+| `/search` | full-text search |
+| `/settings` | theme preset, language, git sync |
+| `/admin/*` | users, tokens, invites, audit (owner only) |
+| `/trash` | soft-deleted notes (if enabled) |
 
 ## Rendering stack
 
-- **HTMX** for interactivity (swap-in-place, progressive enhancement)
-- **Go `html/template`** for rendering, strictly `map[string]any` data
-  (not typed structs) by project convention
-- **SQLite FTS5** backs full-text search
-- **Cytoscape + fcose layout** for the graph view; all JavaScript
-  libraries are vendored under `internal/server/static/js/vendor/` —
-  no CDN calls at runtime
-- **Lucide** inline SVG icons embedded via `//go:embed` since v1.10 —
-  see the icon library entry in the project conventions
+- **Vue 3** (composition API) + **vue-router** + **Pinia** state
+- **Vite** build; output embedded under `internal/server/web/dist`
+- **Tailwind CSS** with a semantic-token theme system (presets +
+  custom palette)
+- **CodeMirror 6** for the editor (markdown, wikilink autocomplete),
+  lazy-loaded
+- **Cytoscape + fcose layout** for the graph view, lazy-loaded
+- **vue-i18n** with catalogues precompiled at build time from
+  `internal/i18n/catalogs/` (shared with the Go side); a strict CSP
+  (`script-src 'self'`, no eval) is enforced
+- The Go backend serves only the SPA shell, fingerprinted assets, the
+  `/api/v1/*` REST API, and `/mcp/sse`
 
 ## Language switching
 
-The topbar `<select class="lang-switcher">` offers five languages
-(IT, EN, ES, FR, DE as of v1.10). Selecting one navigates to
-`/api/i18n?lang=<code>&next=<current-path>`, which sets the
-`gosidian_lang` cookie for one year and redirects back.
-
-Keys missing from the selected language fall back to English
-automatically — see the fallback chain in
-[`internal/i18n/i18n.go`](../../internal/i18n/i18n.go). Spanish,
-French, and German are v1.10 scaffolding stubs (topbar + common
-strings); contributing a complete translation is documented in
-[CONTRIBUTING.md](../../CONTRIBUTING.md).
+The language selector lives in **Settings**. On first load the SPA reads
+the operator's configured `i18n.default_lang`; the user's later choice is
+persisted client-side and wins thereafter. Keys missing from the selected
+language fall back to English automatically — see
+[`internal/i18n/i18n.go`](../../internal/i18n/i18n.go). Spanish, French,
+and German are scaffolding stubs; contributing a complete translation is
+documented in [CONTRIBUTING.md](../../CONTRIBUTING.md). Agents pick their
+language via the `Accept-Language` header on the MCP transport.
 
 ## Web login
 

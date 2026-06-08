@@ -1,6 +1,6 @@
 ---
 title: {{PROJECT}} Plans Index
-description: Piani di task non banali del progetto.
+description: Plans for non-trivial project tasks.
 tags: [{{PROJECT}}, type:index, topic:meta]
 type: index
 updated: {{TODAY}}
@@ -8,21 +8,21 @@ updated: {{TODAY}}
 
 # Plans — {{PROJECT}}
 
-Nome file: `YYYYMMDD-<slug>.md`. Status workflow: `draft` → `in-progress` → `done` | `archived`. Il tag `status:*` vive nel frontmatter.
+File name: `YYYYMMDD-<slug>.md`. Status workflow: `draft` → `in-progress` → `done` | `archived`. The `status:*` tag lives in the frontmatter.
 
 ## Template
 
 ```markdown
 ---
-title: <Titolo>
-description: <1 frase>
+title: <Title>
+description: <1 sentence>
 tags: [{{PROJECT}}, type:plan, status:draft]
 status: draft
 created: YYYY-MM-DD
 updated: YYYY-MM-DD
 ---
 
-# <Titolo>
+# <Title>
 
 ## Context
 ## Problem
@@ -31,5 +31,5 @@ updated: YYYY-MM-DD
 ## Verification performed
 ## Outcome
 ## Non-goals
-## Follow-ups suggeriti
+## Suggested follow-ups
 ```

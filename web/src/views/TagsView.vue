@@ -1,19 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+/** TagsView — tag browser as a plancia window. The selected tag is local
+ *  state (initialised from the `tag` window prop); picking a tag on the left
+ *  browses within this window, picking a note opens it as a sibling window. */
+import { onMounted, ref, watch, inject } from 'vue'
 import { listTags, notesByTag, type TagCount, type NoteSummary } from '@/api/tags'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 
-const route = useRoute()
+const props = defineProps<{ tag?: string }>()
+
+const store = useWindowsStore()
+const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
 const tags = ref<TagCount[]>([])
 const notes = ref<NoteSummary[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
-
-const selectedTag = computed(() => {
-  const raw = route.params.tag
-  return Array.isArray(raw) ? raw[0] : (raw ?? '')
-})
+const selectedTag = ref<string>(props.tag ?? '')
 
 async function loadTags() {
   loading.value = true
@@ -39,6 +42,15 @@ async function loadNotes(tag: string) {
   }
 }
 
+function openNote(n: NoteSummary) {
+  openWindow({
+    type: 'note',
+    key: planciaKey('note', n.path),
+    title: n.title || n.path,
+    props: { path: n.path },
+  })
+}
+
 onMounted(async () => {
   await loadTags()
   if (selectedTag.value) await loadNotes(selectedTag.value)
@@ -50,21 +62,22 @@ watch(selectedTag, (t) => {
 </script>
 
 <template>
-  <div class="p-8 max-w-5xl mx-auto grid gap-8 grid-cols-1 md:grid-cols-3">
+  <div class="p-6 grid gap-8 grid-cols-1 md:grid-cols-3">
     <aside class="md:col-span-1">
       <h1 class="text-xl font-semibold mb-3">Tags</h1>
       <p v-if="loading" class="text-text-muted text-sm">Loading…</p>
       <p v-else-if="error" class="text-danger text-sm">{{ error }}</p>
       <ul v-else class="space-y-1">
         <li v-for="t in tags" :key="t.tag">
-          <RouterLink
-            :to="'/tags/' + encodeURIComponent(t.tag)"
-            class="flex justify-between items-center px-2 py-1 rounded hover:bg-surface-hover"
+          <button
+            type="button"
+            class="w-full flex justify-between items-center px-2 py-1 rounded hover:bg-surface-hover text-left"
             :class="selectedTag === t.tag ? 'bg-surface-hover' : ''"
+            @click="selectedTag = t.tag"
           >
             <span class="truncate text-sm">#{{ t.tag }}</span>
             <span class="text-xs text-text-muted">{{ t.count }}</span>
-          </RouterLink>
+          </button>
         </li>
       </ul>
     </aside>
@@ -80,10 +93,11 @@ watch(selectedTag, (t) => {
             :key="n.path"
             class="rounded border border-border bg-surface px-3 py-2"
           >
-            <RouterLink
-              :to="'/notes/' + encodeURIComponent(n.path)"
-              class="font-medium hover:text-accent"
-            >{{ n.title || n.path }}</RouterLink>
+            <button
+              type="button"
+              class="font-medium hover:text-accent text-left"
+              @click="openNote(n)"
+            >{{ n.title || n.path }}</button>
             <p class="text-xs text-text-muted font-mono">{{ n.path }}</p>
           </li>
         </ul>

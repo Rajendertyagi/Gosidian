@@ -1,2 +1,0 @@
-import{d as s,c as r,a as t,t as a,m as n,h as c,o as d}from"./index-CrclG0B9.js";const m={class:"mt-8 rounded border border-border bg-surface p-6"},l={class:"font-mono text-sm text-text-muted"},_=s({__name:"PlaceholderView",setup(u){const o=c();return(i,e)=>(d(),r("section",m,[t("p",l,"route: "+a(n(o).fullPath),1),e[0]||(e[0]=t("p",{class:"mt-2"},"View not yet implemented in Phase 0.",-1))]))}});export{_ as default};
-//# sourceMappingURL=PlaceholderView-CVqiOxvh.js.map

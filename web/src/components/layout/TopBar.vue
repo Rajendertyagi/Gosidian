@@ -2,12 +2,20 @@
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useWindowsStore } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 import { Search, LogOut } from 'lucide-vue-next'
+import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 
 const { t } = useI18n()
 
 const router = useRouter()
 const auth = useAuthStore()
+const windows = useWindowsStore()
+
+function openSearch() {
+  windows.open({ type: 'search', key: planciaKey('search') })
+}
 
 async function handleLogout() {
   await auth.logout()
@@ -21,29 +29,18 @@ async function handleLogout() {
   >
     <div class="flex items-center gap-3">
       <span class="font-semibold tracking-tight">gosidian</span>
-      <span class="text-xs text-text-muted hidden sm:inline">v2.0</span>
-      <RouterLink
-        to="/search"
-        class="text-xs text-text-muted hover:text-text px-2 py-0.5 rounded border border-border ml-3 hidden md:inline-flex items-center gap-1"
+      <button
+        type="button"
+        class="text-xs text-text-muted hover:text-text px-2 py-0.5 rounded border border-border ml-3 inline-flex items-center gap-1"
+        @click="openSearch"
       >
         <Search class="w-3 h-3" />
         <span>{{ t('nav.search', 'Search') }}</span>
         <kbd class="opacity-60">⌘K</kbd>
-      </RouterLink>
-      <nav class="hidden md:flex items-center gap-3 ml-3 text-xs text-text-muted">
-        <RouterLink to="/projects" class="hover:text-text">{{ t('nav.projects') }}</RouterLink>
-        <RouterLink to="/tags" class="hover:text-text">{{ t('nav.tags') }}</RouterLink>
-        <RouterLink to="/graph" class="hover:text-text">{{ t('nav.graph') }}</RouterLink>
-        <RouterLink v-if="auth.canWrite" to="/trash" class="hover:text-text">{{ t('nav.trash') }}</RouterLink>
-        <RouterLink v-if="auth.canWrite" to="/settings" class="hover:text-text">{{ t('nav.settings') }}</RouterLink>
-        <RouterLink
-          v-if="auth.isOwner"
-          to="/admin"
-          class="hover:text-text"
-        >{{ t('nav.admin', 'Admin') }}</RouterLink>
-      </nav>
+      </button>
     </div>
     <div class="flex items-center gap-3 text-sm">
+      <InsightsBadge v-if="auth.isOwner" />
       <span class="text-text-muted hidden md:inline">{{ auth.username }}</span>
       <span
         v-if="auth.isOwner"

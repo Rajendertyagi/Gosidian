@@ -30,6 +30,10 @@ type Flags struct {
 	// Default false = private (only owner/member). "Public" here means visible
 	// to all authenticated users including guests — not anonymous/world-readable.
 	Public bool `json:"public,omitempty"`
+	// UseGlobals opts the project into the shared "global" projects: when set,
+	// the project's session bootstrap merges in the global skills/agents
+	// (local entries override global ones with the same title). Default false.
+	UseGlobals bool `json:"use_globals,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -226,6 +230,12 @@ func (s *Store) SkipNamesForGit() []string {
 // guests). Unknown projects default to private.
 func (s *Store) IsPublic(name string) bool {
 	return s.Get(name).Public
+}
+
+// UsesGlobals reports whether the project opted into the shared global skills/
+// agents. Unknown projects default to false.
+func (s *Store) UsesGlobals(name string) bool {
+	return s.Get(name).UseGlobals
 }
 
 // PublicNames returns the set of project names flagged Public=true, sorted.

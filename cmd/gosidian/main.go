@@ -20,6 +20,7 @@ import (
 	"github.com/gosidian/gosidian/internal/gitsync"
 	"github.com/gosidian/gosidian/internal/i18n"
 	"github.com/gosidian/gosidian/internal/index"
+	"github.com/gosidian/gosidian/internal/insights"
 	"github.com/gosidian/gosidian/internal/ldap"
 	mcpsrv "github.com/gosidian/gosidian/internal/mcp"
 	"github.com/gosidian/gosidian/internal/metrics"
@@ -263,6 +264,23 @@ func main() {
 	// Web-side login rate-limit + session TTL configuration moved
 	// to internal/api/v1 — the legacy server.ConfigureLogin retired
 	// at the v2.0 cutover alongside the cookie-session middleware.
+
+	// Seed the shared global projects (public + private) when the feature is
+	// enabled, so they exist + are flagged before the initial scan picks them
+	// up. Idempotent: existing folders, flags and READMEs are preserved.
+	if cfg.Global.Enabled {
+		seedGlobalProjects(v, projectsStore, cfg.Global)
+		// Seed the bootstrap templates into the global public project so they
+		// are editable as notes; the scaffold tools read from there when the
+		// global feature is on. Idempotent.
+		gtdir := filepath.Join(absVault, cfg.Global.PublicProject, "templates")
+		if seeded, err := scaffold.SeedTemplatesInto(gtdir, mcpsrv.EmbeddedTemplatesFS(), mcpsrv.EmbeddedTemplatesRoot); err != nil {
+			log.Printf("global templates seed failed: %v", err)
+		} else if len(seeded) > 0 {
+			log.Printf("global: seeded templates %v under %s/templates/", seeded, cfg.Global.PublicProject)
+		}
+	}
+
 	log.Printf("scanning vault %s", absVault)
 	if err := v.ScanInto(idx); err != nil {
 		log.Fatalf("scan: %v", err)
@@ -361,12 +379,36 @@ func main() {
 	// see external-tab + agent edits in real time.
 	mcpServer.SetEvents(eventsHub)
 	mcpServer.SetLintExtraAllowedTags(cfg.Lint.FrontmatterTagVocabulary.ExtraAllowed)
+	mcpServer.SetSelfImprove(cfg.SelfImprove.Enabled, cfg.SelfImprove.TargetProject)
+	mcpServer.SetSelfImproveNudge(cfg.SelfImprove.EveryNCalls, cfg.SelfImprove.MaxNudgesPerSession, time.Duration(cfg.SelfImprove.CooldownMinutes)*time.Minute)
+	mcpServer.SetGlobal(cfg.Global.Enabled, cfg.Global.PublicProject, cfg.Global.PrivateProject)
 
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.
 	apiv1.Version = version
 	apiv1.DefaultLang = cfg.I18n.DefaultLang
 	apiv1.EnabledLangs = cfg.I18n.EnabledLangs
+	apiv1.SelfImproveEnabled = cfg.SelfImprove.Enabled
+	apiv1.SelfImproveProject = cfg.SelfImprove.TargetProject
+
+	// Phase 5: optional scheduled digest of pending insights (+ email when
+	// SMTP is set). Only runs when the loop is on and an interval is given.
+	if cfg.SelfImprove.Enabled && cfg.SelfImprove.DigestInterval > 0 {
+		digester := insights.New(v, idx, insights.DigestConfig{
+			Project:     cfg.SelfImprove.TargetProject,
+			NotifyEmail: cfg.SelfImprove.NotifyEmail,
+			SMTP: insights.SMTPConfig{
+				Host:     cfg.SelfImprove.SMTPHost,
+				Port:     cfg.SelfImprove.SMTPPort,
+				From:     cfg.SelfImprove.SMTPFrom,
+				Username: cfg.SelfImprove.SMTPUsername,
+				Password: cfg.SelfImprove.SMTPPassword,
+			},
+		}, slog.Default())
+		go digester.Start(ctx, cfg.SelfImprove.DigestInterval)
+		log.Printf("self-improve: digest scheduler enabled (interval=%s)", cfg.SelfImprove.DigestInterval)
+	}
+
 	apiRouter := apiv1.NewRouter(&apiv1.Deps{
 		Auth: &apiv1.AuthDeps{
 			WebAuth:   webauthStore,

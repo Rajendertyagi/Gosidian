@@ -10,7 +10,7 @@ cmd/gosidian/        # entry point + CLI subcommands
 internal/vault/      # file access + LRU cache + fsnotify
 internal/index/      # SQLite FTS5 + backlinks + tags
 internal/parser/     # goldmark + wiki-link / tag extraction
-internal/server/     # HTTP router, HTMX templates, static assets
+internal/server/     # HTTP router, REST API (/api/v1), embedded Vue SPA
 internal/mcp/        # MCP tools + transport
 internal/auth/       # MCP bearer tokens
 internal/webauth/    # web login + invite + sessions
@@ -21,6 +21,10 @@ internal/scaffold/   # bootstrap template seeder
 internal/lint/       # vault hygiene rules
 internal/config/     # TOML loader + env overrides
 ```
+
+The web UI source lives outside `internal/` under `web/` (a Vue 3 + Vite
+SPA); `npm run build` emits to `internal/server/web/dist`, which the Go
+binary embeds via `//go:embed`. See [Web UI overview](web-ui/overview.md).
 
 ## Read path
 

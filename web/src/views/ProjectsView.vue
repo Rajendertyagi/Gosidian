@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, inject } from 'vue'
 import {
   listProjects,
   createProject,
@@ -9,6 +9,7 @@ import {
 } from '@/api/projects'
 import { useTreeStore } from '@/stores/tree'
 import { useAuthStore } from '@/stores/auth'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -16,6 +17,18 @@ const error = ref<string | null>(null)
 const newName = ref('')
 const treeStore = useTreeStore()
 const auth = useAuthStore()
+const store = useWindowsStore()
+const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
+
+/** Explore a project as a graph window (its link neighbourhood). */
+function openProjectGraph(name: string) {
+  openWindow({
+    type: 'graph',
+    key: 'graph:project:' + name,
+    title: `Graph · ${name}`,
+    props: { project: name },
+  })
+}
 
 async function load() {
   loading.value = true
@@ -117,10 +130,12 @@ onMounted(load)
         :key="p.name"
         class="rounded border border-border bg-surface px-4 py-3 flex items-center gap-3"
       >
-        <RouterLink
-          :to="'/?project=' + encodeURIComponent(p.name)"
-          class="font-medium hover:text-accent flex-1"
-        >{{ p.name }}</RouterLink>
+        <button
+          type="button"
+          class="font-medium hover:text-accent flex-1 text-left"
+          title="Open project graph"
+          @click="openProjectGraph(p.name)"
+        >{{ p.name }}</button>
         <span class="text-xs text-text-muted">{{ p.note_count }} notes</span>
 
         <template v-if="auth.canWrite">

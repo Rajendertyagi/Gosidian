@@ -1,48 +1,51 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+/**
+ * GraphView — link graph as a plancia window. Two modes:
+ *   - global  (no `focus` prop): full controls aside + canvas.
+ *   - ego      (`focus` set, from the window "direct links" button):
+ *     compact canvas of the note's neighbourhood at `depth` hops.
+ *
+ * Filter state lives in the component (NOT the URL): the plancia owns the URL
+ * (`?w=&f=`), so this view must not call router.replace. Node clicks open the
+ * target note as a sibling window.
+ */
+import { computed, defineAsyncComponent, inject, onMounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { fetchGraph, type GraphResponse } from '@/api/graph'
 import { listProjects, type Project } from '@/api/projects'
 import { listTags, type TagCount } from '@/api/tags'
 import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
 import SearchSelect from '@/components/primitives/SearchSelect.vue'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 
-// Lazy-load Cytoscape via the canvas component — keeps the graph
-// chunk separate from the AppShell shipping bundle.
-const GraphCanvas = defineAsyncComponent(
-  () => import('@/components/graph/GraphCanvas.vue'),
-)
+const GraphCanvas = defineAsyncComponent(() => import('@/components/graph/GraphCanvas.vue'))
 
-const route = useRoute()
-const router = useRouter()
+const props = defineProps<{
+  project?: string
+  tag?: string
+  focus?: string
+  depth?: number
+}>()
+
+const store = useWindowsStore()
+const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
 const data = ref<GraphResponse | null>(null)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
-const project = ref<string>(strFromQuery('project'))
-const tag = ref<string>(strFromQuery('tag'))
-const focus = ref<string>(strFromQuery('focus'))
-const depth = ref<number>(numFromQuery('depth', 2))
-const minDegree = ref<number>(numFromQuery('min_degree', 0))
-const limit = ref<number>(numFromQuery('limit', 0))
+const project = ref<string>(props.project ?? '')
+const tag = ref<string>(props.tag ?? '')
+const focus = ref<string>(props.focus ?? '')
+const depth = ref<number>(props.depth ?? 2)
+const minDegree = ref<number>(0)
+const limit = ref<number>(0)
 
-// Whether the URL already pins a view (deep link / shared graph). When it
-// doesn't, we open on the most-recently-edited project the user can see
-// instead of the whole vault — see onMounted.
+/** Ego windows (opened from the "direct links" button) render compact. */
+const compact = computed(() => Boolean(props.focus))
 const hadInitialFilter = Boolean(project.value || tag.value || focus.value)
-
-function strFromQuery(key: string): string {
-  const v = route.query[key]
-  return typeof v === 'string' ? v : ''
-}
-function numFromQuery(key: string, fallback: number): number {
-  const v = route.query[key]
-  if (typeof v !== 'string') return fallback
-  const parsed = parseInt(v, 10)
-  return Number.isFinite(parsed) ? parsed : fallback
-}
+const base = (p: string) => (p.split('/').pop() ?? p).replace(/\.md$/, '')
 
 const params = computed(() => ({
   project: project.value || undefined,
@@ -67,22 +70,7 @@ async function load() {
 }
 
 const debouncedLoad = useDebounceFn(load, 200)
-
-watch(
-  params,
-  (next) => {
-    const query: Record<string, string> = {}
-    if (next.project) query.project = next.project
-    if (next.tag) query.tag = next.tag
-    if (next.focus) query.focus = next.focus
-    if (next.depth) query.depth = String(next.depth)
-    if (next.min_degree) query.min_degree = String(next.min_degree)
-    if (next.limit) query.limit = String(next.limit)
-    void router.replace({ query })
-    void debouncedLoad()
-  },
-  { deep: true },
-)
+watch(params, () => void debouncedLoad(), { deep: true })
 
 function reset() {
   project.value = ''
@@ -94,40 +82,35 @@ function reset() {
 }
 
 function onSelect(path: string) {
-  void router.push('/notes/' + encodeURIComponent(path))
+  openWindow({
+    type: 'note',
+    key: planciaKey('note', path),
+    title: base(path),
+    props: { path },
+  })
 }
 
-// --- Picker datasets ---------------------------------------------
-//
-// Project: vault top-level dirs sorted by mtime desc (most recent
-//          activity first) — see /api/v1/projects + the mod_time
-//          field added in the same change.
-// Tag:     /api/v1/tags returns items already sorted by count desc
-//          server-side (most-used first). No client sort needed.
-// Focus:   /api/v1/note-titles?q= empty returns the 50 most-recently
-//          edited notes (mtime desc); typing in the textbox falls
-//          through SearchSelect's local filter rather than re-firing
-//          the API. For 50 entries that's plenty of resolution.
 const projects = ref<Project[]>([])
 const tags = ref<TagCount[]>([])
 const notes = ref<NoteTitleHit[]>([])
 
-const sortedProjects = computed<Project[]>(() => {
-  return [...projects.value].sort((a, b) => {
+const sortedProjects = computed<Project[]>(() =>
+  [...projects.value].sort((a, b) => {
     const am = a.mod_time ?? ''
     const bm = b.mod_time ?? ''
     if (am === bm) return a.name.localeCompare(b.name)
     if (!am) return 1
     if (!bm) return -1
     return bm.localeCompare(am)
-  })
-})
+  }),
+)
 
 onMounted(async () => {
-  // Fetch the picker datasets first so we can pick a sensible default
-  // before the first graph load. Failures degrade to "no suggestions,
-  // free typing still works". listProjects() is already authz-filtered,
-  // so sortedProjects only ever holds projects this user may open.
+  if (compact.value) {
+    // Ego graph: no pickers needed, just load the neighbourhood.
+    void load()
+    return
+  }
   const [pRes, tRes, nRes] = await Promise.allSettled([
     listProjects(),
     listTags(),
@@ -137,10 +120,6 @@ onMounted(async () => {
   if (tRes.status === 'fulfilled') tags.value = tRes.value
   if (nRes.status === 'fulfilled') notes.value = nRes.value
 
-  // No deep-link filter → open on the most recently edited project the
-  // user can see, so a vault with many projects doesn't dump every node
-  // at once. Setting project triggers the params watcher (loads + syncs
-  // the URL). "(all)" stays one click away via the project picker.
   const mostRecent = sortedProjects.value[0]
   if (!hadInitialFilter && mostRecent) {
     project.value = mostRecent.name
@@ -152,9 +131,10 @@ onMounted(async () => {
 
 <template>
   <div class="flex h-full">
-    <aside class="w-72 shrink-0 border-r border-border bg-bg-elevated p-4 space-y-4 overflow-auto">
-      <h1 class="text-lg font-semibold">Graph</h1>
-
+    <aside
+      v-if="!compact"
+      class="w-72 shrink-0 border-r border-border bg-bg-elevated p-4 space-y-4 overflow-auto"
+    >
       <div class="block text-sm">
         <span class="text-text-muted text-xs">Project</span>
         <SearchSelect
@@ -239,7 +219,7 @@ onMounted(async () => {
       </div>
     </aside>
 
-    <section class="flex-1 relative">
+    <section class="flex-1 relative min-w-0">
       <p
         v-if="loading"
         class="absolute top-3 left-3 z-10 text-xs text-text-muted bg-bg-elevated px-2 py-1 rounded border border-border"
@@ -248,16 +228,8 @@ onMounted(async () => {
         v-else-if="error"
         class="absolute top-3 left-3 z-10 text-xs text-danger bg-bg-elevated px-2 py-1 rounded border border-danger"
       >{{ error }}</p>
-      <GraphCanvas
-        v-if="data"
-        :nodes="data.nodes"
-        :edges="data.edges"
-        @select="onSelect"
-      />
-      <p
-        v-else-if="!loading"
-        class="p-8 text-text-muted text-sm"
-      >No data yet.</p>
+      <GraphCanvas v-if="data" :nodes="data.nodes" :edges="data.edges" @select="onSelect" />
+      <p v-else-if="!loading" class="p-8 text-text-muted text-sm">No data yet.</p>
     </section>
   </div>
 </template>

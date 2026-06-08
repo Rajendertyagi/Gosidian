@@ -83,10 +83,10 @@ func checkBrokenWikilink(ctx context.Context, l *Linter, project string) ([]Issu
 // have no incoming link. The exclusion is filename-based (not path-based) so
 // it applies at any nesting level (e.g. `gosidian/skills/README.md`).
 var orphanExcludedBase = map[string]struct{}{
-	"README.md":  {},
-	"hot.md":     {},
-	"log.md":     {},
-	"CLAUDE.md":  {},
+	"README.md": {},
+	"hot.md":    {},
+	"log.md":    {},
+	"CLAUDE.md": {},
 }
 
 // orphanExcludedDirs lists vault sub-paths whose notes are documentation
@@ -186,6 +186,7 @@ var knownTagValues = map[string]map[string]struct{}{
 		"doc":     {},
 		"index":   {},
 		"handoff": {},
+		"insight": {},
 	},
 	"topic": {
 		"mcp":     {},

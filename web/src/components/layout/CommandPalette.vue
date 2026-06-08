@@ -11,18 +11,21 @@
  * extra dependencies.
  */
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
 import { fetchCommandPalette, type CommandPaletteData } from '@/api/commandPalette'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 
 interface PaletteItem {
   kind: 'note' | 'project' | 'tag' | 'action'
   label: string
   detail?: string
-  to: string
+  open: OpenSpec
+  /** Note path, for recents boosting. */
+  path?: string
 }
 
-const router = useRouter()
+const windows = useWindowsStore()
 const recents = useRecentlyViewed()
 
 const open = ref(false)
@@ -39,7 +42,13 @@ const baseItems = computed<PaletteItem[]>(() => {
       kind: 'note',
       label: n.title || n.path,
       detail: n.path,
-      to: '/notes/' + encodeURIComponent(n.path),
+      path: n.path,
+      open: {
+        type: 'note',
+        key: planciaKey('note', n.path),
+        title: n.title || n.path,
+        props: { path: n.path },
+      },
     })
   }
   for (const p of dataset.value.projects) {
@@ -47,7 +56,7 @@ const baseItems = computed<PaletteItem[]>(() => {
       kind: 'project',
       label: p.name,
       detail: `${p.noteCount} notes`,
-      to: '/?project=' + encodeURIComponent(p.name),
+      open: { type: 'projects', key: planciaKey('projects'), props: { project: p.name } },
     })
   }
   for (const t of dataset.value.tags) {
@@ -55,7 +64,7 @@ const baseItems = computed<PaletteItem[]>(() => {
       kind: 'tag',
       label: '#' + t.tag,
       detail: `${t.count} notes`,
-      to: '/search?q=' + encodeURIComponent('tag:' + t.tag),
+      open: { type: 'tags', key: planciaKey('tags', t.tag), title: '#' + t.tag, props: { tag: t.tag } },
     })
   }
   return items
@@ -64,7 +73,7 @@ const baseItems = computed<PaletteItem[]>(() => {
 function score(item: PaletteItem, q: string): number {
   if (!q) {
     // Boost recents when the query is empty.
-    const isRecent = recents.entries.value.some((e) => item.to.endsWith(encodeURIComponent(e.path)))
+    const isRecent = !!item.path && recents.entries.value.some((e) => e.path === item.path)
     return isRecent ? 100 : 1
   }
   const haystack = (item.label + ' ' + (item.detail ?? '')).toLowerCase()
@@ -110,7 +119,7 @@ function hide() {
 function pick(item: PaletteItem | undefined) {
   if (!item) return
   hide()
-  void router.push(item.to)
+  windows.open(item.open)
 }
 
 function onKey(e: KeyboardEvent) {
@@ -170,7 +179,7 @@ onUnmounted(() => {
         <ul class="max-h-[50vh] overflow-auto">
           <li
             v-for="(item, idx) in filtered"
-            :key="item.kind + ':' + item.to"
+            :key="item.kind + ':' + (item.path ?? item.label)"
             :class="[
               'flex items-center gap-3 px-4 py-2 cursor-pointer',
               idx === selected ? 'bg-surface-hover' : 'hover:bg-surface-hover',

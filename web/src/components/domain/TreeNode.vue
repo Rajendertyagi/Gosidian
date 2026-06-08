@@ -12,9 +12,12 @@
 import type { TreeNode as TN } from '@/api/tree'
 import { computed } from 'vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
+import { useWindowsStore } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 
 const props = defineProps<{ node: TN }>()
 const recents = useRecentlyViewed()
+const windows = useWindowsStore()
 
 const expandedKey = computed(() => `gosidian.tree.open:${props.node.path}`)
 
@@ -33,10 +36,16 @@ function persistedOpen(): boolean {
   }
 }
 
-function recordView() {
-  if (!props.node.is_dir) {
-    recents.record(props.node.path, props.node.name.replace(/\.md$/, ''))
-  }
+function openNote() {
+  if (props.node.is_dir) return
+  const title = props.node.name.replace(/\.md$/, '')
+  recents.record(props.node.path, title)
+  windows.open({
+    type: 'note',
+    key: planciaKey('note', props.node.path),
+    title,
+    props: { path: props.node.path },
+  })
 }
 </script>
 
@@ -74,10 +83,10 @@ function recordView() {
     </template>
 
     <template v-else>
-      <RouterLink
-        :to="'/notes/' + encodeURIComponent(node.path)"
-        @click="recordView"
-        class="flex items-center gap-1.5 py-0.5 px-2 rounded text-text-muted hover:text-text hover:bg-surface-hover truncate"
+      <button
+        type="button"
+        @click="openNote"
+        class="w-full flex items-center gap-1.5 py-0.5 px-2 rounded text-left text-text-muted hover:text-text hover:bg-surface-hover truncate"
       >
         <span class="opacity-50 text-xs">·</span>
         <span class="truncate">{{ node.name.replace(/\.md$/, '') }}</span>
@@ -86,7 +95,7 @@ function recordView() {
           class="text-[10px] text-info ml-auto"
           title="status:in-progress"
         >●</span>
-      </RouterLink>
+      </button>
     </template>
   </li>
 </template>

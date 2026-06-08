@@ -4,6 +4,50 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.3.0] — 2026-06-08 — "plancia"
+
+MINOR release. The web UI becomes a tiling window manager, and two
+opt-in features land — all backward compatible and off by default.
+
+### Added
+
+- **Plancia window manager.** A niri-style scrollable tiling workspace:
+  notes, the graph, search, and config forms open as resizable windows
+  side by side instead of one page at a time. Windows resize in steps
+  (small / medium / full), minimize to a scrollable footer, and a
+  per-window "direct links" button opens the one-hop ego-graph of a note.
+  Open windows + focus are encoded in the URL (shareable, reload-safe),
+  with a `localStorage` fallback. The app menu moved into a collapsible
+  sidebar section; the command palette (⌘K) and wikilinks open windows.
+- **Global projects** (opt-in, off by default). Shared `global` (public)
+  and `global-private` projects whose skills, agents, and scaffold
+  templates any project can reuse, with local-overrides-global merge.
+  Gated by `GOSIDIAN_GLOBAL_ENABLED` and a per-project `use_globals`
+  flag. See `docs/vault/global-projects.md`.
+- **Self-improvement loop** (experimental, off by default). Agents record
+  structured usage-friction insights via the `memory_self_improve` MCP
+  tool, kept in a private `insights` project for the owner to triage.
+  Opt-in per token. See `docs/mcp/self-improvement.md`.
+- Two new MCP tools — `memory_self_improve` and `memory_global_check`
+  (48 tools total).
+
+### Changed
+
+- A note now opens as a **single window with an in-place View/Edit
+  toggle** — editing no longer navigates to a separate page. The editor
+  (CodeMirror) mounts lazily and is hidden for read-only users.
+- **Documentation corrected**: the web UI has been a Vue 3 SPA since
+  v2.0; the README, web-UI overview, FAQ, and architecture pages that
+  still described the old HTMX stack are now accurate.
+- `modernc.org/sqlite` updated to 1.52.0.
+
+### Notes
+
+- Fully backward compatible. Global projects and the self-improvement
+  loop are **off by default**; existing deployments need no migration.
+  Deep-link routes (`/notes/<path>`, `/graph`, …) still work — they open
+  the matching window in the plancia.
+
 ## [2.2.0] — 2026-06-08 — "auth & roles"
 
 MINOR release. Adds role-based access control, two-factor (TOTP), and

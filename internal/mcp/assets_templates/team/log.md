@@ -1,6 +1,6 @@
 ---
 title: {{PROJECT}} Activity Log
-description: Log append-only di attività sul progetto {{PROJECT}}.
+description: Append-only activity log for the {{PROJECT}} project.
 tags: [{{PROJECT}}, type:index, topic:meta]
 type: index
 updated: {{TODAY}}
@@ -8,20 +8,20 @@ updated: {{TODAY}}
 
 # {{PROJECT}} — Log
 
-Log **append-only** delle attività cross-sessione. Nuove entry **in fondo**, mai modificare le esistenti.
+**Append-only** log of cross-session activity. New entries **at the bottom**, never edit existing ones.
 
-## Convenzioni di entry
+## Entry conventions
 
 ```markdown
-## YYYY-MM-DD — <tipo> — <titolo breve>
+## YYYY-MM-DD — <type> — <short title>
 
-Corpo dell'entry: 1-5 righe. Per task grandi linka il plan.
+Entry body: 1-5 lines. For large tasks, link the plan.
 ```
 
-Tipi: `bootstrap`, `plan-closed`, `adr`, `pattern`, `fix`, `discovery`, `ops`.
+Types: `bootstrap`, `plan-closed`, `adr`, `pattern`, `fix`, `discovery`, `ops`.
 
 ---
 
-## {{TODAY}} — bootstrap — Scaffold creato
+## {{TODAY}} — bootstrap — Scaffold created
 
-Scaffold iniziale del progetto {{PROJECT}} generato via `memory_project_scaffold`.
+Initial scaffold of the {{PROJECT}} project generated via `memory_project_scaffold`.

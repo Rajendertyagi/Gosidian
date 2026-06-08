@@ -13,6 +13,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +21,17 @@ import (
 	"github.com/gosidian/gosidian/internal/scaffold"
 	"github.com/mark3labs/mcp-go/mcp"
 )
+
+// templatesDir returns the active bootstrap-templates root: the global public
+// project's templates/ folder when the global feature is on, otherwise the
+// machine-owned <vault>/.gosidian/templates. With globals on, templates are
+// editable notes; with them off, behaviour is unchanged.
+func (s *Server) templatesDir() string {
+	if s.globalEnabled && s.globalPublic != "" {
+		return filepath.Join(s.vault.Root, s.globalPublic, "templates")
+	}
+	return scaffold.TemplatesDir(s.vault.Root)
+}
 
 //go:embed all:assets_templates/*
 var embeddedTemplates embed.FS
@@ -69,7 +81,7 @@ func (s *Server) handleProjectScaffold(ctx context.Context, req mcp.CallToolRequ
 		tmplName = defaultTemplate
 	}
 
-	tmpl, err := scaffold.LoadTemplate(s.vault.Root, tmplName)
+	tmpl, err := scaffold.LoadTemplateIn(s.templatesDir(), tmplName)
 	if err != nil {
 		return mcp.NewToolResultErrorf("template %q not found in vault; run memory_list_bootstrap_templates to list what's available", tmplName), nil
 	}

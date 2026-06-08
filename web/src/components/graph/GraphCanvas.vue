@@ -34,6 +34,8 @@ const emit = defineEmits<{
 const host = ref<HTMLDivElement | null>(null)
 let cy: Core | null = null
 let presetObserver: MutationObserver | null = null
+let resizeObserver: ResizeObserver | null = null
+let resizeRaf = 0
 
 function elementsFor(nodes: GraphNode[], edges: GraphEdge[]): ElementDefinition[] {
   const els: ElementDefinition[] = []
@@ -271,12 +273,27 @@ async function mount() {
     attributes: true,
     attributeFilter: ['data-preset'],
   })
+
+  // Re-fit when the host resizes — e.g. a plancia window cycling its width
+  // step, or the sidebar drag. Cytoscape needs an explicit resize() to pick
+  // up the new container box; rAF-coalesced so a drag doesn't thrash layout.
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeRaf) cancelAnimationFrame(resizeRaf)
+    resizeRaf = requestAnimationFrame(() => {
+      cy?.resize()
+      cy?.fit(undefined, 30)
+    })
+  })
+  resizeObserver.observe(host.value)
 }
 
 onMounted(mount)
 onBeforeUnmount(() => {
   presetObserver?.disconnect()
   presetObserver = null
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (resizeRaf) cancelAnimationFrame(resizeRaf)
   cy?.destroy()
   cy = null
 })

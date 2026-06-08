@@ -1,6 +1,6 @@
 ---
 title: {{PROJECT}} Memory Index
-description: Landing page per le memory note stabili del progetto.
+description: Landing page for the project's stable memory notes.
 tags: [{{PROJECT}}, type:index, topic:meta]
 type: index
 updated: {{TODAY}}
@@ -8,10 +8,10 @@ updated: {{TODAY}}
 
 # Memory — {{PROJECT}}
 
-Conoscenza stabile del progetto. File convenzionali:
+Stable project knowledge. Conventional files:
 
-- `architecture.md` — componenti, flussi principali, invarianti
-- `conventions.md` — regole di codice / test / ops
-- `decisions.md` — ADR append-only
-- `glossary.md` — termini di dominio
-- `environments.md` — porte, env var, segreti (reference solo, mai plaintext)
+- `architecture.md` — components, main flows, invariants
+- `conventions.md` — code / test / ops rules
+- `decisions.md` — append-only ADRs
+- `glossary.md` — domain terms
+- `environments.md` — ports, env vars, secrets (reference only, never plaintext)

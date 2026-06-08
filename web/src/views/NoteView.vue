@@ -1,41 +1,98 @@
 <script setup lang="ts">
 /**
- * NoteView — read-only render of a single note. Markdown is shipped
- * to /api/v1/preview so wikilinks resolve against the live index;
- * the response is sanitized via DOMPurify in MarkdownPreview before
- * v-html. Phase 3.3 adds the edit pane next to this read view.
+ * NoteView — a single note as ONE plancia window with an in-place view/edit
+ * toggle. Defaults to read (rendered preview); flipping to Edit mounts the
+ * editor in the SAME window (no second window). CodeMirror is lazy so a window
+ * that's only ever read never loads the editor chunk; the Edit toggle is hidden
+ * for read-only users.
+ *
+ * Concurrency is window-aware: the editor listens for the api client's
+ * `note.concurrency-conflict` event filtered to ITS path and resolves the 412
+ * inline (reload remote / overwrite).
+ *
+ * Emits `title`/`dirty`/`close` to the window frame; History opens a sibling
+ * window via the injected `openWindow`.
  */
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { getNote, type Note } from '@/api/notes'
+import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useDebounceFn } from '@vueuse/core'
+import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
 import { renderPreview } from '@/api/preview'
-import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
+import { onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
+import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
+import { planciaKey } from '@/composables/usePlanciaSync'
 import { useAuthStore } from '@/stores/auth'
+import { useTreeStore } from '@/stores/tree'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
 
-const route = useRoute()
+const CodeMirrorEditor = defineAsyncComponent(
+  () => import('@/components/editor/CodeMirrorEditor.vue'),
+)
+
+type Mode = 'view' | 'edit'
+type EditorLayout = 'editor' | 'split' | 'stacked' | 'preview'
+
+const props = defineProps<{ path: string; mode?: Mode }>()
+const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
+
 const auth = useAuthStore()
 const recents = useRecentlyViewed()
-const note = ref<Note | null>(null)
-const html = ref<string>('')
-const loading = ref(false)
-const error = ref<string | null>(null)
+const treeStore = useTreeStore()
+const store = useWindowsStore()
+const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
-const path = computed(() => {
-  const raw = route.params.path
-  return Array.isArray(raw) ? raw.join('/') : (raw ?? '')
+const rootEl = ref<HTMLElement | null>(null)
+const note = ref<Note | null>(null)
+const draft = ref<string>('')
+const previewHTML = ref<string>('')
+const loading = ref(false)
+const saving = ref(false)
+const error = ref<string | null>(null)
+const dirty = ref(false)
+const lastSavedAt = ref<string | null>(null)
+const conflict = ref<ConcurrencyConflictDetail | null>(null)
+
+// Read by default; honour an explicit edit intent (legacy /notes/:path/edit
+// deep-link) only when the user may write.
+const mode = ref<Mode>(props.mode === 'edit' && auth.canWrite ? 'edit' : 'view')
+
+const path = computed(() => props.path)
+const project = computed(() => {
+  const parts = path.value.split('/')
+  return parts.length > 1 ? parts[0] : undefined
+})
+
+const STORAGE_LAYOUT = 'gosidian.editorMode'
+const layout = ref<EditorLayout>(loadLayout())
+function loadLayout(): EditorLayout {
+  try {
+    const v = localStorage.getItem(STORAGE_LAYOUT)
+    if (v === 'editor' || v === 'split' || v === 'stacked' || v === 'preview') return v
+  } catch {
+    /* ignore */
+  }
+  return 'split'
+}
+watch(layout, (m) => {
+  try {
+    localStorage.setItem(STORAGE_LAYOUT, m)
+  } catch {
+    /* ignore */
+  }
 })
 
 async function load() {
   if (!path.value) return
   loading.value = true
   error.value = null
-  html.value = ''
   try {
     const fetched = await getNote(path.value)
     note.value = fetched
-    if (fetched) recents.record(fetched.path, fetched.title || fetched.path)
-    html.value = await renderPreview(fetched.content)
+    draft.value = fetched.content
+    recents.record(fetched.path, fetched.title || fetched.path)
+    emit('title', fetched.title || fetched.path)
+    previewHTML.value = await renderPreview(fetched.content)
+    dirty.value = false
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load note'
     note.value = null
@@ -44,32 +101,230 @@ async function load() {
   }
 }
 
-onMounted(load)
+const refreshPreview = useDebounceFn(async () => {
+  try {
+    previewHTML.value = await renderPreview(draft.value)
+  } catch {
+    /* preview failure shouldn't block editing */
+  }
+}, 300)
+
+watch(draft, () => {
+  if (!note.value) return
+  dirty.value = draft.value !== note.value.content
+  if (mode.value === 'edit' && layout.value !== 'editor') void refreshPreview()
+})
+watch(dirty, (d) => emit('dirty', d))
+
+function enterEdit() {
+  if (!auth.canWrite) return
+  mode.value = 'edit'
+}
+async function enterView() {
+  mode.value = 'view'
+  // View shows the saved content; the draft stays in memory for re-editing.
+  if (note.value) previewHTML.value = await renderPreview(note.value.content)
+}
+
+async function save() {
+  if (!note.value || !dirty.value || saving.value) return
+  saving.value = true
+  error.value = null
+  try {
+    const updated = await updateNote(note.value.path, {
+      content: draft.value,
+      ifMatch: note.value.etag,
+    })
+    note.value = updated
+    draft.value = updated.content
+    dirty.value = false
+    lastSavedAt.value = new Date().toLocaleTimeString()
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Save failed'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function reloadRemote() {
+  conflict.value = null
+  await load()
+}
+async function forceOverwrite() {
+  if (!note.value) return
+  saving.value = true
+  error.value = null
+  try {
+    const updated = await updateNote(note.value.path, { content: draft.value })
+    note.value = updated
+    draft.value = updated.content
+    dirty.value = false
+    lastSavedAt.value = new Date().toLocaleTimeString()
+    conflict.value = null
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Overwrite failed'
+  } finally {
+    saving.value = false
+  }
+}
+
+async function destroy() {
+  if (!note.value) return
+  if (!confirm(`Delete ${note.value.path}? This moves it to the trash.`)) return
+  try {
+    await deleteNote(note.value.path)
+    treeStore.invalidateAll()
+    emit('close')
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Delete failed'
+  }
+}
+
+function openHistory() {
+  if (!note.value) return
+  openWindow({
+    type: 'history',
+    key: planciaKey('history', note.value.path),
+    title: `⏱ ${note.value.title || note.value.path}`,
+    props: { path: note.value.path },
+  })
+}
+
+function onKeydown(e: KeyboardEvent) {
+  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+    if (mode.value !== 'edit' || !rootEl.value?.contains(document.activeElement)) return
+    e.preventDefault()
+    void save()
+  }
+}
+
+let unsub: (() => void) | null = null
+onMounted(() => {
+  void load()
+  window.addEventListener('keydown', onKeydown)
+  unsub = onApiEvent('note.concurrency-conflict', (detail) => {
+    if (detail.path === path.value) conflict.value = detail
+  })
+})
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', onKeydown)
+  unsub?.()
+})
 watch(path, load)
 </script>
 
 <template>
-  <div class="p-8 max-w-3xl mx-auto">
-    <p v-if="loading" class="mt-4 text-text-muted">Loading…</p>
-    <p v-else-if="error" class="mt-4 text-danger">{{ error }}</p>
+  <div ref="rootEl" class="flex flex-col h-full">
+    <header class="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-elevated">
+      <span class="font-semibold truncate">{{ note?.title || note?.path || path }}</span>
+      <span v-if="dirty" class="text-xs text-warning" title="Unsaved changes">●</span>
+      <span v-else-if="lastSavedAt" class="text-xs text-success">saved {{ lastSavedAt }}</span>
 
-    <article v-else-if="note">
-      <header class="mb-6 flex items-baseline gap-3">
-        <h1 class="text-2xl font-semibold flex-1">{{ note.title || note.path }}</h1>
-        <RouterLink
-          :to="'/notes/' + encodeURIComponent(note.path) + '/history'"
-          class="text-sm text-text-muted hover:text-text"
-        >History</RouterLink>
-        <RouterLink
+      <div class="flex-1" />
+
+      <!-- View / Edit toggle (Edit hidden for read-only users) -->
+      <div class="inline-flex rounded border border-border overflow-hidden text-xs">
+        <button
+          type="button"
+          class="px-2 py-1"
+          :class="mode === 'view' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+          @click="enterView"
+        >View</button>
+        <button
           v-if="auth.canWrite"
-          :to="'/notes/' + encodeURIComponent(note.path) + '/edit'"
-          class="text-sm px-3 py-1 rounded bg-accent text-accent-fg hover:bg-accent-hover"
-        >Edit</RouterLink>
-      </header>
-      <p class="text-xs text-text-muted font-mono mb-6">
-        {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
-      </p>
-      <MarkdownPreview :html="html" />
-    </article>
+          type="button"
+          class="px-2 py-1"
+          :class="mode === 'edit' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+          @click="enterEdit"
+        >Edit</button>
+      </div>
+
+      <!-- Edit-only controls -->
+      <template v-if="mode === 'edit'">
+        <div class="inline-flex rounded border border-border overflow-hidden text-xs">
+          <button
+            v-for="m in (['editor', 'split', 'stacked', 'preview'] as EditorLayout[])"
+            :key="m"
+            type="button"
+            class="px-2 py-1"
+            :class="layout === m ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
+            @click="layout = m"
+          >{{ m }}</button>
+        </div>
+        <button
+          type="button"
+          class="text-xs px-2 py-1 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
+          :disabled="!dirty || saving"
+          @click="save"
+        >{{ saving ? 'Saving…' : 'Save' }}</button>
+        <button
+          type="button"
+          class="text-xs px-2 py-1 rounded text-danger hover:bg-surface-hover"
+          @click="destroy"
+        >Delete</button>
+      </template>
+
+      <button
+        type="button"
+        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        @click="openHistory"
+      >History</button>
+    </header>
+
+    <div
+      v-if="conflict"
+      class="flex flex-wrap items-center gap-2 border-b border-warning/40 bg-warning/10 px-4 py-2 text-xs"
+    >
+      <span class="text-warning">Modified externally since you opened it.</span>
+      <div class="flex-1" />
+      <button type="button" class="rounded px-2 py-1 hover:bg-surface-hover" @click="reloadRemote">
+        Reload remote
+      </button>
+      <button
+        type="button"
+        class="rounded bg-accent px-2 py-1 text-accent-fg hover:bg-accent-hover"
+        @click="forceOverwrite"
+      >
+        Overwrite
+      </button>
+    </div>
+
+    <p v-if="loading" class="p-6 text-text-muted">Loading…</p>
+    <p v-else-if="error" class="p-3 text-danger text-sm">{{ error }}</p>
+
+    <!-- View mode: rendered preview -->
+    <div v-else-if="mode === 'view'" class="flex-1 overflow-auto">
+      <article class="p-6 max-w-3xl mx-auto">
+        <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
+          {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
+        </p>
+        <MarkdownPreview :html="previewHTML" />
+      </article>
+    </div>
+
+    <!-- Edit mode: editor + preview -->
+    <div
+      v-else-if="note"
+      class="flex-1 grid min-h-0"
+      :class="{
+        'grid-cols-1': layout !== 'split',
+        'grid-cols-2': layout === 'split',
+        'grid-rows-2': layout === 'stacked',
+      }"
+    >
+      <div
+        v-if="layout !== 'preview'"
+        class="h-full overflow-hidden"
+        :class="{
+          'border-r border-border': layout === 'split',
+          'border-b border-border': layout === 'stacked',
+        }"
+      >
+        <CodeMirrorEditor v-model="draft" :project="project" placeholder="Markdown…" />
+      </div>
+      <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
+        <MarkdownPreview :html="previewHTML" />
+      </div>
+    </div>
   </div>
 </template>

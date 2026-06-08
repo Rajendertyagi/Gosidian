@@ -1,6 +1,6 @@
 ---
 title: {{PROJECT}} Hot State
-description: Session cache — current focus, active plans, recent decisions. Letta all'inizio di ogni sessione per orientamento rapido.
+description: Session cache — current focus, active plans, recent decisions. Read at the start of every session for quick orientation.
 tags: [{{PROJECT}}, type:index, topic:meta]
 type: index
 updated: {{TODAY}}
@@ -8,22 +8,22 @@ updated: {{TODAY}}
 
 # {{PROJECT}} — Hot State
 
-> Session cache stile Karpathy-Wiki-Stack. Aggiornata a fine task quando cambia focus/plan/ADR.
+> Karpathy-Wiki-Stack-style session cache. Updated at end of task when focus/plan/ADR changes.
 
 ## Current focus
 
-_(da popolare al primo task reale)_
+_(to populate at the first real task)_
 
 ## Active plans
 
-Nessun plan `status:in-progress`.
+No plan `status:in-progress`.
 
-## Recent decisions (ultime 5)
+## Recent decisions (last 5)
 
 <!-- auto:recent-decisions -->
-_(da popolare — questa sezione può essere rigenerata via `memory_refresh_hot` quando abilitato nel config)_
+_(to populate — this section can be regenerated via `memory_refresh_hot` when enabled in the config)_
 <!-- /auto -->
 
 ## Hot files
 
-_(file attualmente caldi)_
+_(currently hot files)_

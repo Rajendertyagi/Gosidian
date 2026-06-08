@@ -19,15 +19,49 @@ import (
 
 // Config is the top-level settings document.
 type Config struct {
-	Git     GitConfig     `toml:"git"`
-	MCP     MCPConfig     `toml:"mcp"`
-	Trash   TrashConfig   `toml:"trash"`
-	Theme   ThemeConfig   `toml:"theme"`
-	Webauth WebauthConfig `toml:"webauth"`
-	Vault   VaultConfig   `toml:"vault"`
-	I18n    I18nConfig    `toml:"i18n"`
-	Lint    LintConfig    `toml:"lint"`
-	LDAP    LDAPConfig    `toml:"ldap"`
+	Git         GitConfig         `toml:"git"`
+	MCP         MCPConfig         `toml:"mcp"`
+	Trash       TrashConfig       `toml:"trash"`
+	Theme       ThemeConfig       `toml:"theme"`
+	Webauth     WebauthConfig     `toml:"webauth"`
+	Vault       VaultConfig       `toml:"vault"`
+	I18n        I18nConfig        `toml:"i18n"`
+	Lint        LintConfig        `toml:"lint"`
+	LDAP        LDAPConfig        `toml:"ldap"`
+	SelfImprove SelfImproveConfig `toml:"self_improve"`
+	Global      GlobalConfig      `toml:"global"`
+}
+
+// SelfImproveConfig enables the agent-sourced self-improvement loop: opted-in
+// MCP tokens get a periodic nudge inviting the agent to record a structured
+// insight (via memory_self_improve) about real-usage friction. Disabled by
+// default — with enabled=false gosidian behaves exactly as before. Opt-in is
+// per-token (auth.Token.SelfImproveOptIn), NOT global: this section holds only
+// the master switch and global tuning. See plan 20260608-self-improve-feedback-loop.
+type SelfImproveConfig struct {
+	Enabled             bool          `toml:"enabled"`                // master switch; default false
+	TargetProject       string        `toml:"target_project"`         // vault project for raw insights; default "insights"
+	EveryNCalls         int           `toml:"every_n_calls"`          // nudge cadence per session; default 25
+	CooldownMinutes     int           `toml:"cooldown_minutes"`       // min minutes between nudges per token; default 120
+	MaxNudgesPerSession int           `toml:"max_nudges_per_session"` // hard cap per session; default 1
+	NotifyEmail         string        `toml:"notify_email"`           // scheduled-digest recipient; empty = no email
+	DigestInterval      time.Duration `toml:"digest_interval"`        // how often to compile a digest; 0 disables the scheduler
+	SMTPHost            string        `toml:"smtp_host"`              // SMTP server host; empty = email off (digest note still written)
+	SMTPPort            int           `toml:"smtp_port"`              // default 587
+	SMTPFrom            string        `toml:"smtp_from"`              // From address
+	SMTPUsername        string        `toml:"smtp_username"`          // SMTP auth username
+	SMTPPassword        string        `toml:"smtp_password"`          // SMTP auth password (prefer env GOSIDIAN_SELF_IMPROVE_SMTP_PASSWORD)
+}
+
+// GlobalConfig enables the shared "global" projects that hold reusable skills,
+// agents and init templates other projects can reference (per-project opt-in
+// via projects.Flags.UseGlobals). Two projects: PublicProject (RBAC public,
+// shared with everyone) and PrivateProject (private, owner-only). Disabled by
+// default. See plan 20260608-global-project-shared-skills.
+type GlobalConfig struct {
+	Enabled        bool   `toml:"enabled"`         // master switch; default false
+	PublicProject  string `toml:"public_project"`  // default "global"
+	PrivateProject string `toml:"private_project"` // default "global-private"
 }
 
 // LDAPConfig enables web-login against an external directory via a
@@ -327,6 +361,71 @@ func (c *Config) ApplyEnv() error {
 	if v := os.Getenv("GOSIDIAN_LDAP_INSECURE_SKIP_VERIFY"); v != "" {
 		c.LDAP.SkipVerify = envBool(v)
 	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_ENABLED"); v != "" {
+		c.SelfImprove.Enabled = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT"); v != "" {
+		c.SelfImprove.TargetProject = v
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_EVERY_N_CALLS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_SELF_IMPROVE_EVERY_N_CALLS: %w", err)
+		}
+		c.SelfImprove.EveryNCalls = n
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_COOLDOWN_MINUTES"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_SELF_IMPROVE_COOLDOWN_MINUTES: %w", err)
+		}
+		c.SelfImprove.CooldownMinutes = n
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_MAX_NUDGES_PER_SESSION"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_SELF_IMPROVE_MAX_NUDGES_PER_SESSION: %w", err)
+		}
+		c.SelfImprove.MaxNudgesPerSession = n
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_NOTIFY_EMAIL"); v != "" {
+		c.SelfImprove.NotifyEmail = v
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_DIGEST_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_SELF_IMPROVE_DIGEST_INTERVAL: %w", err)
+		}
+		c.SelfImprove.DigestInterval = d
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_SMTP_HOST"); v != "" {
+		c.SelfImprove.SMTPHost = v
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_SMTP_PORT"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("GOSIDIAN_SELF_IMPROVE_SMTP_PORT: %w", err)
+		}
+		c.SelfImprove.SMTPPort = n
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_SMTP_FROM"); v != "" {
+		c.SelfImprove.SMTPFrom = v
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_SMTP_USERNAME"); v != "" {
+		c.SelfImprove.SMTPUsername = v
+	}
+	if v := os.Getenv("GOSIDIAN_SELF_IMPROVE_SMTP_PASSWORD"); v != "" {
+		c.SelfImprove.SMTPPassword = v
+	}
+	if v := os.Getenv("GOSIDIAN_GLOBAL_ENABLED"); v != "" {
+		c.Global.Enabled = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_GLOBAL_PUBLIC_PROJECT"); v != "" {
+		c.Global.PublicProject = v
+	}
+	if v := os.Getenv("GOSIDIAN_GLOBAL_PRIVATE_PROJECT"); v != "" {
+		c.Global.PrivateProject = v
+	}
 	return nil
 }
 
@@ -401,5 +500,26 @@ func (c *Config) applyDefaults() {
 	}
 	if c.LDAP.UserFilter == "" {
 		c.LDAP.UserFilter = "(uid=%s)"
+	}
+	if c.SelfImprove.TargetProject == "" {
+		c.SelfImprove.TargetProject = "insights"
+	}
+	if c.SelfImprove.EveryNCalls == 0 {
+		c.SelfImprove.EveryNCalls = 25
+	}
+	if c.SelfImprove.CooldownMinutes == 0 {
+		c.SelfImprove.CooldownMinutes = 120
+	}
+	if c.SelfImprove.MaxNudgesPerSession == 0 {
+		c.SelfImprove.MaxNudgesPerSession = 1
+	}
+	if c.SelfImprove.SMTPPort == 0 {
+		c.SelfImprove.SMTPPort = 587
+	}
+	if c.Global.PublicProject == "" {
+		c.Global.PublicProject = "global"
+	}
+	if c.Global.PrivateProject == "" {
+		c.Global.PrivateProject = "global-private"
 	}
 }

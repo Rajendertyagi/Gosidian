@@ -142,6 +142,8 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/admin/invites", owner(r.handleAdminInvites))
 	r.mux.Handle("/api/v1/admin/invites/", owner(r.handleAdminInviteItem))
 	r.mux.Handle("/api/v1/admin/audit", owner(r.handleAdminAudit))
+
+	r.mux.Handle("/api/v1/insights/pending", owner(r.handleInsightsPending))
 }
 
 // notImplemented is the placeholder body used by handlers whose real

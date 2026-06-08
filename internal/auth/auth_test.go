@@ -193,3 +193,42 @@ func TestExtractBearer(t *testing.T) {
 		t.Errorf("non-bearer should be empty")
 	}
 }
+
+func TestStore_SelfImproveOptIn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "tokens.json")
+	s, _ := Open(path)
+	_, tok, err := s.Create("dogfood", "", []string{ScopeRead}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// New tokens default to opt-out.
+	if s.List()[0].SelfImproveOptIn {
+		t.Error("new token should default opt-out")
+	}
+	// Enrol.
+	if err := s.SetSelfImproveOptIn(tok.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if !s.List()[0].SelfImproveOptIn {
+		t.Error("opt-in not set")
+	}
+	// Persisted across reopen (additive field, no migration).
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !s2.List()[0].SelfImproveOptIn {
+		t.Error("opt-in not persisted across reopen")
+	}
+	// Withdraw.
+	if err := s2.SetSelfImproveOptIn(tok.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if s2.List()[0].SelfImproveOptIn {
+		t.Error("opt-in not cleared")
+	}
+	// Unknown id errors.
+	if err := s.SetSelfImproveOptIn("deadbeef", true); err == nil {
+		t.Error("unknown id should error")
+	}
+}

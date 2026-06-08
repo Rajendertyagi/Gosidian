@@ -217,6 +217,8 @@ func (s *Server) registerTools() {
 	s.registerTodosTool()
 	s.registerLintTool()
 	s.registerAskTool()
+	s.registerSelfImproveTool()
+	s.registerGlobalCheckTool()
 }
 
 // ---- handlers ----
@@ -321,8 +323,9 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 }
 
 type noteRef struct {
-	Path  string `json:"path"`
-	Title string `json:"title"`
+	Path   string `json:"path"`
+	Title  string `json:"title"`
+	Source string `json:"source,omitempty"` // local | global | global-private (skill/agent merge in bootstrap)
 }
 
 func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

@@ -34,14 +34,15 @@ const (
 // Token is the persisted record of a provisioned token. The plaintext is never
 // stored; only Hash.
 type Token struct {
-	ID          string    `json:"id"`                     // short display id (first 8 hex of hash)
-	Name        string    `json:"name"`                   // human-readable label
-	Hash        string    `json:"hash"`                   // hex-encoded sha256 of the full token
-	CreatedAt   time.Time `json:"created_at"`
-	ExpiresAt   time.Time `json:"expires_at,omitempty"`   // zero = no expiry
-	Project     string    `json:"project,omitempty"`      // empty = admin, sees everything
-	Scopes      []string  `json:"scopes"`                 // read, write
-	OwnerUserID string    `json:"owner_user_id,omitempty"` // webauth user id; empty = admin-owned (CLI)
+	ID               string    `json:"id"`   // short display id (first 8 hex of hash)
+	Name             string    `json:"name"` // human-readable label
+	Hash             string    `json:"hash"` // hex-encoded sha256 of the full token
+	CreatedAt        time.Time `json:"created_at"`
+	ExpiresAt        time.Time `json:"expires_at,omitempty"`          // zero = no expiry
+	Project          string    `json:"project,omitempty"`             // empty = admin, sees everything
+	Scopes           []string  `json:"scopes"`                        // read, write
+	OwnerUserID      string    `json:"owner_user_id,omitempty"`       // webauth user id; empty = admin-owned (CLI)
+	SelfImproveOptIn bool      `json:"self_improve_opt_in,omitempty"` // opt-in to the self-improve nudge loop (per-token)
 }
 
 // HasScope reports whether the token carries the given scope.
@@ -299,6 +300,24 @@ func (s *Store) AssignOwnerToOrphans(userID string) int {
 	}
 	_ = s.save()
 	return updated
+}
+
+// SetSelfImproveOptIn toggles the self-improve opt-in flag on the token
+// identified by its ID prefix and persists the change. Used by the admin UI
+// and CLI to enrol/withdraw a token from the self-improvement nudge loop
+// (plan 20260608-self-improve-feedback-loop). No migration is needed for
+// existing tokens.json files: the field is additive and absent records
+// deserialize to false.
+func (s *Store) SetSelfImproveOptIn(id string, optIn bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.tokens {
+		if s.tokens[i].ID == id {
+			s.tokens[i].SelfImproveOptIn = optIn
+			return s.save()
+		}
+	}
+	return fmt.Errorf("token %q not found", id)
 }
 
 // Validate takes a plaintext Bearer token and returns the matching stored

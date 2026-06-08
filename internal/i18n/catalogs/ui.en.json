@@ -1,4 +1,19 @@
 {
+  "plancia": {
+    "unsavedClose": "There are unsaved changes. Close anyway?",
+    "dirty": "Unsaved changes",
+    "links": "Direct links (graph)",
+    "resize": "Width — click to cycle",
+    "minimize": "Minimize to footer",
+    "close": "Close",
+    "openTag": "Open",
+    "unknownType": "Unknown window type: {type}",
+    "empty": "No windows open.",
+    "minimizedHint": "{n} minimized in the footer ↓",
+    "openFromSidebar": "Open a note from the sidebar.",
+    "minimizedLabel": "Minimized:",
+    "restore": "Restore"
+  },
   "common": {
     "save": "Save",
     "cancel": "Cancel",

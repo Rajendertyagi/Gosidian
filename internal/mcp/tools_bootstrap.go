@@ -20,7 +20,7 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 	), s.handleBootstrap)
 }
@@ -33,13 +33,22 @@ type bootstrapFile struct {
 }
 
 type bootstrapStats struct {
-	NotesCount int                  `json:"notes_count"`
-	TopTags    []bootstrapTagCount  `json:"top_tags"`
+	NotesCount int                 `json:"notes_count"`
+	TopTags    []bootstrapTagCount `json:"top_tags"`
 }
 
 type bootstrapTagCount struct {
 	Tag   string `json:"tag"`
 	Count int    `json:"count"`
+}
+
+// bootstrapPendingInsights is the owner-facing surface for un-triaged
+// self-improvement insights (status:pending). Count is the full total;
+// Notes is capped to the first few for a quick preview.
+type bootstrapPendingInsights struct {
+	Project string    `json:"project"`
+	Count   int       `json:"count"`
+	Notes   []noteRef `json:"notes"`
 }
 
 // conventionFiles maps the relative-to-project filename to the key we expose
@@ -90,13 +99,13 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("skills lookup failed", err), nil
 	}
-	payload["available_skills"] = skills
+	payload["available_skills"] = s.mergeGlobals(skills, "type:skill", project, tok)
 
 	agents, err := s.filterByTagAndProject("type:agent", project, tok)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("agents lookup failed", err), nil
 	}
-	payload["available_agents"] = agents
+	payload["available_agents"] = s.mergeGlobals(agents, "type:agent", project, tok)
 
 	recent, err := s.index.RecentNotes(project, 0, 5)
 	if err != nil {
@@ -129,6 +138,31 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	payload["stats"] = bootstrapStats{
 		NotesCount: len(projNotes),
 		TopTags:    top,
+	}
+
+	// pending_insights surfaces the owner's un-triaged self-improvement
+	// insights (status:pending) regardless of which project is being
+	// bootstrapped, so they're seen at every session start. Only present
+	// when the loop is enabled, and only populated for tokens that can read
+	// the insights project. Best-effort: a lookup error degrades to absent
+	// rather than failing the whole bootstrap.
+	if s.selfImproveEnabled {
+		insProject := s.selfImproveProject
+		if insProject == "" {
+			insProject = "insights"
+		}
+		if pending, perr := s.filterByTagAndProject("status:pending", insProject, tok); perr == nil {
+			pending = s.intersectWithTag(pending, "type:insight")
+			notes := pending
+			if len(notes) > 10 {
+				notes = notes[:10]
+			}
+			payload["pending_insights"] = bootstrapPendingInsights{
+				Project: insProject,
+				Count:   len(pending),
+				Notes:   notes,
+			}
+		}
 	}
 
 	if missing == nil {
@@ -198,6 +232,55 @@ func (s *Server) intersectWithTag(candidates []noteRef, tag string) []noteRef {
 			out = append(out, c)
 		}
 	}
+	return out
+}
+
+// mergeGlobals augments a project's local skills/agents with those from the
+// shared global projects, when the global feature is on and the project opted
+// in (projects.Flags.UseGlobals). global-public entries are shared with every
+// token; global-private entries only with tokens that can read that project
+// (admin / scoped to it). Deduplication is local-overrides-global by title: a
+// local entry shadows a global one with the same title. Each entry carries its
+// source (local | global | global-private).
+func (s *Server) mergeGlobals(local []noteRef, tag, project string, tok tokenScoped) []noteRef {
+	if !s.globalEnabled || s.projects == nil || !s.projects.UsesGlobals(project) {
+		return local
+	}
+	seen := make(map[string]struct{}, len(local))
+	out := make([]noteRef, 0, len(local))
+	for _, r := range local {
+		r.Source = "local"
+		seen[r.Title] = struct{}{}
+		out = append(out, r)
+	}
+	add := func(globalProject, source string, applyScope bool) {
+		if globalProject == "" || globalProject == project {
+			return
+		}
+		if applyScope && !tok.AllowsPath(globalProject+"/") {
+			return
+		}
+		rows, err := s.index.NotesByTagInProject(tag, globalProject)
+		if err != nil {
+			return
+		}
+		tmplPrefix := globalProject + "/templates/"
+		for _, n := range rows {
+			// Template definition files live under <global>/templates/ and
+			// are scaffold sources (often with {{PLACEHOLDER}} content), not
+			// usable skills/agents — never surface them in the merge.
+			if strings.HasPrefix(n.Path, tmplPrefix) {
+				continue
+			}
+			if _, dup := seen[n.Title]; dup {
+				continue
+			}
+			seen[n.Title] = struct{}{}
+			out = append(out, noteRef{Path: n.Path, Title: n.Title, Source: source})
+		}
+	}
+	add(s.globalPublic, "global", false)         // shared surface: bypass token scope
+	add(s.globalPrivate, "global-private", true) // gated: admin / owner-scoped only
 	return out
 }
 

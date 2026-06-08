@@ -50,6 +50,15 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LDAP_USER_FILTER` | `ldap.user_filter` | `(uid=%s)` (AD: `(sAMAccountName=%s)`) |
 | `GOSIDIAN_VAULT_CACHE_SIZE` | `vault.cache_size` | `128` (`0` disables) |
 | `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` |
+| `GOSIDIAN_SELF_IMPROVE_ENABLED` | `self_improve.enabled` | `false` |
+| `GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT` | `self_improve.target_project` | `insights` |
+| `GOSIDIAN_SELF_IMPROVE_EVERY_N_CALLS` | `self_improve.every_n_calls` | `25` |
+| `GOSIDIAN_SELF_IMPROVE_COOLDOWN_MINUTES` | `self_improve.cooldown_minutes` | `120` |
+| `GOSIDIAN_SELF_IMPROVE_MAX_NUDGES_PER_SESSION` | `self_improve.max_nudges_per_session` | `1` |
+| `GOSIDIAN_SELF_IMPROVE_NOTIFY_EMAIL` | `self_improve.notify_email` | empty (scheduled digest off) |
+| `GOSIDIAN_GLOBAL_ENABLED` | `global.enabled` | `false` |
+| `GOSIDIAN_GLOBAL_PUBLIC_PROJECT` | `global.public_project` | `global` |
+| `GOSIDIAN_GLOBAL_PRIVATE_PROJECT` | `global.private_project` | `global-private` |
 
 The `config.toml` at `<vault>/.gosidian/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at

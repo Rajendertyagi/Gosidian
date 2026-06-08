@@ -1,4 +1,19 @@
 {
+  "plancia": {
+    "unsavedClose": "Ci sono modifiche non salvate. Chiudere comunque?",
+    "dirty": "Modifiche non salvate",
+    "links": "Legami diretti (grafo)",
+    "resize": "Larghezza — clic per cambiare",
+    "minimize": "Riduci a head (footer)",
+    "close": "Chiudi",
+    "openTag": "Apri",
+    "unknownType": "Tipo finestra sconosciuto: {type}",
+    "empty": "Nessuna finestra aperta.",
+    "minimizedHint": "{n} ridotte nel footer ↓",
+    "openFromSidebar": "Apri una nota dalla sidebar.",
+    "minimizedLabel": "Ridotte:",
+    "restore": "Ripristina"
+  },
   "common": {
     "save": "Salva",
     "cancel": "Annulla",

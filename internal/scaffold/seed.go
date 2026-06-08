@@ -80,7 +80,14 @@ func TemplatesDir(vaultRoot string) string {
 // templates live (e.g. "assets_templates"). Each child directory of
 // embedRoot becomes a template.
 func SeedTemplates(vaultRoot string, efs fs.FS, embedRoot string) ([]string, error) {
-	targetDir := TemplatesDir(vaultRoot)
+	return SeedTemplatesInto(TemplatesDir(vaultRoot), efs, embedRoot)
+}
+
+// SeedTemplatesInto copies every template from the embedded FS into targetDir
+// when its target directory is absent. Existing template folders are left
+// untouched (idempotent). Returns the names seeded on this call. Used for both
+// the machine-owned .gosidian/templates and a global project's templates/.
+func SeedTemplatesInto(targetDir string, efs fs.FS, embedRoot string) ([]string, error) {
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir templates dir: %w", err)
 	}
@@ -139,7 +146,13 @@ func copyEmbedTree(efs fs.FS, src, dst string) error {
 // <vault>/.gosidian/templates/, sorted alphabetically. Missing dir is
 // not an error — it just returns an empty slice.
 func ListTemplates(vaultRoot string) ([]Template, error) {
-	dir := TemplatesDir(vaultRoot)
+	return ListTemplatesIn(TemplatesDir(vaultRoot))
+}
+
+// ListTemplatesIn returns every template found in the given templates
+// directory, sorted. A missing directory is not an error — it returns an empty
+// slice.
+func ListTemplatesIn(dir string) ([]Template, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -157,7 +170,7 @@ func ListTemplates(vaultRoot string) ([]Template, error) {
 		if strings.HasPrefix(name, ".") {
 			continue
 		}
-		t, err := LoadTemplate(vaultRoot, name)
+		t, err := LoadTemplateIn(dir, name)
 		if err != nil {
 			// Skip malformed templates but keep listing the rest.
 			continue
@@ -168,9 +181,16 @@ func ListTemplates(vaultRoot string) ([]Template, error) {
 	return out, nil
 }
 
-// LoadTemplate reads a single template by name and returns its meta + file list.
+// LoadTemplate reads a single template by name from <vault>/.gosidian/templates/.
 func LoadTemplate(vaultRoot, name string) (Template, error) {
-	root := filepath.Join(TemplatesDir(vaultRoot), name)
+	return LoadTemplateIn(TemplatesDir(vaultRoot), name)
+}
+
+// LoadTemplateIn reads a single template by name from an explicit templates
+// directory (e.g. a global project's templates/ folder) and returns its meta +
+// file list.
+func LoadTemplateIn(dir, name string) (Template, error) {
+	root := filepath.Join(dir, name)
 	st, err := os.Stat(root)
 	if err != nil || !st.IsDir() {
 		return Template{}, fmt.Errorf("%w: %s", ErrTemplateNotFound, name)

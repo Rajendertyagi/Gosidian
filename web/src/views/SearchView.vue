@@ -1,14 +1,19 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+/** SearchView — full-text search as a plancia window. Local query state (the
+ *  plancia owns the URL); hits open as note windows. */
+import { ref, watch, onMounted, inject } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { search, type SearchHit } from '@/api/search'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 
-const route = useRoute()
-const router = useRouter()
+const props = defineProps<{ q?: string; project?: string }>()
 
-const query = ref<string>(typeof route.query.q === 'string' ? route.query.q : '')
-const project = ref<string>(typeof route.query.project === 'string' ? route.query.project : '')
+const store = useWindowsStore()
+const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
+
+const query = ref<string>(props.q ?? '')
+const project = ref<string>(props.project ?? '')
 const hits = ref<SearchHit[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
@@ -33,24 +38,25 @@ async function run(q: string, p: string) {
   }
 }
 
-const debounced = useDebounceFn(() => {
-  router.replace({
-    query: {
-      ...(query.value ? { q: query.value } : {}),
-      ...(project.value ? { project: project.value } : {}),
-    },
-  })
-  void run(query.value, project.value)
-}, 300)
-
+const debounced = useDebounceFn(() => void run(query.value, project.value), 300)
 watch([query, project], debounced)
+
+function openHit(hit: SearchHit) {
+  openWindow({
+    type: 'note',
+    key: planciaKey('note', hit.path),
+    title: hit.title || hit.path,
+    props: { path: hit.path },
+  })
+}
+
 onMounted(() => {
   if (query.value) void run(query.value, project.value)
 })
 </script>
 
 <template>
-  <div class="p-8 max-w-3xl mx-auto">
+  <div class="p-6 max-w-3xl mx-auto">
     <h1 class="text-xl font-semibold mb-4">Search</h1>
 
     <div class="flex gap-2 mb-6">
@@ -84,10 +90,11 @@ onMounted(() => {
         :key="hit.path"
         class="rounded border border-border bg-surface px-4 py-3"
       >
-        <RouterLink
-          :to="'/notes/' + encodeURIComponent(hit.path)"
-          class="font-medium hover:text-accent"
-        >{{ hit.title || hit.path }}</RouterLink>
+        <button
+          type="button"
+          class="font-medium hover:text-accent text-left"
+          @click="openHit(hit)"
+        >{{ hit.title || hit.path }}</button>
         <p class="text-xs text-text-muted font-mono mt-0.5">{{ hit.path }}</p>
         <p
           v-if="hit.snippet"

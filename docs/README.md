@@ -15,9 +15,11 @@ trial, read the [root README](../README.md) first.
 ## MCP server
 
 - [Overview](mcp/overview.md) — what MCP is, why gosidian uses it
-- [Tool catalogue](mcp/tools.md) — all 47 typed tools, grouped by purpose
+- [Tool catalogue](mcp/tools.md) — all 48 typed tools, grouped by purpose
 - [Authentication](mcp/authentication.md) — bearer tokens, scopes,
   rotation
+- [Self-improvement loop](mcp/self-improvement.md) — *experimental, off
+  by default*: agents record usage-friction insights; opt-in, private-first
 - [Client setup](mcp/client-setup.md) — Claude Code, Zed, Cursor,
   Continue, custom clients
 - [Agent patterns](mcp/patterns.md) — typical session flow, bootstrap →
@@ -27,8 +29,9 @@ trial, read the [root README](../README.md) first.
 
 ## Web UI
 
-- [Overview](web-ui/overview.md) — routes, web login, admin pages
-- [Editor](web-ui/editor.md) — markdown editor, live preview, HTMX
+- [Overview](web-ui/overview.md) — the Vue 3 SPA, the **plancia** window
+  manager, deep-link routes, web login
+- [Editor](web-ui/editor.md) — markdown editor, live preview, CodeMirror 6
 - [Authentication & roles](web-ui/authentication.md) — owner/member/guest
   roles, public/private projects, TOTP two-factor, LDAP / Active Directory
 - [Settings](web-ui/settings.md) — theme presets, language selector,
@@ -42,6 +45,8 @@ trial, read the [root README](../README.md) first.
   `importance`, `pinned`
 - [Multi-project layout](vault/multi-project.md) — top-level folders
   as projects, cross-project links
+- [Global projects](vault/global-projects.md) — shared skills, agents
+  & scaffold templates that any project can opt into
 - [Obsidian compatibility](vault/obsidian-compat.md) — what's fully
   compatible, what degrades, what's ignored
 

@@ -53,7 +53,8 @@ Create options:
   --name <s>              Human label (required)
   --project <s>           Restrict the token to a top-level project (empty = admin)
   --scopes read,write     Comma-separated scopes (default: read,write)
-  --ttl <duration>        Expiration, e.g. 720h. 0 = no expiry (default)`)
+  --ttl <duration>        Expiration, e.g. 720h. 0 = no expiry (default)
+  --self-improve          Opt this token in to the self-improvement insight loop`)
 }
 
 func openStore(vaultDir string) *auth.Store {
@@ -82,6 +83,7 @@ func tokenCreate(args []string) {
 	project := fs.String("project", "", "restrict to project (empty = admin)")
 	scopesCSV := fs.String("scopes", "read,write", "comma-separated scopes")
 	ttl := fs.Duration("ttl", 0, "expiration (0 = no expiry)")
+	selfImprove := fs.Bool("self-improve", false, "opt this token in to the self-improvement insight loop")
 	_ = fs.Parse(args)
 
 	store := openStore(*vaultDir)
@@ -91,12 +93,21 @@ func tokenCreate(args []string) {
 	if err != nil {
 		log.Fatalf("create: %v", err)
 	}
+	if *selfImprove {
+		if err := store.SetSelfImproveOptIn(tok.ID, true); err != nil {
+			log.Fatalf("set self-improve opt-in: %v", err)
+		}
+		tok.SelfImproveOptIn = true
+	}
 
 	fmt.Printf("Token created.\n\n")
 	fmt.Printf("  id:      %s\n", tok.ID)
 	fmt.Printf("  name:    %s\n", tok.Name)
 	fmt.Printf("  project: %s\n", displayProject(tok.Project))
 	fmt.Printf("  scopes:  %s\n", strings.Join(tok.Scopes, ","))
+	if tok.SelfImproveOptIn {
+		fmt.Printf("  self-improve: opt-in\n")
+	}
 	if !tok.ExpiresAt.IsZero() {
 		fmt.Printf("  expires: %s\n", tok.ExpiresAt.Format(time.RFC3339))
 	}
@@ -116,17 +127,21 @@ func tokenList(args []string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tPROJECT\tSCOPES\tCREATED\tEXPIRES")
+	fmt.Fprintln(w, "ID\tNAME\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tSELF-IMPROVE")
 	for _, t := range tokens {
 		exp := "-"
 		if !t.ExpiresAt.IsZero() {
 			exp = t.ExpiresAt.Format("2006-01-02")
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+		si := "-"
+		if t.SelfImproveOptIn {
+			si = "opt-in"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			t.ID, t.Name, displayProject(t.Project),
 			strings.Join(t.Scopes, ","),
 			t.CreatedAt.Format("2006-01-02"),
-			exp)
+			exp, si)
 	}
 	_ = w.Flush()
 }

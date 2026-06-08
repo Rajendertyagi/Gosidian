@@ -1,7 +1,7 @@
 # MCP tool catalogue
 
-As of v1.0.0 (v1.9 internal), **44 tools** cover the full
-retrieval → write → workflow → self-check cycle for agent memory.
+**48 tools** cover the full retrieval → write → workflow → self-check
+cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
 for precise schemas; the groupings below are the conceptual map.
@@ -54,6 +54,9 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_create_project(name)`
 - `memory_delete_project(name)`
 - `memory_rename_project(from, to)`
+- `memory_global_check(project)` — owner-only: report which
+  `global-private` notes a project references, for private→public
+  promotion (see [Global projects](../vault/global-projects.md))
 
 ## Attachments
 
@@ -91,6 +94,10 @@ The single-step / pre-uploader split, the equivalent REST endpoint
   hygiene: `broken-wikilink`, `orphan-note`, `frontmatter-missing`,
   `frontmatter-tag-unknown`, `status-incoherent`. Zero
   `severity:error` on a coherent vault.
+- `memory_self_improve(category, title, friction, confidence, …)` —
+  *experimental, opt-in, off by default*: record a structured insight
+  about gosidian's own ergonomics (see
+  [Self-improvement loop](self-improvement.md))
 
 ## Audit
 

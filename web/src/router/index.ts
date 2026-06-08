@@ -1,6 +1,17 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
+/** Build a `/?w=&f=` redirect that opens a single window for a cold deep-link.
+ *  In-app navigation never goes through here — it calls the windows store
+ *  directly — so these redirects only fire for address-bar / external links. */
+function singleWindow(token: string) {
+  return { path: '/', query: { w: token, f: token } }
+}
+function pathParam(to: { params: Record<string, unknown> }): string {
+  const raw = to.params.path
+  return Array.isArray(raw) ? raw.join('/') : String(raw ?? '')
+}
+
 const routes: RouteRecordRaw[] = [
   {
     path: '/login',
@@ -10,109 +21,46 @@ const routes: RouteRecordRaw[] = [
   },
   {
     path: '/',
+    name: 'home',
     component: () => import('@/components/layout/AppShell.vue'),
     meta: { requiresAuth: true },
-    children: [
-      {
-        path: '',
-        name: 'home',
-        component: () => import('@/views/HomeView.vue'),
-      },
-      {
-        path: 'notes/:path(.*)/edit',
-        name: 'note-edit',
-        component: () => import('@/views/NoteEditView.vue'),
-        meta: { requiresWrite: true },
-      },
-      {
-        path: 'notes/:path(.*)',
-        name: 'note',
-        component: () => import('@/views/NoteView.vue'),
-      },
-      {
-        path: 'search',
-        name: 'search',
-        component: () => import('@/views/SearchView.vue'),
-      },
-      {
-        path: 'projects',
-        name: 'projects',
-        component: () => import('@/views/ProjectsView.vue'),
-      },
-      {
-        path: 'tags',
-        name: 'tags',
-        component: () => import('@/views/TagsView.vue'),
-      },
-      {
-        path: 'tags/:tag',
-        name: 'tag-detail',
-        component: () => import('@/views/TagsView.vue'),
-      },
-      {
-        path: 'settings',
-        name: 'settings',
-        component: () => import('@/views/SettingsView.vue'),
-      },
-      {
-        path: 'trash',
-        name: 'trash',
-        component: () => import('@/views/TrashView.vue'),
-      },
-      {
-        path: 'graph',
-        name: 'graph',
-        component: () => import('@/views/GraphView.vue'),
-      },
-      {
-        path: 'notes/:path(.*)/history',
-        name: 'note-history',
-        component: () => import('@/views/NoteHistoryView.vue'),
-      },
-      {
-        path: 'admin',
-        component: () => import('@/views/admin/AdminLayout.vue'),
-        meta: { requiresOwner: true },
-        children: [
-          {
-            path: '',
-            redirect: '/admin/users',
-          },
-          {
-            path: 'users',
-            name: 'admin-users',
-            component: () => import('@/views/admin/AdminUsersView.vue'),
-          },
-          {
-            path: 'tokens',
-            name: 'admin-tokens',
-            component: () => import('@/views/admin/AdminTokensView.vue'),
-          },
-          {
-            path: 'spa-tokens',
-            name: 'admin-spa-tokens',
-            component: () => import('@/views/admin/AdminSpaTokensView.vue'),
-          },
-          {
-            path: 'invites',
-            name: 'admin-invites',
-            component: () => import('@/views/admin/AdminInvitesView.vue'),
-          },
-          {
-            path: 'audit',
-            name: 'admin-audit',
-            component: () => import('@/views/admin/AdminAuditView.vue'),
-          },
-        ],
-      },
-      // Phase 3.4+ add /graph here.
-      {
-        path: ':pathMatch(.*)*',
-        name: 'not-found',
-        component: () => import('@/views/PlaceholderView.vue'),
-      },
-    ],
   },
+
+  // ── Legacy routes → open the matching window in the plancia ──────────────
+  // Order matters: the /edit and /history suffixes must precede the bare note.
+  {
+    path: '/notes/:path(.*)/edit',
+    redirect: (to) => singleWindow('edit:' + encodeURIComponent(pathParam(to))),
+  },
+  {
+    path: '/notes/:path(.*)/history',
+    redirect: (to) => singleWindow('history:' + encodeURIComponent(pathParam(to))),
+  },
+  {
+    path: '/notes/:path(.*)',
+    redirect: (to) => singleWindow('note:' + encodeURIComponent(pathParam(to))),
+  },
+  { path: '/search', redirect: () => singleWindow('search') },
+  { path: '/projects', redirect: () => singleWindow('projects') },
+  {
+    path: '/tags/:tag',
+    redirect: (to) => singleWindow('tags:' + encodeURIComponent(String(to.params.tag ?? ''))),
+  },
+  { path: '/tags', redirect: () => singleWindow('tags') },
+  { path: '/graph', redirect: () => singleWindow('graph') },
+  { path: '/settings', redirect: () => singleWindow('settings') },
+  { path: '/trash', redirect: () => singleWindow('trash') },
+  {
+    path: '/admin/:section(.*)?',
+    redirect: (to) => {
+      const s = Array.isArray(to.params.section)
+        ? to.params.section.join('/')
+        : String(to.params.section ?? '')
+      return singleWindow(s ? 'admin:' + encodeURIComponent(s) : 'admin')
+    },
+  },
+
+  { path: '/:pathMatch(.*)*', redirect: () => ({ path: '/' }) },
 ]
 
 export const router = createRouter({
@@ -123,21 +71,12 @@ export const router = createRouter({
 router.beforeEach((to, _from) => {
   const auth = useAuthStore()
   const requires = to.matched.some((r) => r.meta.requiresAuth !== false)
-  const ownerOnly = to.matched.some((r) => r.meta.requiresOwner)
-  const writeOnly = to.matched.some((r) => r.meta.requiresWrite)
 
   if (requires && !auth.isAuthenticated) {
     return {
       name: 'login',
       query: to.fullPath !== '/' ? { next: to.fullPath } : {},
     }
-  }
-  if (ownerOnly && !auth.isOwner) {
-    return { name: 'home' }
-  }
-  if (writeOnly && !auth.canWrite) {
-    // Guests are read-only — keep them out of the editor.
-    return { name: 'home' }
   }
   if (to.name === 'login' && auth.isAuthenticated) {
     return { name: 'home' }

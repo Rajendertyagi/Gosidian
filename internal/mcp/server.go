@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"net/http"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
 	"github.com/gosidian/gosidian/internal/auth"
@@ -75,6 +76,23 @@ type Server struct {
 	// change for vaults that do not configure it. Wired by main at
 	// startup via SetLintExtraAllowedTags.
 	lintExtraAllowedTags []string
+	// selfImprove* gate, target and tune the self-improvement loop, wired
+	// by main from config. With enabled=false (default) the
+	// memory_self_improve tool rejects every call and the nudge middleware
+	// stays silent. See plan 20260608-self-improve-feedback-loop.
+	selfImproveEnabled       bool
+	selfImproveProject       string
+	selfImproveEveryN        int           // nudge cadence (tool calls); 0 disables the nudge
+	selfImproveMaxPerSession int           // hard cap on nudges per session; 0 disables
+	selfImproveCooldown      time.Duration // min time between nudges per session
+	nudges                   *nudgeTracker
+	// global* enable and name the shared global projects (skills/agents/
+	// templates other projects reference). Wired by main from [global];
+	// with globalEnabled=false the bootstrap merge is a no-op. See plan
+	// 20260608-global-project-shared-skills.
+	globalEnabled bool
+	globalPublic  string
+	globalPrivate string
 }
 
 // SetEvents wires the SSE hub used to broadcast note/tree changes
@@ -91,6 +109,36 @@ func (s *Server) SetEvents(h *events.Hub) {
 // validates and dedupes them. Pass nil to revert to built-in only.
 func (s *Server) SetLintExtraAllowedTags(extra []string) {
 	s.lintExtraAllowedTags = extra
+}
+
+// SetSelfImprove configures the agent-sourced self-improvement loop: the
+// master switch and the target project for raw insights. With enabled=false
+// (default) memory_self_improve rejects every call. An empty project keeps
+// the built-in default ("insights").
+func (s *Server) SetSelfImprove(enabled bool, project string) {
+	s.selfImproveEnabled = enabled
+	if project != "" {
+		s.selfImproveProject = project
+	}
+}
+
+// SetSelfImproveNudge configures the periodic nudge (Phase 2): a nudge is
+// appended to a tool result every everyN calls, at most maxPerSession times
+// per session, throttled by cooldown. Zero everyN or maxPerSession disables
+// the nudge while leaving the memory_self_improve tool usable.
+func (s *Server) SetSelfImproveNudge(everyN, maxPerSession int, cooldown time.Duration) {
+	s.selfImproveEveryN = everyN
+	s.selfImproveMaxPerSession = maxPerSession
+	s.selfImproveCooldown = cooldown
+}
+
+// SetGlobal configures the shared global projects: the master switch and the
+// public/private project names. With enabled=false the bootstrap global merge
+// is a no-op.
+func (s *Server) SetGlobal(enabled bool, public, private string) {
+	s.globalEnabled = enabled
+	s.globalPublic = public
+	s.globalPrivate = private
 }
 
 // publishNoteChange broadcasts a note-level write (create/update/
@@ -197,20 +245,24 @@ func correlationIDFromContext(ctx context.Context) string {
 // registered immediately; the server is not yet listening. If tokens is non
 // nil and non empty, Bearer-token auth is enforced on the SSE transport.
 func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
-	impl := server.NewMCPServer(
-		"gosidian",
-		"0.1.0",
-		server.WithToolCapabilities(true),
-		server.WithToolHandlerMiddleware(instrumentMiddleware),
-	)
 	s := &Server{
 		vault:        v,
 		index:        idx,
 		tokens:       tokens,
-		impl:         impl,
 		limiter:      newWriteLimiter(60),
 		maxNoteBytes: 1 << 20,
+		nudges:       newNudgeTracker(),
 	}
+	// The self-improve nudge middleware is bound to s, so s must exist
+	// before NewMCPServer captures it. s.impl is assigned right after and
+	// is only dereferenced at tool-call time, by which point it is set.
+	s.impl = server.NewMCPServer(
+		"gosidian",
+		"0.1.0",
+		server.WithToolCapabilities(true),
+		server.WithToolHandlerMiddleware(instrumentMiddleware),
+		server.WithToolHandlerMiddleware(s.selfImproveNudgeMiddleware),
+	)
 	s.registerTools()
 	s.registerResourcesAndPrompts()
 	return s

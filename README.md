@@ -34,12 +34,14 @@ Other installation paths (source, custom compose, bare-metal):
   folder in Obsidian, VS Code, `vim`, or any editor you already use.
   Zero lock-in: delete `.gosidian/` and you have a pure Obsidian
   vault.
-- **An MCP server.** 44 typed tools let agents bootstrap a session,
+- **An MCP server.** 48 typed tools let agents bootstrap a session,
   search, read, write, link, handoff, self-check, audit. Bearer-token
   authentication with per-project scoping.
-- **A web UI.** HTMX, server-rendered, no JavaScript framework. Full-
-  text search, backlinks, graph view, editor, audit trail, admin
-  pages for tokens and users.
+- **A web UI.** A Vue 3 single-page app served from the same binary
+  (built with Vite, embedded via `go:embed`). Notes, graph, search and
+  config forms open as windows in a tiling "plancia" workspace —
+  full-text search, backlinks, graph view, editor with live preview,
+  audit trail, admin pages for tokens and users.
 
 All three views hit the **same files on disk**. The SQLite FTS5 index
 is a cache — drop it and it rebuilds.
@@ -70,9 +72,13 @@ is a cache — drop it and it rebuilds.
 ## Feature highlights
 
 - Single binary, ≤50 MB, Alpine-based Docker image
-- Web UI with editor + live preview + sidebar + search + graph view +
-  attachments + audit log + admin pages
-- MCP server over HTTP + SSE with 44 typed tools
+- Web UI: a Vue 3 SPA (Vite, Pinia, Tailwind, CodeMirror, Cytoscape),
+  embedded in the binary — editor + live preview, sidebar, search,
+  graph view, attachments, audit log, admin pages
+- **Plancia** tiling window manager (niri-style): notes, graph, search
+  and config forms open as resizable, side-by-side windows in a
+  horizontally-scrollable workspace, restorable from the URL
+- MCP server over HTTP + SSE with 48 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
   restriction; cascade-revoke on user disable
 - Multi-user web login with **role-based access** (owner / member /
@@ -87,6 +93,9 @@ is a cache — drop it and it rebuilds.
   + custom palette
 - Opinionated [Karpathy-Wiki-Stack](docs/vault/conventions.md#karpathy-wiki-stack-project-shape)
   project layout with one-call scaffolding
+- Optional [global projects](docs/vault/global-projects.md) for skills,
+  agents & scaffold templates shared across projects (opt-in per
+  project, local-overrides-global)
 
 ## Documentation
 
@@ -95,7 +104,7 @@ is a cache — drop it and it rebuilds.
 | **Install + configure** | [Getting started](docs/getting-started.md), [Configuration](docs/configuration.md), [Deployment](docs/deployment.md) |
 | **MCP integration** | [Overview](docs/mcp/overview.md), [Tool catalogue](docs/mcp/tools.md), [Authentication](docs/mcp/authentication.md), [Client setup](docs/mcp/client-setup.md), [Agent patterns](docs/mcp/patterns.md) |
 | **Web UI** | [Overview](docs/web-ui/overview.md), [Editor](docs/web-ui/editor.md), [Authentication & roles](docs/web-ui/authentication.md), [Settings](docs/web-ui/settings.md) |
-| **Vault** | [Format](docs/vault/format.md), [Conventions](docs/vault/conventions.md), [Multi-project](docs/vault/multi-project.md), [Obsidian compatibility](docs/vault/obsidian-compat.md) |
+| **Vault** | [Format](docs/vault/format.md), [Conventions](docs/vault/conventions.md), [Multi-project](docs/vault/multi-project.md), [Global projects](docs/vault/global-projects.md), [Obsidian compatibility](docs/vault/obsidian-compat.md) |
 | **Internals** | [Architecture](docs/architecture.md), [Development](docs/development.md) |
 | **Common questions** | [FAQ](docs/faq.md) |
 

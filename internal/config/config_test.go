@@ -184,3 +184,98 @@ token_env = "GITEA_TOKEN"
 		t.Errorf("token_env = %q", cfg.Git.TokenEnv)
 	}
 }
+
+func TestSelfImprove_Defaults(t *testing.T) {
+	cfg := Default()
+	if cfg.SelfImprove.Enabled {
+		t.Error("self-improve should default disabled")
+	}
+	if cfg.SelfImprove.TargetProject != "insights" {
+		t.Errorf("default target_project = %q", cfg.SelfImprove.TargetProject)
+	}
+	if cfg.SelfImprove.EveryNCalls != 25 {
+		t.Errorf("default every_n_calls = %d", cfg.SelfImprove.EveryNCalls)
+	}
+	if cfg.SelfImprove.CooldownMinutes != 120 {
+		t.Errorf("default cooldown_minutes = %d", cfg.SelfImprove.CooldownMinutes)
+	}
+	if cfg.SelfImprove.MaxNudgesPerSession != 1 {
+		t.Errorf("default max_nudges_per_session = %d", cfg.SelfImprove.MaxNudgesPerSession)
+	}
+}
+
+func TestSelfImprove_RoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg := Default()
+	cfg.SelfImprove.Enabled = true
+	cfg.SelfImprove.TargetProject = "dogfood"
+	cfg.SelfImprove.EveryNCalls = 50
+	cfg.SelfImprove.NotifyEmail = "me@example.com"
+	if err := Save(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	si := loaded.SelfImprove
+	if !si.Enabled || si.TargetProject != "dogfood" || si.EveryNCalls != 50 || si.NotifyEmail != "me@example.com" {
+		t.Errorf("round-trip lost data: %+v", si)
+	}
+	// Untouched fields keep their defaults.
+	if si.CooldownMinutes != 120 || si.MaxNudgesPerSession != 1 {
+		t.Errorf("defaults not preserved: %+v", si)
+	}
+}
+
+func TestSelfImprove_ApplyEnv(t *testing.T) {
+	cfg := Default()
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_ENABLED", "true")
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT", "insights-dev")
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_EVERY_N_CALLS", "10")
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_COOLDOWN_MINUTES", "30")
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_MAX_NUDGES_PER_SESSION", "2")
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_NOTIFY_EMAIL", "ops@example.com")
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	si := cfg.SelfImprove
+	if !si.Enabled || si.TargetProject != "insights-dev" || si.EveryNCalls != 10 ||
+		si.CooldownMinutes != 30 || si.MaxNudgesPerSession != 2 || si.NotifyEmail != "ops@example.com" {
+		t.Errorf("env not applied: %+v", si)
+	}
+}
+
+func TestSelfImprove_ApplyEnv_Invalid(t *testing.T) {
+	cfg := Default()
+	t.Setenv("GOSIDIAN_SELF_IMPROVE_EVERY_N_CALLS", "not-a-number")
+	if err := cfg.ApplyEnv(); err == nil {
+		t.Error("invalid every_n_calls should error")
+	}
+}
+
+func TestGlobal_Defaults(t *testing.T) {
+	cfg := Default()
+	if cfg.Global.Enabled {
+		t.Error("global should default disabled")
+	}
+	if cfg.Global.PublicProject != "global" {
+		t.Errorf("default public_project = %q", cfg.Global.PublicProject)
+	}
+	if cfg.Global.PrivateProject != "global-private" {
+		t.Errorf("default private_project = %q", cfg.Global.PrivateProject)
+	}
+}
+
+func TestGlobal_ApplyEnv(t *testing.T) {
+	cfg := Default()
+	t.Setenv("GOSIDIAN_GLOBAL_ENABLED", "true")
+	t.Setenv("GOSIDIAN_GLOBAL_PUBLIC_PROJECT", "shared")
+	t.Setenv("GOSIDIAN_GLOBAL_PRIVATE_PROJECT", "shared-priv")
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Global.Enabled || cfg.Global.PublicProject != "shared" || cfg.Global.PrivateProject != "shared-priv" {
+		t.Errorf("env not applied: %+v", cfg.Global)
+	}
+}

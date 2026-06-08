@@ -1,2 +1,0 @@
-import{z as a,O as i}from"./index-CrclG0B9.js";async function o(t){const{data:e}=await a.get("/tree",{params:t?{project:t}:void 0});return e.root}const n=i("tree",{state:()=>({byProject:{},loading:{},error:{}}),actions:{async load(t=""){const e=t;this.loading[e]=!0,this.error[e]="";try{this.byProject[e]=await o(t||void 0)}catch(r){this.error[e]=r instanceof Error?r.message:String(r)}finally{this.loading[e]=!1}},invalidate(t=""){delete this.byProject[t]},invalidateAll(){this.byProject={}}}});export{n as u};
-//# sourceMappingURL=tree-CeFxOZNa.js.map

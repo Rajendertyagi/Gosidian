@@ -55,17 +55,21 @@ This is a preference, not a universal answer. Python with FastAPI
 would work; Rust with axum would work. The pure-Go path happens to
 match the project's shape.
 
-## Why HTMX and not React / Svelte?
+## Why Vue 3 and not React / Svelte?
 
-Most agent work happens **through MCP**, not the web UI. The UI is a
-human-readable window into the same vault — it doesn't need client-
-side routing, global state, or reactivity beyond swap-in-place. HTMX
-delivers the interactivity users expect with zero build step, zero
-npm install, zero framework upgrade treadmill.
+The UI started as server-rendered HTML + HTMX. As it grew an editor
+with live preview, a graph view, an audit trail and — in v2.3 — the
+plancia window manager, the swap-in-place model stopped paying for
+itself, and v2.0 moved the UI to a **Vue 3 single-page app**.
 
-If/when a page grows complex enough to need a real frontend
-framework, that page (and only that page) can ship its own bundle.
-Nothing about the server prevents it.
+Vue was chosen over React/Svelte for a small, framework-light SPA: a
+gentle composition API, first-class TypeScript, a built-in store
+(Pinia) and router, and a calm upgrade cadence. The whole bundle is
+embedded in the binary via `go:embed` and served under a strict CSP
+(`script-src 'self'`), so there's still no CDN and no runtime npm.
+
+Most agent work still happens **through MCP**, not the web UI — the
+UI is the human-readable window into the same vault.
 
 ## Is it multi-tenant?
 

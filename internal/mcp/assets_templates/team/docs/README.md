@@ -8,7 +8,7 @@ updated: {{TODAY}}
 
 # Docs — {{PROJECT}}
 
-- `bugs.md` — Bug noti, append-only (`## BUG-NNN`)
-- `open-questions.md` — Domande aperte (`## OQ-NNN`)
+- `bugs.md` — Known bugs, append-only (`## BUG-NNN`)
+- `open-questions.md` — Open questions (`## OQ-NNN`)
 - `improvements.md` — Technical debt / refactor backlog (`## IMP-NNN`)
-- `qa.md` — Q&A risolti (move-from open-questions)
+- `qa.md` — Resolved Q&A (moved from open-questions)

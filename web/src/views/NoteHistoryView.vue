@@ -1,17 +1,20 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+/** NoteHistoryView — git history of a note as a plancia window. `path` comes
+ *  from window props; the back link opens the note read window. */
+import { onMounted, ref, watch, computed, inject } from 'vue'
 import { getHistory, type HistoryEntry } from '@/api/history'
+import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { planciaKey } from '@/composables/usePlanciaSync'
 
-const route = useRoute()
+const props = defineProps<{ path: string }>()
+
+const store = useWindowsStore()
+const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
+
+const path = computed(() => props.path)
 const entries = ref<HistoryEntry[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
-
-const path = computed(() => {
-  const raw = route.params.path
-  return Array.isArray(raw) ? raw.join('/') : (raw ?? '')
-})
 
 async function load() {
   if (!path.value) return
@@ -27,17 +30,27 @@ async function load() {
   }
 }
 
+function openNote() {
+  openWindow({
+    type: 'note',
+    key: planciaKey('note', path.value),
+    title: (path.value.split('/').pop() ?? path.value).replace(/\.md$/, ''),
+    props: { path: path.value },
+  })
+}
+
 onMounted(load)
 watch(path, load)
 </script>
 
 <template>
-  <div class="p-8 max-w-4xl mx-auto">
+  <div class="p-6 max-w-4xl mx-auto">
     <header class="flex items-center gap-3 mb-4">
-      <RouterLink
-        :to="'/notes/' + encodeURIComponent(path)"
+      <button
+        type="button"
         class="text-sm text-text-muted hover:text-text"
-      >← Note</RouterLink>
+        @click="openNote"
+      >Note</button>
       <h1 class="text-xl font-semibold">History</h1>
       <span class="font-mono text-sm text-text-muted truncate">{{ path }}</span>
     </header>

@@ -19,7 +19,13 @@
 import { ref, onScopeDispose } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 
-export type SSETopic = 'tree' | 'note' | 'sidebar' | 'audit'
+export type SSETopic = 'tree' | 'note' | 'sidebar' | 'audit' | 'insight'
+
+// ALL_TOPICS is the full known topic set. The singleton subscribes to all of
+// them so any consumer's .on() works regardless of which component opened the
+// connection first (the Sidebar opens it for 'tree', but the owner insights
+// badge still needs 'insight').
+const ALL_TOPICS: SSETopic[] = ['tree', 'note', 'sidebar', 'audit', 'insight']
 
 export interface SSEPayload {
   action?: string
@@ -66,7 +72,10 @@ function connect(token: string, topics: SSETopic[]) {
   status.value = 'connecting'
   const params = new URLSearchParams()
   params.set('token', token)
-  if (topics.length) params.set('topics', topics.join(','))
+  // Subscribe to the full known topic set (union with the caller's request)
+  // so every consumer's .on() is served by the single shared connection.
+  const subscribed = Array.from(new Set<SSETopic>([...topics, ...ALL_TOPICS]))
+  params.set('topics', subscribed.join(','))
   const url = `/api/v1/events?${params.toString()}`
   const es = new EventSource(url)
   sharedSource = es
@@ -83,7 +92,7 @@ function connect(token: string, topics: SSETopic[]) {
   }
   // Wire each topic explicitly. The default `message` handler isn't
   // useful because we always send named events from the server.
-  for (const topic of ['tree', 'note', 'sidebar', 'audit'] as SSETopic[]) {
+  for (const topic of ALL_TOPICS) {
     es.addEventListener(topic, (e) => {
       const data = (e as MessageEvent).data ?? ''
       dispatch(topic, String(data))
