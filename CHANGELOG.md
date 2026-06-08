@@ -4,6 +4,51 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+## [2.1.2] — 2026-06-08 — "security bundle"
+
+PATCH bundle. Closes six open Dependabot PRs (#23–#28) and resolves
+six Dependabot security alerts. The only runtime-facing fix is axios
+in the SPA bundle; the Go bumps are routine hygiene; the dev-only
+vitest critical is deferred (see below).
+
+### Security
+
+- **`axios`** 1.15.2 → 1.16.0 — runtime dependency, ships in the SPA
+  bundle. Patches three advisories: ReDoS via cookie-name injection
+  (high), allocation of resources without limits / DoS (high), and a
+  proxy-authorization header injection via prototype pollution (low).
+  Closes #25.
+- **`js-cookie`** 3.0.5 → 3.0.8 — transitive, dev-only (via
+  `js-beautify`). Patches per-instance prototype hijack in `assign()`
+  (high). Closes #23.
+
+### Changed
+
+- **`github.com/mark3labs/mcp-go`** 0.52.0 → 0.54.1 (closes #28).
+- **`modernc.org/sqlite`** 1.50.0 → 1.51.0 (closes #27).
+- **`golang.org/x/crypto`** 0.51.0 → 0.52.0 (closes #24).
+- Transitive via `go mod tidy`: `golang.org/x/sys` 0.44 → 0.45,
+  `modernc.org/libc` 1.72.0 → 1.72.3.
+
+### Deferred
+
+- **`vitest`** 2.1.9 → 4.1.0 (#26) is *not* merged. The advisory
+  (Vitest UI server arbitrary file read/exec, **critical**) is patched
+  only in 4.1.0, which requires `vite ^6 || ^7 || ^8` — pulling in the
+  full Vite 5 → 8 major upgrade already tracked for the v2.2.x cycle
+  (incremental 5 → 6 → 7 → 8 with runtime SPA validation per step).
+  vitest is a **dev-only** test runner; the vulnerable surface
+  (`vitest --ui`) is never built into the image nor exposed in
+  production. The alert remains `dismissed: tolerable_risk` until the
+  Vite upgrade lands. #26 is closed without merging.
+
+### Notes
+
+- Unlike v2.1.0 / v2.1.1, the SPA `dist/` **is** rebuilt here to pick
+  up axios 1.16.0 — this is a security release, not a Go-only PATCH.
+  Vitest 16/16 green, `npm audit --omit=dev` = 0 vulnerabilities
+  (runtime), `go test -race ./...` green across all packages.
+
 ## [2.1.1] — 2026-05-11 — "deps cleanup #2"
 
 PATCH bundle. Closes 4 open Dependabot Go-module PRs and overrides
