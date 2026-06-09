@@ -8,6 +8,22 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.3.2] — 2026-06-09 — "security patch follow-up"
+
+PATCH release. Completes the note-titles allocation hardening started in
+v2.3.1. No user-facing or API changes; existing deployments need no
+migration.
+
+### Security
+
+- **CodeQL `go/uncontrolled-allocation-size` (HIGH), second occurrence.**
+  v2.3.1 capped the first of the two result-slice allocations in the
+  note-titles autocomplete endpoint to a constant, but the second one (on
+  the search branch) was left request-derived, so the alert stayed open.
+  Both allocations now use the constant cap; neither depends on the
+  request-supplied `limit`. As before, the value was already clamped to
+  `[1, 50]`, so there was no practical exploit.
+
 ## [2.3.1] — 2026-06-09 — "security patch"
 
 PATCH release. Dependency and static-analysis security fixes, a dev-tooling

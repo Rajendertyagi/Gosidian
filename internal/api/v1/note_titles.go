@@ -84,7 +84,7 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
-	out := make([]noteTitleHit, 0, limit)
+	out := make([]noteTitleHit, 0, noteTitlesMaxLimit)
 	for _, h := range rows {
 		if !r.canSee(p, h.Path) {
 			continue
