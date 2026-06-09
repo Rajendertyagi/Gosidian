@@ -15,6 +15,16 @@ type noteTitleHit struct {
 	Path  string `json:"path"`
 }
 
+const (
+	// noteTitlesDefaultLimit is the dropdown's default row count.
+	noteTitlesDefaultLimit = 10
+	// noteTitlesMaxLimit caps both the user-supplied limit and the slice
+	// pre-allocation. Allocating with the constant (not the request-derived
+	// limit) keeps the allocation size independent of unvalidated input
+	// (CodeQL go/uncontrolled-allocation-size).
+	noteTitlesMaxLimit = 50
+)
+
 // handleNoteTitles powers wikilink autocomplete. The SPA fires this
 // endpoint as the user types `[[<prefix>` in the editor, debounced at
 // 200ms. We use the existing FTS Search index — title-only matches
@@ -32,8 +42,8 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 	}
 	q := strings.TrimSpace(req.URL.Query().Get("q"))
 	limit, _ := strconv.Atoi(req.URL.Query().Get("limit"))
-	if limit <= 0 || limit > 50 {
-		limit = 10
+	if limit <= 0 || limit > noteTitlesMaxLimit {
+		limit = noteTitlesDefaultLimit
 	}
 
 	// Empty query returns the most recently modified notes — useful as
@@ -55,7 +65,7 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 			return
 		}
-		out := make([]noteTitleHit, 0, limit)
+		out := make([]noteTitleHit, 0, noteTitlesMaxLimit)
 		for _, n := range rows {
 			if !r.canSee(p, n.Path) {
 				continue

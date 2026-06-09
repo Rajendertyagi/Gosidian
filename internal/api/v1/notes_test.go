@@ -93,30 +93,6 @@ func newNotesFixture(t *testing.T) *notesFixture {
 	return &notesFixture{authFixture: af, vaultRoot: vaultRoot, idx: idx, projects: pstore, bearer: bearer}
 }
 
-// authed wraps the request helper with the Bearer header so tests
-// stay readable.
-func (f *notesFixture) authed(method, path, body string, extra map[string]string) *http.Request {
-	headers := map[string]string{"Authorization": "Bearer " + f.bearer}
-	for k, v := range extra {
-		headers[k] = v
-	}
-	w := f.request(method, path, body, headers)
-	_ = w
-	// Re-issue: the request helper returns ResponseRecorder, so we
-	// rebuild the request only for the cases that need raw access
-	// (we mostly use the recorder via doAuth).
-	return nil
-}
-
-func (f *notesFixture) doAuth(method, path, body string, extra map[string]string) (*http.Request, *http.Response) {
-	headers := map[string]string{"Authorization": "Bearer " + f.bearer}
-	for k, v := range extra {
-		headers[k] = v
-	}
-	w := f.request(method, path, body, headers)
-	return nil, w.Result()
-}
-
 func (f *notesFixture) doAuthRecorder(method, path, body string, extra map[string]string) *recorder {
 	headers := map[string]string{"Authorization": "Bearer " + f.bearer}
 	for k, v := range extra {

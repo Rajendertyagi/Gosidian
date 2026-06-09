@@ -146,15 +146,6 @@ func (r *Router) registerAuthed() {
 	r.mux.Handle("/api/v1/insights/pending", owner(r.handleInsightsPending))
 }
 
-// notImplemented is the placeholder body used by handlers whose real
-// implementation arrives in subsequent v2.0 phases. It writes a
-// machine-readable 501 so the SPA can render a "feature coming soon"
-// state during development without wrapping every fetch in a
-// try/catch.
-func notImplemented(w http.ResponseWriter, _ *http.Request) {
-	WriteError(w, http.StatusNotImplemented, CodeServerUnavailable, "endpoint not yet implemented (v2.0 phase)")
-}
-
 // Health is the only handler implemented end-to-end at Phase 0; it
 // confirms the v1 mux is wired and reachable.
 func (r *Router) handleHealth(w http.ResponseWriter, _ *http.Request) {

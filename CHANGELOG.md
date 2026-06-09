@@ -4,6 +4,43 @@ All notable changes to gosidian are documented here. The format loosely
 follows [Keep a Changelog](https://keepachangelog.com/); dates are
 `YYYY-MM-DD`; versions follow [SemVer](https://semver.org/).
 
+This file is the single source for per-release notes — each GitHub Release
+pulls its body from the matching section below. There are no separate
+`RELEASE_NOTES_*` files.
+
+## [2.3.1] — 2026-06-09 — "security patch"
+
+PATCH release. Dependency and static-analysis security fixes, a dev-tooling
+upgrade, and dead-code / release-notes housekeeping. No user-facing or API
+changes; existing deployments need no migration.
+
+### Security
+
+- **CodeQL `go/uncontrolled-allocation-size` (HIGH).** The note-titles
+  autocomplete endpoint pre-allocated its result slice with a
+  request-supplied `limit`. The value was already clamped to `[1, 50]`, so
+  there was no real exploit, but the allocation now uses a constant cap so
+  its size never depends on unvalidated input.
+- **`go-ntlmssp` 0.1.0 → 0.1.1.** Closes a medium advisory (NTLM challenges
+  could panic on malformed payloads); indirect dependency of the LDAP
+  client.
+
+### Changed
+
+- **Dev tooling: Vite 5 → 6, Vitest 2 → 3.** Closes the critical Vitest
+  advisory (UI-server arbitrary file read/exec) and the dev-only
+  Vite/esbuild advisories — `npm audit` is now clean. No bundle behaviour
+  change for end users; the runtime SPA stack (Vue 3.5, vue-i18n 9 AOT,
+  Tailwind 3.4) is unchanged.
+
+### Removed
+
+- Dead code: three unbundled leftover SPA views from the plancia refactor
+  (`HomeView`, `PlaceholderView`, `ConflictDialog`) and two unused Go
+  test/router helpers.
+- The per-version `RELEASE_NOTES_*.md` files — release notes are now
+  consolidated into this single CHANGELOG (see the note above).
+
 ## [2.3.0] — 2026-06-08 — "plancia"
 
 MINOR release. The web UI becomes a tiling window manager, and two
