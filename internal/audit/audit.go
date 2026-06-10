@@ -49,6 +49,9 @@ const (
 	ActionDeleteAttachment Action = "delete_attachment"
 	ActionTokenCreate      Action = "token_create"
 	ActionTokenRevoke      Action = "token_revoke"
+	// IMP-051: partial update of an MCP token (today: self-improve opt-in
+	// toggle) via PATCH /api/v1/admin/tokens/{id}. Path = token id.
+	ActionTokenUpdate Action = "token_update"
 	// v1.13: per-project flags update via /projects/<name>/settings.
 	// Path = project name; To = compact diff "skip_git_sync:false→true ...".
 	ActionProjectFlagsUpdate Action = "project_flags_update"

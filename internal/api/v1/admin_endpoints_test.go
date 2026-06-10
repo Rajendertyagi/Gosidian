@@ -95,6 +95,63 @@ func TestAdminTokens_RevokeNotFound(t *testing.T) {
 	}
 }
 
+// IMP-051: PATCH toggles the self-improve opt-in flag on an existing token,
+// without recreating it. New tokens default to opt-out.
+func TestAdminTokens_OptInToggle(t *testing.T) {
+	f := newAdminFixture(t)
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", `{"name":"enrol-me","scopes":["read"]}`, nil)
+	var resp mcpTokenCreatedResponse
+	_ = json.Unmarshal([]byte(w.body), &resp)
+	id := resp.Record.ID
+	if resp.Record.SelfImproveOptIn {
+		t.Fatalf("new token should default to opt-out: %+v", resp.Record)
+	}
+
+	wp := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/tokens/"+id, `{"self_improve_opt_in":true}`, nil)
+	if wp.code != http.StatusOK {
+		t.Fatalf("patch status=%d body=%s", wp.code, wp.body)
+	}
+	var updated mcpTokenView
+	_ = json.Unmarshal([]byte(wp.body), &updated)
+	if !updated.SelfImproveOptIn {
+		t.Errorf("expected opt-in after PATCH true: %+v", updated)
+	}
+
+	wl := f.doAuthRecorder(http.MethodGet, "/api/v1/admin/tokens", "", nil)
+	if !strings.Contains(wl.body, `"self_improve_opt_in":true`) {
+		t.Errorf("opt-in not persisted in list: %s", wl.body)
+	}
+
+	ww := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/tokens/"+id, `{"self_improve_opt_in":false}`, nil)
+	if ww.code != http.StatusOK {
+		t.Fatalf("patch off status=%d body=%s", ww.code, ww.body)
+	}
+	var off mcpTokenView
+	_ = json.Unmarshal([]byte(ww.body), &off)
+	if off.SelfImproveOptIn {
+		t.Errorf("expected opt-out after PATCH false: %+v", off)
+	}
+}
+
+func TestAdminTokens_OptInRejectsEmptyBody(t *testing.T) {
+	f := newAdminFixture(t)
+	w := f.doAuthRecorder(http.MethodPost, "/api/v1/admin/tokens", `{"name":"x","scopes":["read"]}`, nil)
+	var resp mcpTokenCreatedResponse
+	_ = json.Unmarshal([]byte(w.body), &resp)
+	wp := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/tokens/"+resp.Record.ID, `{}`, nil)
+	if wp.code != http.StatusBadRequest {
+		t.Errorf("empty patch status=%d, want 400", wp.code)
+	}
+}
+
+func TestAdminTokens_OptInNotFound(t *testing.T) {
+	f := newAdminFixture(t)
+	w := f.doAuthRecorder(http.MethodPatch, "/api/v1/admin/tokens/deadbeef", `{"self_improve_opt_in":true}`, nil)
+	if w.code != http.StatusNotFound {
+		t.Errorf("status=%d, want 404", w.code)
+	}
+}
+
 func TestAdminTokens_MemberForbidden(t *testing.T) {
 	f := newAdminFixture(t)
 	memberTok := f.memberToken(t)

@@ -9,6 +9,7 @@ export interface MCPToken {
   created_at: string
   expires_at?: string
   expired?: boolean
+  self_improve_opt_in: boolean
 }
 
 export interface MCPTokenCreated {
@@ -97,6 +98,16 @@ export async function createMCPToken(body: CreateMCPTokenRequest): Promise<MCPTo
 
 export async function revokeMCPToken(id: string): Promise<void> {
   await client.delete(`/admin/tokens/${encodeURIComponent(id)}`)
+}
+
+/** Enrol or withdraw an existing MCP token from the self-improvement insight
+ *  loop (owner-only). Reuses the server-side opt-in setter, so no token
+ *  recreation is needed. Returns the updated record. */
+export async function setMCPTokenOptIn(id: string, optIn: boolean): Promise<MCPToken> {
+  const { data } = await client.patch<MCPToken>(`/admin/tokens/${encodeURIComponent(id)}`, {
+    self_improve_opt_in: optIn,
+  })
+  return data
 }
 
 // SPA tokens

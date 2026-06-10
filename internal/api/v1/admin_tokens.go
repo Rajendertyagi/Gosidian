@@ -14,14 +14,15 @@ import (
 // `mcpTokenCreatedResponse` so the SPA explicitly handles the
 // "show once, never again" affordance for the freshly minted secret.
 type mcpTokenView struct {
-	ID          string   `json:"id"`
-	Name        string   `json:"name"`
-	Project     string   `json:"project,omitempty"`
-	Scopes      []string `json:"scopes"`
-	OwnerUserID string   `json:"owner_user_id,omitempty"`
-	CreatedAt   string   `json:"created_at"`
-	ExpiresAt   string   `json:"expires_at,omitempty"`
-	Expired     bool     `json:"expired,omitempty"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	Project          string   `json:"project,omitempty"`
+	Scopes           []string `json:"scopes"`
+	OwnerUserID      string   `json:"owner_user_id,omitempty"`
+	CreatedAt        string   `json:"created_at"`
+	ExpiresAt        string   `json:"expires_at,omitempty"`
+	Expired          bool     `json:"expired,omitempty"`
+	SelfImproveOptIn bool     `json:"self_improve_opt_in"`
 }
 
 type mcpTokenCreatedResponse struct {
@@ -35,6 +36,13 @@ type createMCPTokenRequest struct {
 	Project string   `json:"project,omitempty"`
 	Scopes  []string `json:"scopes"`
 	TTLMS   int64    `json:"ttl_ms,omitempty"`
+}
+
+// updateMCPTokenRequest is the PATCH body for an existing token. Fields are
+// pointers so absent ones are left untouched; today only the self-improve
+// opt-in flag is mutable (IMP-051).
+type updateMCPTokenRequest struct {
+	SelfImproveOptIn *bool `json:"self_improve_opt_in"`
 }
 
 func (r *Router) handleAdminTokens(w http.ResponseWriter, req *http.Request) {
@@ -62,10 +70,17 @@ func (r *Router) handleAdminTokenItem(w http.ResponseWriter, req *http.Request) 
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "expected /api/v1/admin/tokens/{id}")
 		return
 	}
-	if req.Method != http.MethodDelete {
+	switch req.Method {
+	case http.MethodDelete:
+		r.revokeMCPToken(w, req, id)
+	case http.MethodPatch:
+		r.updateMCPToken(w, req, id)
+	default:
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
-		return
 	}
+}
+
+func (r *Router) revokeMCPToken(w http.ResponseWriter, req *http.Request, id string) {
 	user := UserFromContext(req.Context())
 	if err := r.deps.Auth.MCPTokens.Revoke(id); err != nil {
 		WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
@@ -81,6 +96,59 @@ func (r *Router) handleAdminTokenItem(w http.ResponseWriter, req *http.Request) 
 		})
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// updateMCPToken applies a partial update to an existing MCP token. Today the
+// only mutable field is the self-improve opt-in flag (IMP-051): owners can
+// enrol/withdraw a token from the self-improvement loop without recreating it
+// or hand-editing tokens.json. Returns the updated view.
+func (r *Router) updateMCPToken(w http.ResponseWriter, req *http.Request, id string) {
+	user := UserFromContext(req.Context())
+	if user == nil {
+		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	var body updateMCPTokenRequest
+	if err := DecodeJSON(req, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
+	}
+	if body.SelfImproveOptIn == nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "no updatable field provided")
+		return
+	}
+	if err := r.deps.Auth.MCPTokens.SetSelfImproveOptIn(id, *body.SelfImproveOptIn); err != nil {
+		WriteError(w, http.StatusNotFound, CodeNotFound, err.Error())
+		return
+	}
+	if r.deps.Audit != nil {
+		_ = r.deps.Audit.Write(audit.Entry{
+			Source: audit.SourceHTTP,
+			Actor:  user.Username,
+			UserID: user.ID,
+			Action: audit.ActionTokenUpdate,
+			Path:   id,
+		})
+	}
+	// Return the updated record so the SPA can reflect the new state.
+	tok, ok := r.findMCPToken(id)
+	if !ok {
+		WriteError(w, http.StatusNotFound, CodeNotFound, "token not found after update")
+		return
+	}
+	WriteJSON(w, http.StatusOK, mcpTokenToView(tok))
+}
+
+// findMCPToken returns the stored token whose ID matches, by scanning the
+// store's List() snapshot. Used to echo back the updated record after a PATCH.
+func (r *Router) findMCPToken(id string) (*auth.Token, bool) {
+	tokens := r.deps.Auth.MCPTokens.List()
+	for i := range tokens {
+		if tokens[i].ID == id {
+			return &tokens[i], true
+		}
+	}
+	return nil, false
 }
 
 func (r *Router) listMCPTokens(w http.ResponseWriter, _ *http.Request) {
@@ -145,12 +213,13 @@ func (r *Router) createMCPToken(w http.ResponseWriter, req *http.Request) {
 
 func mcpTokenToView(t *auth.Token) mcpTokenView {
 	v := mcpTokenView{
-		ID:          t.ID,
-		Name:        t.Name,
-		Project:     t.Project,
-		Scopes:      append([]string(nil), t.Scopes...),
-		OwnerUserID: t.OwnerUserID,
-		CreatedAt:   t.CreatedAt.UTC().Format(rfc3339Z),
+		ID:               t.ID,
+		Name:             t.Name,
+		Project:          t.Project,
+		Scopes:           append([]string(nil), t.Scopes...),
+		OwnerUserID:      t.OwnerUserID,
+		CreatedAt:        t.CreatedAt.UTC().Format(rfc3339Z),
+		SelfImproveOptIn: t.SelfImproveOptIn,
 	}
 	if !t.ExpiresAt.IsZero() {
 		v.ExpiresAt = t.ExpiresAt.UTC().Format(rfc3339Z)

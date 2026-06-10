@@ -8,6 +8,40 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.5.0] — 2026-06-10 — "self-improve opt-in toggle"
+
+MINOR release. Operators can now toggle a token's self-improvement opt-in
+after the token was created — from the CLI, the admin API, or the admin SPA —
+instead of recreating the token or hand-editing the store. Bootstrap also stops
+flagging the agent instruction file as missing when it correctly lives outside
+the vault. Purely additive; existing deployments need no migration.
+
+### Added
+
+- **Toggle self-improve opt-in on existing tokens.** A new `gosidian token
+  opt-in --id <id> [--off]` CLI subcommand (with `--all`), a
+  `PATCH /api/v1/admin/tokens/{id}` endpoint, and a "Self-improve" toggle in the
+  admin Tokens view let owners enrol or withdraw an already-issued MCP token
+  from the self-improvement loop. Previously the flag could only be set at
+  token-creation time. The token API view now includes `self_improve_opt_in`,
+  and token updates are recorded with a new `token_update` audit action.
+
+### Changed
+
+- **`memory_bootstrap` no longer reports the instruction file as missing.** In
+  the stub model the agent instruction file lives in the agent's working
+  directory, outside the vault, so its vault-absence is expected. Bootstrap now
+  sets `agent_md.expected_external` instead of listing `AGENTS.md` in `missing`
+  (which is reserved for genuinely absent vault scaffold such as `hot.md` /
+  `README.md`). This supersedes the v2.4.0 behavior where `AGENTS.md` was always
+  added to `missing`.
+
+### Notes
+
+- All changes are additive and backward-compatible: existing tokens keep their
+  current opt-in state, and the new API / bootstrap fields are additive — a
+  client that ignored them keeps working. No migration is needed.
+
 ## [2.4.0] — 2026-06-10 — "directives versioning"
 
 MINOR release. The agent-facing memory protocol gains versioned operational

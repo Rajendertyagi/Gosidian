@@ -21,7 +21,7 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename. In the stub model the instruction file lives in the agent's working dir (outside the vault); when it is not a vault note, `agent_md.expected_external` is true and it is NOT reported in `missing` (which lists only absent vault scaffold such as hot.md / README.md)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 	), s.handleBootstrap)
 }
@@ -31,6 +31,10 @@ type bootstrapFile struct {
 	Path    string `json:"path,omitempty"`
 	Content string `json:"content,omitempty"`
 	ETag    string `json:"etag,omitempty"`
+	// ExpectedExternal marks an instruction file that is absent from the vault
+	// but expected to live in the agent's working dir (the stub model, ADR-010).
+	// Only ever set on the agent_md payload, never on hot.md/README.md.
+	ExpectedExternal bool `json:"expected_external,omitempty"`
 }
 
 type bootstrapStats struct {
@@ -106,15 +110,19 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 
 	// agent_md: agent-agnostic detection of the project's instruction file
 	// (ADR-010) — no longer assumes CLAUDE.md. Reports the first existing
-	// candidate (as a vault note) and its name; the generic name AGENTS.md is
-	// added to `missing` when none is present.
+	// candidate (as a vault note) and its name. In the stub model the
+	// instruction file lives in the agent's working dir, OUTSIDE the vault, so
+	// its absence from the vault is expected — not a missing scaffold (IMP-050).
+	// Flag it expected_external instead of polluting `missing` with a perpetual
+	// false positive; `missing` stays reserved for real vault files
+	// (hot.md / README.md).
 	agentFile, agentName := s.detectAgentFile(project)
-	payload["agent_md"] = agentFile
 	if agentFile.Present {
 		payload["agent_md_name"] = agentName
 	} else {
-		missing = append(missing, "AGENTS.md")
+		agentFile.ExpectedExternal = true
 	}
+	payload["agent_md"] = agentFile
 
 	active, err := s.filterByTagAndProject("status:in-progress", project, tok)
 	if err != nil {

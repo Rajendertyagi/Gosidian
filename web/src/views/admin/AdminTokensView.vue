@@ -4,6 +4,7 @@ import {
   listMCPTokens,
   createMCPToken,
   revokeMCPToken,
+  setMCPTokenOptIn,
   type MCPToken,
   type MCPTokenCreated,
 } from '@/api/admin'
@@ -56,6 +57,15 @@ async function revoke(t: MCPToken) {
     await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Revoke failed'
+  }
+}
+
+async function toggleOptIn(t: MCPToken) {
+  try {
+    const updated = await setMCPTokenOptIn(t.id, !t.self_improve_opt_in)
+    t.self_improve_opt_in = updated.self_improve_opt_in
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Update failed'
   }
 }
 
@@ -117,6 +127,7 @@ onMounted(load)
         <th class="text-left py-2 px-3">Scopes</th>
         <th class="text-left py-2 px-3">Created</th>
         <th class="text-left py-2 px-3">Expires</th>
+        <th class="text-left py-2 px-3">Self-improve</th>
         <th class="text-right py-2 px-3">Actions</th>
       </tr>
     </thead>
@@ -138,6 +149,15 @@ onMounted(load)
         <td class="py-2 px-3 font-mono text-xs">{{ t.created_at }}</td>
         <td class="py-2 px-3 font-mono text-xs">
           <span :class="t.expired ? 'text-warning' : ''">{{ t.expires_at || '—' }}</span>
+        </td>
+        <td class="py-2 px-3">
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
+            :class="t.self_improve_opt_in ? 'text-success' : 'text-text-muted'"
+            :title="t.self_improve_opt_in ? 'Opted in — click to withdraw' : 'Not opted in — click to enrol'"
+            @click="toggleOptIn(t)"
+          >{{ t.self_improve_opt_in ? 'opt-in ✓' : 'off' }}</button>
         </td>
         <td class="py-2 px-3 text-right">
           <button

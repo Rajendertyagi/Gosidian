@@ -95,12 +95,19 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	if len(p.Stats.TopTags) == 0 {
 		t.Errorf("top_tags should not be empty")
 	}
-	wantMissing := map[string]bool{"AGENTS.md": true}
-	for _, m := range p.Missing {
-		delete(wantMissing, m)
+	// IMP-050: the instruction file is expected to live in the agent's working
+	// dir (stub model), so its vault-absence is flagged expected_external rather
+	// than reported in `missing`. hot.md + README.md are seeded → missing empty.
+	if !p.AgentMD.ExpectedExternal {
+		t.Errorf("agent_md.expected_external should be true when no vault instruction file: %+v", p.AgentMD)
 	}
-	if len(wantMissing) > 0 {
-		t.Errorf("missing = %v, want to include AGENTS.md", p.Missing)
+	for _, m := range p.Missing {
+		if m == "AGENTS.md" {
+			t.Errorf("AGENTS.md must not appear in missing (IMP-050): %v", p.Missing)
+		}
+	}
+	if len(p.Missing) != 0 {
+		t.Errorf("missing should be empty (hot.md + README.md seeded), got %v", p.Missing)
 	}
 
 	if p.DirectivesVersion != initprompt.DirectivesVersion {
@@ -140,8 +147,10 @@ func TestMCP_Bootstrap_EmptyProject(t *testing.T) {
 	if p.Stats.NotesCount != 0 {
 		t.Errorf("expected 0 notes, got %d", p.Stats.NotesCount)
 	}
-	if len(p.Missing) != 3 {
-		t.Errorf("expected 3 missing convention files, got %v", p.Missing)
+	// IMP-050: AGENTS.md no longer counts as missing vault scaffold — only
+	// hot.md + README.md remain.
+	if len(p.Missing) != 2 {
+		t.Errorf("expected 2 missing convention files (hot.md, README.md), got %v", p.Missing)
 	}
 }
 

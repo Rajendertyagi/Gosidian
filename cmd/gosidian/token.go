@@ -29,6 +29,8 @@ func runTokenCmd(args []string) {
 		tokenList(rest)
 	case "revoke":
 		tokenRevoke(rest)
+	case "opt-in":
+		tokenOptIn(rest)
 	case "-h", "--help", "help":
 		tokenUsage()
 	default:
@@ -45,6 +47,7 @@ Actions:
   create   Create a new bearer token
   list     List provisioned tokens (no plaintext)
   revoke   Delete a token by id
+  opt-in   Toggle self-improve opt-in on existing token(s)
 
 Common options:
   --vault <dir>   Vault directory (required)
@@ -54,7 +57,12 @@ Create options:
   --project <s>           Restrict the token to a top-level project (empty = admin)
   --scopes read,write     Comma-separated scopes (default: read,write)
   --ttl <duration>        Expiration, e.g. 720h. 0 = no expiry (default)
-  --self-improve          Opt this token in to the self-improvement insight loop`)
+  --self-improve          Opt this token in to the self-improvement insight loop
+
+Opt-in options:
+  --id <s>                Token id from 'token list' (mutually exclusive with --all)
+  --all                   Apply to every token
+  --off                   Withdraw the opt-in instead of granting it`)
 }
 
 func openStore(vaultDir string) *auth.Store {
@@ -157,6 +165,53 @@ func tokenRevoke(args []string) {
 		log.Fatalf("revoke: %v", err)
 	}
 	fmt.Printf("revoked token %s\n", *id)
+}
+
+// tokenOptIn enrols or withdraws an existing token (or all of them) from the
+// self-improvement insight loop. It reuses Store.SetSelfImproveOptIn, so the
+// operator no longer has to hand-edit tokens.json to flip the flag on a token
+// that already exists (IMP-051). --id and --all are mutually exclusive.
+func tokenOptIn(args []string) {
+	fs := flag.NewFlagSet("token opt-in", flag.ExitOnError)
+	vaultDir := fs.String("vault", "", "vault directory")
+	id := fs.String("id", "", "token id (from `token list`)")
+	all := fs.Bool("all", false, "apply to every token")
+	off := fs.Bool("off", false, "withdraw the opt-in instead of granting it")
+	_ = fs.Parse(args)
+
+	if (*id == "" && !*all) || (*id != "" && *all) {
+		log.Fatal("exactly one of --id or --all is required")
+	}
+
+	store := openStore(*vaultDir)
+	optIn := !*off
+
+	if *all {
+		tokens := store.List()
+		if len(tokens) == 0 {
+			fmt.Println("(no tokens — auth disabled)")
+			return
+		}
+		for i := range tokens {
+			if err := store.SetSelfImproveOptIn(tokens[i].ID, optIn); err != nil {
+				log.Fatalf("set self-improve opt-in on %s: %v", tokens[i].ID, err)
+			}
+		}
+		fmt.Printf("self-improve opt-in %s on %d token(s)\n", optInWord(optIn), len(tokens))
+		return
+	}
+
+	if err := store.SetSelfImproveOptIn(*id, optIn); err != nil {
+		log.Fatalf("set self-improve opt-in: %v", err)
+	}
+	fmt.Printf("self-improve opt-in %s on token %s\n", optInWord(optIn), *id)
+}
+
+func optInWord(optIn bool) string {
+	if optIn {
+		return "granted"
+	}
+	return "withdrawn"
 }
 
 func parseScopes(csv string) []string {
