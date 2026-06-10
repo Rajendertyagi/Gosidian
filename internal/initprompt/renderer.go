@@ -4,6 +4,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,10 +42,14 @@ type Hints struct {
 // executes; `GosidianBlock` is the parametric markdown to innest into the
 // agent-native instruction file.
 type Result struct {
-	Mode               Mode     `json:"mode"`
-	NeedsScaffold      bool     `json:"needs_scaffold"`
-	Prompt             string   `json:"prompt"`
+	Mode          Mode   `json:"mode"`
+	NeedsScaffold bool   `json:"needs_scaffold"`
+	Prompt        string `json:"prompt"`
+	// GosidianBlock is the thin instruction-file stub to innest into the
+	// agent-native file. The full operational directives live in
+	// memory_bootstrap's directives_block, not here.
 	GosidianBlock      string   `json:"gosidian_block"`
+	StubVersion        int      `json:"stub_version"`
 	SuggestedQuestions []string `json:"suggested_questions"`
 }
 
@@ -79,9 +84,9 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 	if err != nil {
 		return Result{}, fmt.Errorf("read prompt asset %s: %w", promptAsset, err)
 	}
-	blockBytes, err := assetsFS.ReadFile(sharedGosidianBlock)
+	stubBytes, err := assetsFS.ReadFile(sharedStubTemplate)
 	if err != nil {
-		return Result{}, fmt.Errorf("read gosidian block: %w", err)
+		return Result{}, fmt.Errorf("read stub template: %w", err)
 	}
 
 	vars := map[string]string{
@@ -89,6 +94,7 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 		"TODAY":         time.Now().UTC().Format("2006-01-02"),
 		"AGENT_PROFILE": string(profile),
 		"AGENT_NAME":    coalesce(hints.AgentName, prof.DisplayName),
+		"STUB_VERSION":  strconv.Itoa(StubVersion),
 	}
 	if hints.Language != "" {
 		vars["LANGUAGE"] = hints.Language
@@ -116,9 +122,30 @@ func Render(project string, profile Profile, mode Mode, hints Hints, projectExis
 		Mode:               mode,
 		NeedsScaffold:      !projectExists,
 		Prompt:             applyVars(string(promptBytes), vars),
-		GosidianBlock:      applyVars(string(blockBytes), vars),
+		GosidianBlock:      applyVars(string(stubBytes), vars),
+		StubVersion:        StubVersion,
 		SuggestedQuestions: defaultSuggestedQuestions(),
 	}, nil
+}
+
+// RenderDirectives renders the generic operational directives block for a
+// project, parameterised only by {{PROJECT}} and {{DIRECTIVES_VERSION}}. It is
+// served by memory_bootstrap (directives_block) so each project reads the rules
+// fresh every session instead of embedding them in its instruction file.
+// Returns the rendered markdown and the current DirectivesVersion.
+func RenderDirectives(project string) (string, int, error) {
+	if strings.TrimSpace(project) == "" {
+		return "", 0, errors.New("project is required")
+	}
+	body, err := assetsFS.ReadFile(sharedDirectivesTemplate)
+	if err != nil {
+		return "", 0, fmt.Errorf("read directives template: %w", err)
+	}
+	vars := map[string]string{
+		"PROJECT":            project,
+		"DIRECTIVES_VERSION": strconv.Itoa(DirectivesVersion),
+	}
+	return applyVars(string(body), vars), DirectivesVersion, nil
 }
 
 func applyVars(body string, vars map[string]string) string {

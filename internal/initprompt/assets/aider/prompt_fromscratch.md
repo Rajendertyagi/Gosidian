@@ -1,7 +1,10 @@
 # memory_init_agent — modalità from-scratch (Aider / CONVENTIONS.md)
 
 Hai ricevuto il payload dal tool MCP `memory_init_agent`. **Ruolo**:
-creare da zero `CONVENTIONS.md` nel progetto **{{PROJECT}}**.
+creare da zero `CONVENTIONS.md` nel progetto **{{PROJECT}}**, innestando
+il `gosidian_block`. Il `gosidian_block` è uno **stub sottile** (Regola
+Zero → bootstrap + specifiche locali): le direttive operative complete
+arrivano dal `directives_block` di `memory_bootstrap`, non da questo file.
 
 ## Step 1 — Determina filename
 

@@ -6,8 +6,11 @@ Hai appena ricevuto questo payload dal tool MCP `memory_init_agent`.
 
 Il server ti ha passato:
 
-- `gosidian_block` — markdown parametrico con Regola Zero, ingest rules,
-  workflow end-of-task. **Payload principale.** Placeholder non risolti:
+- `gosidian_block` — **stub sottile** parametrico: Regola Zero (che punta
+  a `memory_bootstrap` per le direttive) + specifiche locali. **Payload
+  principale.** Le direttive operative complete (mappa cartelle, ingest
+  rules, workflow end-of-task, tag) **non** sono qui: le serve
+  `memory_bootstrap` nel campo `directives_block`. Placeholder non risolti:
   `{{LANGUAGE}}`, `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`, `{{STACK}}`,
   `{{HOT_FILES}}`. `{{PROJECT}}` e `{{TODAY}}` sono già risolti.
 - `needs_scaffold` — bool. Se `true`, il progetto vault **non esiste** e

@@ -1,6 +1,9 @@
 package initprompt
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -204,5 +207,95 @@ func TestProfiles_ReturnsAllRegistered(t *testing.T) {
 		if !IsKnownProfile(p) {
 			t.Errorf("Profiles() returned unknown profile %q", p)
 		}
+	}
+}
+
+// TestRender_StubHasVersionMarker verifies the rendered stub carries the
+// machine-readable version markers (start with the resolved StubVersion + end),
+// that Result.StubVersion is set, and that the stub POINTS at the
+// bootstrap-served directives rather than embedding them (ADR-010).
+func TestRender_StubHasVersionMarker(t *testing.T) {
+	res, err := Render("p", ProfileClaude, ModeAugment, Hints{}, true)
+	if err != nil {
+		t.Fatalf("Render failed: %v", err)
+	}
+	if res.StubVersion != StubVersion {
+		t.Errorf("Result.StubVersion = %d, want %d", res.StubVersion, StubVersion)
+	}
+	start := fmt.Sprintf("<!-- gosidian:stub v=%d -->", StubVersion)
+	if !strings.Contains(res.GosidianBlock, start) {
+		t.Errorf("stub missing start marker %q", start)
+	}
+	if !strings.Contains(res.GosidianBlock, "<!-- /gosidian:stub -->") {
+		t.Error("stub missing end marker <!-- /gosidian:stub -->")
+	}
+	if strings.Contains(res.GosidianBlock, "{{STUB_VERSION}}") {
+		t.Error("stub contains unresolved {{STUB_VERSION}}")
+	}
+	if !strings.Contains(res.GosidianBlock, "directives_block") {
+		t.Error("stub should reference directives_block (directives are served by bootstrap, not embedded)")
+	}
+}
+
+// TestRenderDirectives verifies the bootstrap-served directives render with the
+// project name + version marker resolved and no dangling placeholders.
+func TestRenderDirectives(t *testing.T) {
+	body, ver, err := RenderDirectives("myproj")
+	if err != nil {
+		t.Fatalf("RenderDirectives failed: %v", err)
+	}
+	if ver != DirectivesVersion {
+		t.Errorf("version = %d, want %d", ver, DirectivesVersion)
+	}
+	start := fmt.Sprintf("<!-- gosidian:directives v=%d -->", DirectivesVersion)
+	if !strings.Contains(body, start) {
+		t.Errorf("directives missing start marker %q", start)
+	}
+	if !strings.Contains(body, "<!-- /gosidian:directives -->") {
+		t.Error("directives missing end marker")
+	}
+	if !strings.Contains(body, "myproj") {
+		t.Error("directives should mention the project name")
+	}
+	for _, ph := range []string{"{{PROJECT}}", "{{DIRECTIVES_VERSION}}"} {
+		if strings.Contains(body, ph) {
+			t.Errorf("directives contains unresolved %s", ph)
+		}
+	}
+	if _, _, err := RenderDirectives("  "); err == nil {
+		t.Error("expected error for empty project")
+	}
+}
+
+// TestStubVersion_PinnedToContent and TestDirectivesVersion_PinnedToContent are
+// discipline guards: each fails whenever the embedded template changes without
+// the maintainer revisiting the matching version. When one fires: bump the
+// version in profiles.go (if agents should pick the change up) AND update the
+// pin, or just update the pin for a cosmetic edit.
+func TestStubVersion_PinnedToContent(t *testing.T) {
+	assertPinned(t, sharedStubTemplate, StubVersion, 2,
+		"78a4e8c3cd21d1eba604b675492b2462e11a9ae54785be2be61927d4160bbdb0")
+}
+
+func TestDirectivesVersion_PinnedToContent(t *testing.T) {
+	assertPinned(t, sharedDirectivesTemplate, DirectivesVersion, 2,
+		"85384f90e3fb415b5a114e0582e27c28cc906eae5f29db623a4f6c8ded188886")
+}
+
+func assertPinned(t *testing.T, asset string, gotVersion, wantVersion int, wantHash string) {
+	t.Helper()
+	raw, err := assetsFS.ReadFile(asset)
+	if err != nil {
+		t.Fatalf("read %s: %v", asset, err)
+	}
+	sum := sha256.Sum256(raw)
+	got := hex.EncodeToString(sum[:])
+	if gotVersion != wantVersion {
+		t.Fatalf("%s: version = %d, pin expects %d — update both together", asset, gotVersion, wantVersion)
+	}
+	if got != wantHash {
+		t.Fatalf("%s content changed (sha256 %s, pin %s).\n"+
+			"If agents should pick this up: bump the version in profiles.go, then set wantVersion+wantHash.\n"+
+			"If cosmetic: just set wantHash.", asset, got, wantHash)
 	}
 }

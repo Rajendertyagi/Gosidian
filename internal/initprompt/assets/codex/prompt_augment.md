@@ -6,7 +6,11 @@ tutto il contenuto.
 
 Il server ti ha passato:
 
-- `gosidian_block` — con placeholder non risolti: `{{LANGUAGE}}`,
+- `gosidian_block` — **stub sottile** parametrico: Regola Zero (che
+  punta a `memory_bootstrap` per le direttive) + specifiche locali. Le
+  direttive operative complete (mappa cartelle, ingest rules, workflow,
+  tag) **non** sono qui: le serve `memory_bootstrap` nel campo
+  `directives_block`. Placeholder non risolti: `{{LANGUAGE}}`,
   `{{CODE_LANGUAGE}}`, `{{PROJECT_TYPE}}`, `{{STACK}}`, `{{HOT_FILES}}`.
 - `needs_scaffold` — se `true`, crea il progetto vault prima.
 - `mode: "augment"` — `existing_content` presente.

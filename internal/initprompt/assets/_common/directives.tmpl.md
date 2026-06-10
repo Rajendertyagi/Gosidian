@@ -1,44 +1,36 @@
+<!-- gosidian:directives v={{DIRECTIVES_VERSION}} -->
 <!--
-  gosidian_block.tmpl.md — sezione "Memory & workflow (gosidian)" da
-  innestare nel file di istruzioni agent-native del progetto
-  "{{PROJECT}}". Mantenuto dal tool `memory_init_agent` del server MCP
-  gosidian. Placeholder: {{PROJECT}} {{TODAY}} {{LANGUAGE}}
-  {{CODE_LANGUAGE}} {{PROJECT_TYPE}} {{STACK}} {{HOT_FILES}}
-  {{AGENT_NAME}} {{AGENT_PROFILE}}.
+  directives.tmpl.md — direttive operative gosidian, servite da
+  memory_bootstrap nel campo `directives_block` (parametrico solo su
+  {{PROJECT}} e {{DIRECTIVES_VERSION}}). NON è un file da scrivere su
+  disco: l'agente le legge fresche a ogni bootstrap. La personalizzazione
+  per-progetto (stack, hot files, lingua) vive nello stub locale, non qui.
 -->
 
-## Memory & workflow (gosidian)
+## Direttive operative (gosidian) — v{{DIRECTIVES_VERSION}}
 
-Stai lavorando su **{{PROJECT}}** ({{PROJECT_TYPE}}, stack: {{STACK}}).
-La memoria persistente cross-sessione vive nel vault gosidian, nel
-progetto `{{PROJECT}}/`, accessibile via i tool MCP `mcp__gosidian__memory_*`.
+Queste regole sono servite da `memory_bootstrap` (campo `directives_block`)
+e valgono per il lavoro nel progetto `{{PROJECT}}`. **Leggile e seguile a
+ogni sessione**: non tenerne una copia nel file di istruzioni — si
+aggiornano da sole quando il server cambia versione.
 
-Il pattern è Karpathy-Wiki-Stack: le note sono la wiki che **tu**
-(l'agent) mantieni mentre lavori — non il tuo output primario, ma la
-tua memoria compilata.
+### Auto-conversione del file di istruzioni (one-time)
 
-### Regola zero — Bootstrap di sessione
-
-All'inizio di **ogni** sessione, **prima** di qualsiasi `Grep`/`Read` sul
-codice, fai il bootstrap della memoria con una singola call:
+Controlla **subito** il file di istruzioni di questo progetto
+(CLAUDE.md/AGENTS.md/… già caricato in contesto): se **non** contiene il
+marker `<!-- gosidian:stub -->`, è un file *pre-stub* (probabilmente con
+queste stesse direttive duplicate al suo interno). Convertilo **una-tantum**
+a stub sottile:
 
 ```
-mcp__gosidian__memory_bootstrap({project: "{{PROJECT}}"})
+mcp__gosidian__memory_init_agent({project: "{{PROJECT}}", existing_content: "<contenuto del file>"})
 ```
 
-Ritorna in un solo JSON: `hot_md_content`, `readme_content`,
-`active_plans[]`, `available_skills[]`, `available_agents[]`,
-`recent_notes[]`, `project_stats`, `missing[]`. Sostituisce 4 chiamate
-separate. **Controlla sempre `available_skills[]` prima di iniziare una
-procedura operativa** (build, deploy, config edit, rotazione,
-troubleshoot): riusare una skill è sempre meglio che reinventarla.
-
-Se `memory_bootstrap` non è disponibile, fallback manuale:
-
-1. `mcp__gosidian__memory_get({path: "{{PROJECT}}/hot.md"})` — orientamento rapido
-2. `mcp__gosidian__memory_get({path: "{{PROJECT}}/README.md"})` — mappa del progetto
-3. `mcp__gosidian__memory_notes_by_tag({tag: "status:in-progress"})` — plan attivi
-4. `mcp__gosidian__memory_notes_by_tag({tag: "type:skill"})` — catalogo skill
+(modalità augment) — innesta lo stub fra i marker `gosidian:stub`, **preserva
+le sezioni locali** del repo e **rimuovi** le direttive operative duplicate
+(ora le servo io). Da quel momento il file resta sottile e queste direttive
+arrivano sempre fresche dal bootstrap. Idempotente: se il marker è già
+presente, non fare nulla. Procedura completa: skill `rollout direttive`.
 
 ### Mappa delle cartelle del vault
 
@@ -52,8 +44,6 @@ Se `memory_bootstrap` non è disponibile, fallback manuale:
 | `{{PROJECT}}/hot.md` | Session cache aggiornata fine-task | **Sempre** al bootstrap |
 | `{{PROJECT}}/log.md` | Log append-only di attività | Append a fine task |
 
-**Hot files** (dominio-specifico): {{HOT_FILES}}
-
 ### Quando scrivere in memoria (ingest rules)
 
 Durante il lavoro, quando scopri qualcosa che sopravvivrà al task
@@ -66,7 +56,7 @@ corrente, aggiorna il vault:
 | Termine di dominio nuovo | `{{PROJECT}}/memory/glossary.md` | `memory_append` |
 | Nuova convenzione di codice / test / ops | `{{PROJECT}}/memory/conventions.md` | `memory_edit` |
 | Cambio infra / deploy / env | `{{PROJECT}}/memory/environments.md` | `memory_edit` |
-| Task non banale che sta per cominciare | `{{PROJECT}}/plans/{{TODAY}}-<slug>.md` | `memory_create` **prima** di toccare il codice |
+| Task non banale che sta per cominciare | `{{PROJECT}}/plans/<YYYYMMDD>-<slug>.md` | `memory_create` **prima** di toccare il codice |
 | Procedura ripetuta ≥2 volte nella stessa sessione | `{{PROJECT}}/skills/<slug>.md` | `memory_create` con frontmatter `type:skill` + trigger phrase + step + gotcha |
 | Dominio di competenza ricorrente (ri-leggi le stesse 3-5 note in 2+ task) | `{{PROJECT}}/agents/<slug>.md` | `memory_create` con `type:agent` + sezione "Contesto obbligatorio" |
 | Bug osservato anche fuori scope del task corrente | `{{PROJECT}}/docs/bugs.md` | `memory_append` come `## BUG-NNN` |
@@ -100,7 +90,7 @@ plan outcome equivale a perderle.
   entry `pattern` in `{{PROJECT}}/log.md`.
 - **Task large/architetturale** (3+ file, migration, nuovo sotto-sistema,
   cambio ADR, refactor cross-pacchetto): plan autoritativo in
-  `{{PROJECT}}/plans/{{TODAY}}-<slug>.md` **prima** di implementare.
+  `{{PROJECT}}/plans/<YYYYMMDD>-<slug>.md` **prima** di implementare.
   Chiudilo con sezione `Outcome` compilata (hash commit, sorprese,
   side findings).
 
@@ -133,15 +123,4 @@ inutile alla prossima sessione.
 - `pinned` — sempre in superficie al bootstrap
 - `importance: 1..5` nel frontmatter — priorità (complementare a pinned)
 
-### Lingua
-
-- UI utente, messaggi, note del vault: **{{LANGUAGE}}**
-- Codice, commenti inline, commit message, nomi di variabili/funzioni:
-  **{{CODE_LANGUAGE}}**
-
-### Meta
-
-- Questa sezione è stata generata da `memory_init_agent` ({{TODAY}}) per
-  il profilo agent **{{AGENT_NAME}}** (`agent_profile={{AGENT_PROFILE}}`).
-  Se aggiungi regole o la rigeneri, mantieni il blocco "Memory &
-  workflow (gosidian)" come unità riconoscibile.
+<!-- /gosidian:directives -->

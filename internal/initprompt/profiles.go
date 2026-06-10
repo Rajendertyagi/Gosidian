@@ -35,10 +35,42 @@ type profileMeta struct {
 	PromptFromScratch string
 }
 
-// sharedGosidianBlock is the single parametric block embedded into every
-// profile output. Paths are relative to the embed.FS root (which is
-// rooted at "assets").
-const sharedGosidianBlock = "assets/_common/gosidian_block.tmpl.md"
+// sharedStubTemplate is the thin instruction-file stub emitted by
+// memory_init_agent: Regola Zero (call bootstrap, follow directives_block) +
+// local-specifics placeholders. The full operational directives are NOT here —
+// they are served by memory_bootstrap. Paths are relative to the embed.FS root
+// (rooted at "assets").
+const sharedStubTemplate = "assets/_common/stub.tmpl.md"
+
+// sharedDirectivesTemplate is the generic operational directives block served
+// by memory_bootstrap (directives_block field), parameterised only by
+// {{PROJECT}} and {{DIRECTIVES_VERSION}}.
+const sharedDirectivesTemplate = "assets/_common/directives.tmpl.md"
+
+// StubVersion is the version of the instruction-file stub (stub.tmpl.md). It is
+// substituted into the `<!-- gosidian:stub v=N -->` marker and surfaced by
+// memory_bootstrap as `stub_version`, so an agent knows when its (rarely
+// changing) stub must be regenerated via memory_init_agent. Bump when the stub
+// contract changes. Guarded by TestStubVersion_PinnedToContent.
+//
+// v2 (2026-06-09, IMP-048): the in-stub "Specifiche locali" section is now an
+// explicit signpost ("write local specifics BELOW the closing marker") instead
+// of an editable placeholder — content inside the markers is regenerated on
+// every bump, so inviting edits there was a footgun. Already-converted projects
+// self-heal on their next bootstrap (stub_version advances → regeneration).
+const StubVersion = 2
+
+// DirectivesVersion is the version of the operational directives
+// (directives.tmpl.md). It is substituted into the
+// `<!-- gosidian:directives v=N -->` marker and surfaced by memory_bootstrap as
+// `directives_version`. Since the directives are served fresh each session,
+// projects never go stale on content — this version is informational + caching.
+// Bump on every meaningful change. Guarded by TestDirectivesVersion_PinnedToContent.
+//
+// v2 (2026-06-09, IMP-049): directives now instruct pre-stub projects to
+// self-convert their instruction file at bootstrap — breaks the first-conversion
+// chicken-and-egg so existing projects heal without a manual rollout.
+const DirectivesVersion = 2
 
 var profilesMap = map[Profile]profileMeta{
 	ProfileClaude: {

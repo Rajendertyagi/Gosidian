@@ -2,9 +2,11 @@
 //
 // Returns an init-prompt payload for adopting gosidian as the memory
 // layer in a new project. The caller (an AI agent) uses the prompt to
-// create or augment its agent-native instruction file (CLAUDE.md /
-// AGENTS.md / .cursor/rules.mdc / CONVENTIONS.md / …) with the
-// gosidian_block (Regola Zero + ingest rules + workflow end-of-task).
+// create or augment its agent-native instruction file (AGENTS.md /
+// CLAUDE.md / .cursor/rules.mdc / CONVENTIONS.md / …) with the thin
+// gosidian_block STUB (Regola Zero → memory_bootstrap + local specifics).
+// The full operational directives are served by memory_bootstrap
+// (directives_block), not embedded in the file (ADR-010).
 //
 // Design notes:
 //   - Read-only. The tool does NOT write to the vault and does NOT read
@@ -29,7 +31,7 @@ import (
 
 func (s *Server) registerInitAgentTool() {
 	s.impl.AddTool(mcp.NewTool("memory_init_agent",
-		mcp.WithDescription("Produce an init-prompt payload for adopting gosidian as the memory layer in a new project. Returns a multi-section `prompt` that instructs the caller to create or update the agent-native instruction file (CLAUDE.md / AGENTS.md / .cursor/rules.mdc / CONVENTIONS.md / …), plus a parametric `gosidian_block` to innest into it. Two modes, selected automatically by the presence of `existing_content`: **augment** (preferred — the caller already ran the agent's native /init and passes its output; the prompt instructs a merge preserving existing sections) and **from-scratch** (fallback — no existing content; the prompt includes cwd-scan instructions). The server does NOT read the caller's filesystem: all scanning and writing happen on the agent side. The tool does NOT choose the filename — the agent determines it (optional `filename_hint` is surfaced but not validated). If the project doesn't exist in the vault yet, `needs_scaffold=true` in the response tells the agent to call `memory_project_scaffold` first."),
+		mcp.WithDescription("Produce an init-prompt payload for adopting gosidian as the memory layer in a new project. Returns a multi-section `prompt` that instructs the caller to create or update the agent-native instruction file (CLAUDE.md / AGENTS.md / .cursor/rules.mdc / CONVENTIONS.md / …), plus a parametric thin `gosidian_block` STUB to innest into it (Regola Zero pointing at memory_bootstrap + local-specifics placeholders; the full operational directives are served separately by memory_bootstrap's `directives_block`, NOT embedded in the file — ADR-010). Two modes, selected automatically by the presence of `existing_content`: **augment** (preferred — the caller already ran the agent's native /init and passes its output; the prompt instructs a merge preserving existing sections) and **from-scratch** (fallback — no existing content; the prompt includes cwd-scan instructions). The server does NOT read the caller's filesystem: all scanning and writing happen on the agent side. The tool does NOT choose the filename — the agent determines it (optional `filename_hint` is surfaced but not validated). If the project doesn't exist in the vault yet, `needs_scaffold=true` in the response tells the agent to call `memory_project_scaffold` first."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to initialise. May not exist yet; check `needs_scaffold` in the response to know whether to call `memory_project_scaffold` first. Scoped tokens are forced to their project.")),
 		mcp.WithString("agent_profile", mcp.Description("Target agent identifier. Known values: \"claude\", \"cursor\", \"codex\", \"aider\", \"generic\". Default \"generic\". Influences only the prompt tone and tool references — the gosidian_block is identical across profiles.")),
 		mcp.WithString("existing_content", mcp.Description("Content of the agent's native instruction file when it already exists (the output of /init). If non-empty the tool switches to augment mode and the prompt will instruct a merge that preserves every existing section.")),
@@ -44,6 +46,7 @@ type initAgentResponse struct {
 	NeedsScaffold      bool     `json:"needs_scaffold"`
 	Prompt             string   `json:"prompt"`
 	GosidianBlock      string   `json:"gosidian_block"`
+	StubVersion        int      `json:"stub_version"`
 	SuggestedQuestions []string `json:"suggested_questions"`
 }
 
@@ -116,6 +119,7 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 		NeedsScaffold:      res.NeedsScaffold,
 		Prompt:             res.Prompt,
 		GosidianBlock:      res.GosidianBlock,
+		StubVersion:        res.StubVersion,
 		SuggestedQuestions: res.SuggestedQuestions,
 	})
 }

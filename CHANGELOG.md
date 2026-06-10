@@ -8,6 +8,49 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.4.0] — 2026-06-10 — "directives versioning"
+
+MINOR release. The agent-facing memory protocol gains versioned operational
+directives served at session start, a thin versioned instruction-file stub,
+and agent-agnostic instruction-file detection. Purely additive — existing
+deployments need no migration; the new response fields are additive and the
+self-healing directives upgrade older projects automatically.
+
+### Added
+
+- **Bootstrap-served directives.** `memory_bootstrap` now returns
+  `directives_block` (the full operational directives — vault folder map,
+  ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary)
+  plus `directives_version`. Projects read the rules fresh every session
+  instead of duplicating them in their instruction file, so they can no longer
+  drift out of date.
+- **Versioned instruction-file stub.** `memory_init_agent` now emits a thin
+  stub (session-bootstrap rule + local-specifics) carrying a
+  `<!-- gosidian:stub v=N -->` marker, and `memory_bootstrap` reports
+  `stub_version` so an agent knows when its (rarely changing) stub should be
+  regenerated. The full directives live in `directives_block`, not in the file.
+- **Self-healing of pre-stub projects.** The served directives instruct a
+  project whose instruction file predates the stub system to convert itself
+  once at bootstrap — existing projects upgrade with no manual rollout.
+
+### Changed
+
+- **Agent-agnostic instruction-file detection.** Bootstrap no longer assumes
+  `CLAUDE.md`: it probes `AGENTS.md`, `CLAUDE.md`, `.cursor/rules.mdc`,
+  `CONVENTIONS.md` and reports the detected file as `agent_md` (replacing the
+  former `CLAUDE.md`-specific `claude_md` field). `missing` lists `AGENTS.md`
+  when none is present.
+- **Single source of truth for conventions.** The scaffold templates
+  (`karpathy-wiki` prompt + index READMEs) and the non-Claude init prompts
+  (Cursor / Codex / Aider / generic) no longer restate the tag vocabulary,
+  plan format, or ingest rules — they point at the bootstrap `directives_block`.
+
+### Notes
+
+- New MCP response fields are additive; a client that ignored them keeps
+  working. The `claude_md` → `agent_md` rename only affects callers that read
+  that informational field directly.
+
 ## [2.3.2] — 2026-06-09 — "security patch follow-up"
 
 PATCH release. Completes the note-titles allocation hardening started in

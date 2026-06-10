@@ -3,7 +3,10 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
+
+	"github.com/gosidian/gosidian/internal/initprompt"
 )
 
 // seedBootstrapVault populates the test server with a small but realistic set
@@ -41,16 +44,19 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	body := resultText(t, res)
 
 	var p struct {
-		Project         string              `json:"project"`
-		HotMD           bootstrapFile       `json:"hot_md"`
-		Readme          bootstrapFile       `json:"readme"`
-		ClaudeMD        bootstrapFile       `json:"claude_md"`
-		ActivePlans     []noteRef           `json:"active_plans"`
-		AvailableSkills []noteRef           `json:"available_skills"`
-		AvailableAgents []noteRef           `json:"available_agents"`
-		RecentNotes     []recentNoteResponse `json:"recent_notes"`
-		Stats           bootstrapStats      `json:"stats"`
-		Missing         []string            `json:"missing"`
+		Project           string               `json:"project"`
+		HotMD             bootstrapFile        `json:"hot_md"`
+		Readme            bootstrapFile        `json:"readme"`
+		AgentMD           bootstrapFile        `json:"agent_md"`
+		ActivePlans       []noteRef            `json:"active_plans"`
+		AvailableSkills   []noteRef            `json:"available_skills"`
+		AvailableAgents   []noteRef            `json:"available_agents"`
+		RecentNotes       []recentNoteResponse `json:"recent_notes"`
+		Stats             bootstrapStats       `json:"stats"`
+		Missing           []string             `json:"missing"`
+		DirectivesVersion int                  `json:"directives_version"`
+		DirectivesBlock   string               `json:"directives_block"`
+		StubVersion       int                  `json:"stub_version"`
 	}
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse: %v body=%s", err, body)
@@ -62,8 +68,8 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	if !p.HotMD.Present || !p.Readme.Present {
 		t.Errorf("hot/readme should be present: %+v %+v", p.HotMD, p.Readme)
 	}
-	if p.ClaudeMD.Present {
-		t.Errorf("CLAUDE.md not seeded, should be absent")
+	if p.AgentMD.Present {
+		t.Errorf("agent instruction file not seeded, should be absent")
 	}
 	if p.HotMD.ETag == "" {
 		t.Errorf("hot_md etag should be non-empty")
@@ -89,12 +95,30 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	if len(p.Stats.TopTags) == 0 {
 		t.Errorf("top_tags should not be empty")
 	}
-	wantMissing := map[string]bool{"CLAUDE.md": true}
+	wantMissing := map[string]bool{"AGENTS.md": true}
 	for _, m := range p.Missing {
 		delete(wantMissing, m)
 	}
 	if len(wantMissing) > 0 {
-		t.Errorf("missing = %v, want to include CLAUDE.md", p.Missing)
+		t.Errorf("missing = %v, want to include AGENTS.md", p.Missing)
+	}
+
+	if p.DirectivesVersion != initprompt.DirectivesVersion {
+		t.Errorf("directives_version = %d, want %d", p.DirectivesVersion, initprompt.DirectivesVersion)
+	}
+	if p.StubVersion != initprompt.StubVersion {
+		t.Errorf("stub_version = %d, want %d", p.StubVersion, initprompt.StubVersion)
+	}
+	// directives_block must be served and carry its own version marker + the
+	// project name (ADR-010: directives delivered via bootstrap, not embedded).
+	if p.DirectivesBlock == "" {
+		t.Error("directives_block should be served, got empty")
+	}
+	if !strings.Contains(p.DirectivesBlock, "gosidian:directives") {
+		t.Error("directives_block missing its version marker")
+	}
+	if !strings.Contains(p.DirectivesBlock, proj) {
+		t.Error("directives_block should be rendered for the project")
 	}
 }
 

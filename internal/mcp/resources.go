@@ -62,9 +62,10 @@ func (s *Server) readNoteResource(ctx context.Context, req mcp.ReadResourceReque
 	}, nil
 }
 
-// handleLoadProjectContext composes the project's CLAUDE.md + every note
-// under <project>/agents/*.md into a single user prompt message the agent
-// can replay. Useful as a one-shot context bootstrap at session start.
+// handleLoadProjectContext composes the project's instruction file
+// (AGENTS.md/CLAUDE.md/… — agent-agnostic, ADR-010) + every note under
+// <project>/agents/*.md into a single user prompt message the agent can
+// replay. Useful as a one-shot context bootstrap at session start.
 func (s *Server) handleLoadProjectContext(ctx context.Context, req mcp.GetPromptRequest) (*mcp.GetPromptResult, error) {
 	tok := s.tokenFromContext(ctx)
 	if tok == nil || !tok.HasScope(auth.ScopeRead) {
@@ -86,9 +87,13 @@ func (s *Server) handleLoadProjectContext(ctx context.Context, req mcp.GetPrompt
 	sb.WriteString(project)
 	sb.WriteString("\n\n")
 
-	if note, err := s.vault.Load(project + "/CLAUDE.md"); err == nil {
-		sb.WriteString("## CLAUDE.md\n\n")
-		sb.Write(note.Content)
+	// Agent-agnostic (ADR-010): pick the project's instruction file under any
+	// recognised name instead of assuming CLAUDE.md.
+	if af, name := s.detectAgentFile(project); af.Present {
+		sb.WriteString("## ")
+		sb.WriteString(name)
+		sb.WriteString("\n\n")
+		sb.WriteString(af.Content)
 		sb.WriteString("\n\n")
 	}
 

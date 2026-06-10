@@ -27,3 +27,8 @@ Persistent memory for the **{{PROJECT}}** project. Karpathy-Wiki-Stack pattern (
 1. `memory_bootstrap({project: "{{PROJECT}}"})` — full aggregate in one call
 2. If needed, `memory_plans(project, status:"in-progress")` + `memory_skills(project)`
 3. For focused tasks, targeted reads via `memory_get`
+
+The operating conventions (tag vocabulary, plan/ADR format, ingest rules,
+end-of-task workflow) are not restated in this vault — they are served
+authoritatively by `memory_bootstrap` in the `directives_block` field.
+Read and follow that each session.
