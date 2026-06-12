@@ -1,6 +1,8 @@
 package index
 
 import (
+	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -281,4 +283,154 @@ func (i *Index) Projects() ([]string, error) {
 		}
 	}
 	return out, rows.Err()
+}
+
+// Hub is a most-connected note in the wikilink graph, ranked by undirected
+// degree. Surfaced by the memory_hubs MCP tool — the "god nodes" of a vault,
+// the inverse signal of orphan-note.
+type Hub struct {
+	Path   string
+	Title  string
+	Degree int
+}
+
+// Hubs returns the most-connected notes ranked by undirected degree desc
+// (ties broken by path for determinism). project scopes to a top-level folder
+// (empty = whole vault); degree then counts only intra-project edges, matching
+// GraphData(project, includeCross=false). Notes with zero degree are omitted —
+// a hub has links by definition. limit caps the result (<=0 → 20).
+func (i *Index) Hubs(project string, limit int) ([]Hub, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	nodes, _, err := i.GraphData(project, false)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Hub, 0, len(nodes))
+	for _, n := range nodes {
+		if n.Degree == 0 {
+			continue
+		}
+		out = append(out, Hub{Path: n.Path, Title: n.Title, Degree: n.Degree})
+	}
+	sort.Slice(out, func(a, b int) bool {
+		if out[a].Degree != out[b].Degree {
+			return out[a].Degree > out[b].Degree
+		}
+		return out[a].Path < out[b].Path
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// adjacency builds the undirected adjacency list of the resolved-wikilink
+// graph, vault-wide. Self-loops and duplicate edges collapse. Neighbour slices
+// are sorted so BFS traversal — and therefore the returned shortest path — is
+// deterministic when several shortest paths exist.
+func (i *Index) adjacency() (map[string][]string, error) {
+	rows, err := i.db.Query(`
+        SELECT s.path, l.target_path
+        FROM links l
+        JOIN notes s ON s.id = l.src_id
+        WHERE l.target_path IS NOT NULL AND l.target_path <> ''
+    `)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	set := make(map[string]map[string]struct{})
+	add := func(a, b string) {
+		m := set[a]
+		if m == nil {
+			m = make(map[string]struct{})
+			set[a] = m
+		}
+		m[b] = struct{}{}
+	}
+	for rows.Next() {
+		var from, to string
+		if err := rows.Scan(&from, &to); err != nil {
+			return nil, err
+		}
+		if from == to {
+			continue
+		}
+		add(from, to)
+		add(to, from)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	adj := make(map[string][]string, len(set))
+	for node, nbrs := range set {
+		list := make([]string, 0, len(nbrs))
+		for n := range nbrs {
+			list = append(list, n)
+		}
+		sort.Strings(list)
+		adj[node] = list
+	}
+	return adj, nil
+}
+
+// BFSPath returns the shortest path of note paths connecting from→to over the
+// undirected wikilink graph (resolved links only), inclusive of both
+// endpoints. Returns nil (and no error) when the two notes exist but are not
+// connected within maxDepth. maxDepth <= 0 means unbounded. A missing endpoint
+// is a typed error (so callers can distinguish "not found" from "no path").
+func (i *Index) BFSPath(from, to string, maxDepth int) ([]string, error) {
+	fn, err := i.Note(from)
+	if err != nil {
+		return nil, err
+	}
+	if fn == nil {
+		return nil, fmt.Errorf("note %q not found", from)
+	}
+	tn, err := i.Note(to)
+	if err != nil {
+		return nil, err
+	}
+	if tn == nil {
+		return nil, fmt.Errorf("note %q not found", to)
+	}
+	if from == to {
+		return []string{from}, nil
+	}
+	adj, err := i.adjacency()
+	if err != nil {
+		return nil, err
+	}
+	prev := map[string]string{from: ""}
+	depth := map[string]int{from: 0}
+	queue := []string{from}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if maxDepth > 0 && depth[cur] >= maxDepth {
+			continue
+		}
+		for _, nb := range adj[cur] {
+			if _, seen := prev[nb]; seen {
+				continue
+			}
+			prev[nb] = cur
+			depth[nb] = depth[cur] + 1
+			if nb == to {
+				// Reconstruct from→to by walking parents back from `to`.
+				rev := []string{to}
+				for p := cur; p != ""; p = prev[p] {
+					rev = append(rev, p)
+				}
+				for l, r := 0, len(rev)-1; l < r; l, r = l+1, r-1 {
+					rev[l], rev[r] = rev[r], rev[l]
+				}
+				return rev, nil
+			}
+			queue = append(queue, nb)
+		}
+	}
+	return nil, nil
 }

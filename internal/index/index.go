@@ -41,6 +41,33 @@ func Open(path string) (*Index, error) {
 
 func (i *Index) Close() error { return i.db.Close() }
 
+// noteExts mirrors vault.noteExtensions. Duplicated rather than imported
+// because internal/vault imports internal/index — the reverse would cycle.
+var noteExts = []string{".md", ".html"}
+
+// stripNoteExt drops a trailing note extension (.md/.html) from p, leaving any
+// other suffix untouched.
+func stripNoteExt(p string) string {
+	low := strings.ToLower(p)
+	for _, e := range noteExts {
+		if strings.HasSuffix(low, e) {
+			return p[:len(p)-len(e)]
+		}
+	}
+	return p
+}
+
+// extractForPath dispatches link/tag/title/fts-body extraction by note kind.
+// HTML notes use parser.ExtractHTML and index its plain-text projection (not the
+// raw markup) for FTS; markdown notes index the raw body.
+func extractForPath(path, body string) (links []parser.WikiLinkRef, tags []string, title, ftsBody string) {
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		return parser.ExtractHTML([]byte(body))
+	}
+	links, tags, title = parser.Extract([]byte(body))
+	return links, tags, title, body
+}
+
 // Upsert stores the note, extracts links/tags from the body, and refreshes
 // notes_fts. Existing rows for the same path are replaced.
 func (i *Index) Upsert(n NoteDoc) error {
@@ -65,10 +92,10 @@ func (i *Index) resolveInbound(noteID int64, notePath, title string) error {
 	if idx := strings.LastIndex(base, "/"); idx >= 0 {
 		base = base[idx+1:]
 	}
-	base = strings.TrimSuffix(base, ".md")
+	base = stripNoteExt(base)
 
 	// Candidate target strings that should resolve to this note.
-	candidates := []string{notePath, strings.TrimSuffix(notePath, ".md"), title, base}
+	candidates := []string{notePath, stripNoteExt(notePath), title, base}
 	seen := map[string]struct{}{}
 	var dedup []string
 	for _, c := range candidates {
@@ -105,7 +132,7 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 	defer tx.Rollback()
 
 	title := n.Title
-	links, tags, frontTitle := parser.Extract([]byte(n.Body))
+	links, tags, frontTitle, ftsBody := extractForPath(n.Path, n.Body)
 	if frontTitle != "" {
 		title = frontTitle
 	}
@@ -151,7 +178,7 @@ func (i *Index) upsertLocked(n NoteDoc) (int64, error) {
 
 	if _, err := tx.Exec(
 		`INSERT INTO notes_fts(rowid, title, body) VALUES(?,?,?)`,
-		id, title, n.Body,
+		id, title, ftsBody,
 	); err != nil {
 		return 0, err
 	}
@@ -237,8 +264,12 @@ func (i *Index) resolveTargetLocked(target string) string {
 	if t == "" {
 		return ""
 	}
-	// 1. exact path match (with or without .md)
-	tryPaths := []string{t, t + ".md"}
+	// 1. exact path match (verbatim, then with each note extension; markdown
+	// wins ties because .md precedes .html in noteExts).
+	tryPaths := []string{t}
+	for _, e := range noteExts {
+		tryPaths = append(tryPaths, t+e)
+	}
 	for _, p := range tryPaths {
 		var got string
 		if err := i.db.QueryRow(`SELECT path FROM notes WHERE path = ?`, p).Scan(&got); err == nil {
@@ -250,12 +281,14 @@ func (i *Index) resolveTargetLocked(target string) string {
 	if err := i.db.QueryRow(`SELECT path FROM notes WHERE lower(title) = lower(?) LIMIT 1`, t).Scan(&got); err == nil {
 		return got
 	}
-	// 3. basename match
-	if err := i.db.QueryRow(
-		`SELECT path FROM notes WHERE lower(path) LIKE ? OR lower(path) = ? LIMIT 1`,
-		"%/"+strings.ToLower(t)+".md", strings.ToLower(t)+".md",
-	).Scan(&got); err == nil {
-		return got
+	// 3. basename match across note extensions (.md before .html).
+	for _, e := range noteExts {
+		if err := i.db.QueryRow(
+			`SELECT path FROM notes WHERE lower(path) LIKE ? OR lower(path) = ? LIMIT 1`,
+			"%/"+strings.ToLower(t)+e, strings.ToLower(t)+e,
+		).Scan(&got); err == nil {
+			return got
+		}
 	}
 	return ""
 }

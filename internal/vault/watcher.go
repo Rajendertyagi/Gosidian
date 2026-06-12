@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gosidian/gosidian/internal/index"
 	"github.com/fsnotify/fsnotify"
+	"github.com/gosidian/gosidian/internal/index"
 )
 
 // Watch starts a recursive fsnotify watcher on the vault and reindexes files
@@ -29,7 +29,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 	debounce := make(map[string]*time.Timer)
 
 	handle := func(abs string) {
-		if !strings.EqualFold(filepath.Ext(abs), ".md") {
+		if !v.IsNoteFile(abs) {
 			return
 		}
 		rel, err := filepath.Rel(v.Root, abs)
@@ -77,7 +77,7 @@ func (v *Vault) Watch(ctx context.Context, idx *index.Index, onChange func()) er
 						if err != nil || info.IsDir() {
 							return nil
 						}
-						if !strings.EqualFold(filepath.Ext(info.Name()), ".md") {
+						if !v.IsNoteFile(info.Name()) {
 							return nil
 						}
 						name := p

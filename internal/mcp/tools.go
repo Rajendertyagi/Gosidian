@@ -216,6 +216,7 @@ func (s *Server) registerTools() {
 	s.registerRefreshHotTool()
 	s.registerTodosTool()
 	s.registerLintTool()
+	s.registerGraphTools()
 	s.registerAskTool()
 	s.registerSelfImproveTool()
 	s.registerGlobalCheckTool()
@@ -590,6 +591,9 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	rel, err := s.vault.Rel(path)
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
+	}
+	if strings.HasSuffix(strings.ToLower(rel), ".html") && !s.vault.HTMLNotesEnabled() {
+		return mcp.NewToolResultError("html notes are disabled; enable [vault] html_notes (GOSIDIAN_VAULT_HTML_NOTES) to create .html notes"), nil
 	}
 	tok, errRes := s.authorizeWrite(ctx, rel)
 	if errRes != nil {

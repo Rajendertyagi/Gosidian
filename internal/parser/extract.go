@@ -322,6 +322,11 @@ func Extract(body []byte) (links []WikiLinkRef, tags []string, title string) {
 	return links, tags, title
 }
 
+// StripCode returns s with fenced code blocks (``` / ~~~) and inline `code`
+// spans blanked to whitespace, so regex-based text scanning does not match
+// inside code. Exposed for reuse by the lint package's unlinked-mentions rule.
+func StripCode(s string) string { return stripCode(s) }
+
 func stripCode(s string) string {
 	var out strings.Builder
 	out.Grow(len(s))

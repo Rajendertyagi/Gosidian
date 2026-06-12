@@ -19,6 +19,7 @@ import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
 import { renderPreview } from '@/api/preview'
 import { onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
+import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey } from '@/composables/usePlanciaSync'
 import { useAuthStore } from '@/stores/auth'
@@ -51,12 +52,17 @@ const error = ref<string | null>(null)
 const dirty = ref(false)
 const lastSavedAt = ref<string | null>(null)
 const conflict = ref<ConcurrencyConflictDetail | null>(null)
+const copied = ref(false)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
 // Read by default; honour an explicit edit intent (legacy /notes/:path/edit
 // deep-link) only when the user may write.
 const mode = ref<Mode>(props.mode === 'edit' && auth.canWrite ? 'edit' : 'view')
 
 const path = computed(() => props.path)
+// HTML notes (.html) render through the sandboxed iframe (HTMLPreview) instead
+// of the markdown → /api/preview → MarkdownPreview pipeline.
+const isHtml = computed(() => path.value.toLowerCase().endsWith('.html'))
 const project = computed(() => {
   const parts = path.value.split('/')
   return parts.length > 1 ? parts[0] : undefined
@@ -91,7 +97,8 @@ async function load() {
     draft.value = fetched.content
     recents.record(fetched.path, fetched.title || fetched.path)
     emit('title', fetched.title || fetched.path)
-    previewHTML.value = await renderPreview(fetched.content)
+    // HTML notes bypass the markdown renderer; the iframe shows raw content.
+    previewHTML.value = isHtml.value ? '' : await renderPreview(fetched.content)
     dirty.value = false
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Failed to load note'
@@ -112,7 +119,9 @@ const refreshPreview = useDebounceFn(async () => {
 watch(draft, () => {
   if (!note.value) return
   dirty.value = draft.value !== note.value.content
-  if (mode.value === 'edit' && layout.value !== 'editor') void refreshPreview()
+  // HTMLPreview binds the draft directly (reactive); only markdown needs the
+  // server round-trip to refresh the preview pane.
+  if (!isHtml.value && mode.value === 'edit' && layout.value !== 'editor') void refreshPreview()
 })
 watch(dirty, (d) => emit('dirty', d))
 
@@ -123,7 +132,7 @@ function enterEdit() {
 async function enterView() {
   mode.value = 'view'
   // View shows the saved content; the draft stays in memory for re-editing.
-  if (note.value) previewHTML.value = await renderPreview(note.value.content)
+  if (note.value && !isHtml.value) previewHTML.value = await renderPreview(note.value.content)
 }
 
 async function save() {
@@ -180,6 +189,35 @@ async function destroy() {
   }
 }
 
+// Copy the raw note source the user sees in the editor (markdown or HTML).
+// `draft` always holds the current source: the saved content in view mode and
+// the live edits in edit mode.
+async function copySource() {
+  const text = draft.value
+  try {
+    await navigator.clipboard.writeText(text)
+  } catch {
+    // Fallback for non-secure contexts / clipboard API unavailable.
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    try {
+      document.execCommand('copy')
+    } catch {
+      /* ignore */
+    }
+    document.body.removeChild(ta)
+  }
+  copied.value = true
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copied.value = false
+  }, 1500)
+}
+
 function openHistory() {
   if (!note.value) return
   openWindow({
@@ -209,6 +247,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   unsub?.()
+  if (copiedTimer) clearTimeout(copiedTimer)
 })
 watch(path, load)
 </script>
@@ -267,6 +306,14 @@ watch(path, load)
       <button
         type="button"
         class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        :disabled="!note"
+        title="Copy note source"
+        @click="copySource"
+      >{{ copied ? 'Copied!' : 'Copy' }}</button>
+
+      <button
+        type="button"
+        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
         @click="openHistory"
       >History</button>
     </header>
@@ -294,7 +341,15 @@ watch(path, load)
 
     <!-- View mode: rendered preview -->
     <div v-else-if="mode === 'view'" class="flex-1 overflow-auto">
-      <article class="p-6 max-w-3xl mx-auto">
+      <!-- HTML note: full-bleed sandboxed iframe -->
+      <template v-if="isHtml && note">
+        <p class="px-4 pt-2 text-xs text-text-muted font-mono">
+          {{ note.path }} · html · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
+        </p>
+        <HTMLPreview :html="note.content" />
+      </template>
+      <!-- Markdown note: prose-rendered preview -->
+      <article v-else class="p-6 max-w-3xl mx-auto">
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
           {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
         </p>
@@ -323,7 +378,8 @@ watch(path, load)
         <CodeMirrorEditor v-model="draft" :project="project" placeholder="Markdown…" />
       </div>
       <div v-if="layout !== 'editor'" class="overflow-auto p-4 max-w-none">
-        <MarkdownPreview :html="previewHTML" />
+        <HTMLPreview v-if="isHtml" :html="draft" />
+        <MarkdownPreview v-else :html="previewHTML" />
       </div>
     </div>
   </div>

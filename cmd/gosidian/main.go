@@ -261,6 +261,10 @@ func main() {
 		v.SetCacheSize(cfg.Vault.CacheSize)
 		log.Printf("vault cache size set to %d", cfg.Vault.CacheSize)
 	}
+	v.SetHTMLNotes(cfg.Vault.HTMLNotes)
+	if cfg.Vault.HTMLNotes {
+		log.Printf("html notes enabled: single-file .html treated as first-class notes (ADR-011)")
+	}
 	// Web-side login rate-limit + session TTL configuration moved
 	// to internal/api/v1 — the legacy server.ConfigureLogin retired
 	// at the v2.0 cutover alongside the cookie-session middleware.

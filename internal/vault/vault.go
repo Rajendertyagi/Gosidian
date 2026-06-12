@@ -15,8 +15,9 @@ import (
 )
 
 type Vault struct {
-	Root  string
-	cache *loadCache
+	Root      string
+	cache     *loadCache
+	htmlNotes bool
 }
 
 // New returns a Vault rooted at the given directory. A 128-entry LRU load
@@ -36,6 +37,44 @@ func (v *Vault) SetCacheSize(n int) {
 		return
 	}
 	v.cache = newLoadCache(n)
+}
+
+// SetHTMLNotes toggles whether single-file .html files are treated as
+// first-class notes (enumerated, indexed, served, rendered in a sandboxed
+// iframe). Default false. Wired from [vault] html_notes / GOSIDIAN_VAULT_HTML_NOTES.
+// See ADR-011 for the security model.
+func (v *Vault) SetHTMLNotes(on bool) { v.htmlNotes = on }
+
+// HTMLNotesEnabled reports whether .html notes are active.
+func (v *Vault) HTMLNotesEnabled() bool { return v.htmlNotes }
+
+// noteExtensions are the file extensions gosidian recognises as notes. Markdown
+// is always a note; .html is gated by the htmlNotes feature flag (IsNoteFile).
+var noteExtensions = []string{".md", ".html"}
+
+// IsNoteFile reports whether name (a path or basename) is a note file: always
+// true for .md, true for .html only when the html-notes feature is enabled.
+func (v *Vault) IsNoteFile(name string) bool {
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".md":
+		return true
+	case ".html":
+		return v.htmlNotes
+	}
+	return false
+}
+
+// stripNoteExt removes a trailing note extension (.md/.html, case-insensitive)
+// from p, leaving any other suffix untouched. Used for basename-based
+// wikilink rewriting where the link text carries no extension.
+func stripNoteExt(p string) string {
+	low := strings.ToLower(p)
+	for _, e := range noteExtensions {
+		if strings.HasSuffix(low, e) {
+			return p[:len(p)-len(e)]
+		}
+	}
+	return p
 }
 
 // Rel returns a cleaned vault-relative path. Rejects any path that contains
@@ -123,7 +162,7 @@ func (v *Vault) Save(rel string, content []byte) error {
 	return nil
 }
 
-// List returns all markdown note paths, sorted.
+// List returns all note paths, sorted.
 func (v *Vault) List() ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(v.Root, func(path string, d fs.DirEntry, err error) error {
@@ -137,7 +176,7 @@ func (v *Vault) List() ([]string, error) {
 			}
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".md") {
+		if !v.IsNoteFile(d.Name()) {
 			return nil
 		}
 		rel, err := filepath.Rel(v.Root, path)
@@ -224,7 +263,7 @@ func (v *Vault) countNotesIn(dir string) (int, error) {
 			}
 			return nil
 		}
-		if strings.EqualFold(filepath.Ext(d.Name()), ".md") {
+		if v.IsNoteFile(d.Name()) {
 			n++
 		}
 		return nil
@@ -254,7 +293,7 @@ func (v *Vault) DeleteProject(name string) ([]string, error) {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(d.Name()), ".md") {
+		if !v.IsNoteFile(d.Name()) {
 			return nil
 		}
 		rel, relErr := filepath.Rel(v.Root, path)
@@ -422,8 +461,11 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("invalid target: %w", err)
 	}
-	if !strings.HasSuffix(strings.ToLower(toRel), ".md") {
-		toRel += ".md"
+	// Preserve the source's note extension when the target carries none, so
+	// renaming `note.html` to `renamed` keeps it a `.html` note. An explicit
+	// extension on the target (e.g. switching .md→.html) is honoured as-is.
+	if filepath.Ext(toRel) == "" {
+		toRel += filepath.Ext(fromRel)
 	}
 	if fromRel == toRel {
 		return nil, nil
@@ -453,8 +495,8 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 		return nil, err
 	}
 
-	oldBase := strings.TrimSuffix(filepath.Base(fromRel), ".md")
-	newBase := strings.TrimSuffix(filepath.Base(toRel), ".md")
+	oldBase := stripNoteExt(filepath.Base(fromRel))
+	newBase := stripNoteExt(filepath.Base(toRel))
 
 	var rewritten []string
 	for _, b := range backs {
@@ -494,8 +536,8 @@ func (v *Vault) RenameNote(idx *index.Index, from, to string) ([]string, error) 
 // oldBase (or at the old full path) rewritten to newBase. Alias text is
 // preserved. Targets outside the match set are left untouched.
 func rewriteWikiLinks(body []byte, oldBase, newBase, oldRel, newRel string) []byte {
-	oldRelNoExt := strings.TrimSuffix(oldRel, ".md")
-	newRelNoExt := strings.TrimSuffix(newRel, ".md")
+	oldRelNoExt := stripNoteExt(oldRel)
+	newRelNoExt := stripNoteExt(newRel)
 
 	replaced := wikiLinkRegex.ReplaceAllFunc(body, func(match []byte) []byte {
 		sub := wikiLinkRegex.FindSubmatch(match)

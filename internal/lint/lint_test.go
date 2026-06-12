@@ -3,6 +3,7 @@ package lint
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/index"
@@ -126,6 +127,40 @@ func TestLint_FrontmatterMissing(t *testing.T) {
 	}
 }
 
+func TestLint_FrontmatterMissing_HTMLNote(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+
+	// HTML notes carry frontmatter inside a leading <!-- --> comment (ADR-011);
+	// the indexer reads it the same way, so a well-formed one must NOT be
+	// flagged frontmatter-missing — only a truly headerless one (BUG-012).
+	seed(t, v, idx, "proj/widget.html", "<!--\n---\ntitle: widget\ntags: [proj, type:doc]\n---\n-->\n<!DOCTYPE html>\n<html><body>hi</body></html>\n")
+	seed(t, v, idx, "proj/raw.html", "<!DOCTYPE html>\n<html><body>no frontmatter</body></html>\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-missing"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "proj/raw.html" {
+		t.Fatalf("expected only proj/raw.html flagged frontmatter-missing, got %+v", issues)
+	}
+}
+
+func TestLint_FrontmatterTagUnknown_HTMLNote(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+
+	// The tag rule must read an HTML note's comment-wrapped frontmatter too —
+	// before the dispatch fix it silently saw no frontmatter and skipped it.
+	seed(t, v, idx, "proj/w.html", "<!--\n---\ntitle: w\ntags: [proj, type:doc, topic:bogus]\n---\n-->\n<html><body>x</body></html>\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].File != "proj/w.html" {
+		t.Fatalf("expected 1 unknown-tag issue on proj/w.html (topic:bogus), got %+v", issues)
+	}
+}
+
 func TestLint_FrontmatterTagUnknown(t *testing.T) {
 	l, v, idx := newTestLinter(t)
 
@@ -242,6 +277,44 @@ func TestLint_StatusIncoherent(t *testing.T) {
 	// plan-b IS mentioned (wikilink), plan-a is NOT → 1 incoherence.
 	if len(issues) != 1 || issues[0].File != "proj/plans/plan-a.md" {
 		t.Fatalf("expected only plan-a to be flagged, got %+v", issues)
+	}
+}
+
+func TestLint_UnlinkedMentions(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+
+	// parser.md is the mention target.
+	seed(t, v, idx, "proj/parser.md", "---\ntitle: Parser\ntags: [proj, type:memory]\n---\n\n# Parser module\n")
+	// main.md names "Parser" in prose without linking it → flagged.
+	seed(t, v, idx, "proj/main.md", "---\ntitle: Main\ntags: [proj, type:memory]\n---\n\nThe Parser handles syntax. See [[proj/README]].\n")
+	// linked.md names "Parser" AND links it → not flagged for that target.
+	seed(t, v, idx, "proj/linked.md", "---\ntitle: Linked\ntags: [proj, type:memory]\n---\n\nThe Parser is great, see [[proj/parser]].\n")
+	// README.md references parser/main only inside wikilinks (stripped) → clean.
+	seed(t, v, idx, "proj/README.md", "---\ntitle: README\ntags: [proj, type:index]\n---\n\nlinks [[proj/parser]] and [[proj/main]]\n")
+
+	// Opt-in: not part of the default run.
+	def, err := l.Run(context.Background(), "proj", nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range def {
+		if i.Rule == "unlinked-mentions" {
+			t.Errorf("unlinked-mentions must be opt-in, leaked into default run: %+v", i)
+		}
+	}
+
+	issues, err := l.Run(context.Background(), "proj", []string{"unlinked-mentions"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 {
+		t.Fatalf("expected exactly 1 unlinked-mention (main→parser), got %d: %+v", len(issues), issues)
+	}
+	if issues[0].File != "proj/main.md" || issues[0].Severity != SeverityInfo {
+		t.Errorf("unexpected issue: %+v", issues[0])
+	}
+	if !strings.Contains(issues[0].Message, "proj/parser.md") {
+		t.Errorf("message should name the target note: %q", issues[0].Message)
 	}
 }
 

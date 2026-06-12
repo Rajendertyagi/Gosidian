@@ -113,7 +113,8 @@ type WebauthConfig struct {
 
 // VaultConfig tunes the vault read cache.
 type VaultConfig struct {
-	CacheSize int `toml:"cache_size"` // LRU entries; 0 disables; default 128
+	CacheSize int  `toml:"cache_size"` // LRU entries; 0 disables; default 128
+	HTMLNotes bool `toml:"html_notes"` // treat single-file .html as first-class notes; default false (ADR-011)
 }
 
 // I18nConfig chooses the default UI language and the list of enabled ones.
@@ -333,6 +334,9 @@ func (c *Config) ApplyEnv() error {
 			return fmt.Errorf("GOSIDIAN_VAULT_CACHE_SIZE: %w", err)
 		}
 		c.Vault.CacheSize = n
+	}
+	if v := os.Getenv("GOSIDIAN_VAULT_HTML_NOTES"); v != "" {
+		c.Vault.HTMLNotes = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v

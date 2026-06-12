@@ -8,6 +8,50 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.6.0] — 2026-06-12 — "graph analytics + HTML notes"
+
+MINOR release. Two additive feature tracks: graph-analytics MCP tools over the
+wiki-link graph gosidian already maintains, and support for single-file `.html`
+documents as first-class notes rendered in a sandboxed iframe (opt-in, off by
+default). Purely additive; existing deployments need no migration.
+
+### Added
+
+- **Graph analytics MCP tools.** `memory_hubs` ranks the most-connected notes by
+  undirected wiki-link degree (the inverse of orphan notes — where the graph
+  concentrates). `memory_path` returns the shortest path between two notes over
+  the wiki-link graph. Both scope to a single project or run vault-wide.
+- **`unlinked-mentions` lint rule (opt-in).** Flags prose that names another
+  note's title or basename without linking it, surfacing missing
+  `[[wiki-links]]`. It is advisory and higher-noise on a dense vault, so it is
+  excluded from the default lint run — name it explicitly in `rules` to enable it.
+- **First-class single-file HTML notes (opt-in, off by default).** With
+  `[vault] html_notes` enabled (env `GOSIDIAN_VAULT_HTML_NOTES`), a `.html` file
+  (HTML + inline CSS/JS) is indexed like a markdown note: frontmatter (a
+  `--- YAML ---` block wrapped in a leading HTML comment), tags, wiki-links and a
+  full-text body all participate in the graph, backlinks and search. The web UI
+  renders such notes in a sandboxed `<iframe sandbox="allow-scripts">` with no
+  same-origin access and an injected `Content-Security-Policy: default-src 'none'`,
+  so author-supplied scripts run but cannot reach the viewer's session, the API,
+  or the network.
+
+### Fixed
+
+- **Lint frontmatter rules now understand HTML notes.** The `frontmatter-missing`
+  and `frontmatter-tag-unknown` checks read an HTML note's comment-wrapped
+  frontmatter (dispatching on file type the same way the indexer does), so a
+  well-formed `.html` note is no longer reported as missing its frontmatter.
+- **`memory_lint` reports the rules it actually ran.** The response `rules` field
+  now reflects the requested rule set (e.g. an explicit opt-in rule) instead of
+  always echoing the default list.
+
+### Notes
+
+- All changes are additive and backward-compatible. HTML notes are **off by
+  default**: enable `html_notes` consciously after reviewing the sandbox/CSP
+  security model, since it lets one user author markup that another user renders.
+  No migration is required.
+
 ## [2.5.0] — 2026-06-10 — "self-improve opt-in toggle"
 
 MINOR release. Operators can now toggle a token's self-improvement opt-in

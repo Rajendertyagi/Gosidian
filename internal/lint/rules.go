@@ -3,6 +3,7 @@ package lint
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/parser"
@@ -16,6 +17,35 @@ var allRules = []ruleSpec{
 	{name: "frontmatter-missing", defaultSeverity: SeverityError, fn: checkFrontmatterMissing},
 	{name: "frontmatter-tag-unknown", defaultSeverity: SeverityWarning, fn: checkFrontmatterTagUnknown},
 	{name: "status-incoherent", defaultSeverity: SeverityWarning, fn: checkStatusIncoherent},
+}
+
+// optionalRules are known and selectable by name but excluded from the default
+// run, because they are advisory and higher-noise on a dense vault. Name them
+// explicitly in the `rules` argument to run them. See knownRules / selectRules.
+var optionalRules = []ruleSpec{
+	{name: "unlinked-mentions", defaultSeverity: SeverityInfo, fn: checkUnlinkedMentions},
+}
+
+// knownRules returns the full registry (default + optional) for name
+// resolution and discovery. The default set alone is allRules.
+func knownRules() []ruleSpec {
+	out := make([]ruleSpec, 0, len(allRules)+len(optionalRules))
+	out = append(out, allRules...)
+	out = append(out, optionalRules...)
+	return out
+}
+
+// rawFrontmatter returns a note's raw YAML frontmatter, dispatching on note
+// kind the same way the indexer does (index.extractForPath): HTML notes carry
+// the block inside a leading <!-- --> comment, every other note uses the
+// markdown convention. Keeping the frontmatter rules consistent with indexing
+// stops a well-formed .html note from being falsely flagged frontmatter-missing
+// (or having its tags silently skipped by frontmatter-tag-unknown).
+func rawFrontmatter(n projectNote) string {
+	if strings.HasSuffix(strings.ToLower(n.Path), ".html") {
+		return parser.ExtractHTMLFrontmatterRaw(n.Content)
+	}
+	return parser.ExtractFrontmatterRaw(n.Content)
 }
 
 // notesInProject returns the notes under the given project prefix.
@@ -153,7 +183,7 @@ func checkFrontmatterMissing(ctx context.Context, l *Linter, project string) ([]
 	}
 	var issues []Issue
 	for _, n := range notes {
-		raw := parser.ExtractFrontmatterRaw(n.Content)
+		raw := rawFrontmatter(n)
 		if strings.TrimSpace(raw) != "" {
 			continue
 		}
@@ -272,7 +302,7 @@ func checkFrontmatterTagUnknown(ctx context.Context, l *Linter, project string) 
 	}
 	var issues []Issue
 	for _, n := range notes {
-		raw := parser.ExtractFrontmatterRaw(n.Content)
+		raw := rawFrontmatter(n)
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
@@ -319,7 +349,7 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 	}
 	var issues []Issue
 	for _, n := range notes {
-		raw := parser.ExtractFrontmatterRaw(n.Content)
+		raw := rawFrontmatter(n)
 		if strings.TrimSpace(raw) == "" {
 			continue
 		}
@@ -358,4 +388,125 @@ func checkStatusIncoherent(ctx context.Context, l *Linter, project string) ([]Is
 		})
 	}
 	return issues, nil
+}
+
+// ---- unlinked-mentions (optional) ----
+
+// minMentionLen is the shortest note title/basename considered a mention
+// candidate. Short labels ("a", "ok", project acronyms) match too much prose
+// and drown the signal, so they are skipped. 4 runes is a pragmatic floor.
+const minMentionLen = 4
+
+// fmBlockRe matches a leading YAML frontmatter block so it can be stripped
+// before scanning prose — otherwise a note's own `title:` would self-match.
+// Mirrors parser's internal frontmatter regex (kept local to avoid exporting it).
+var fmBlockRe = regexp.MustCompile(`(?s)\A---\r?\n.*?\r?\n---\r?\n`)
+
+// wikilinkBlockRe blanks out existing [[wikilinks]] so their inner text is not
+// re-flagged as an unlinked mention of some other note.
+var wikilinkBlockRe = regexp.MustCompile(`\[\[[^\]]*\]\]`)
+
+// mentionCandidate is a note plus a precompiled word-boundary matcher for one
+// of its labels (title or basename). Compiled once, scanned against every note.
+type mentionCandidate struct {
+	path  string
+	label string
+	re    *regexp.Regexp
+}
+
+// checkUnlinkedMentions flags notes whose prose names another note's title or
+// basename without linking to it — the "unlinked mentions" of Obsidian, adapted
+// to an explicit-wikilink vault. Advisory (Info) and opt-in: it is not in the
+// default rule set. False-positive guards: frontmatter, fenced/inline code and
+// existing wikilinks are stripped before scanning; labels under minMentionLen
+// runes are ignored; a note already linking the target is skipped for that
+// target; at most one issue per (source, target) pair.
+func checkUnlinkedMentions(ctx context.Context, l *Linter, project string) ([]Issue, error) {
+	notes, err := l.notesInProject(project)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build mention candidates from every note's title + basename.
+	var cands []mentionCandidate
+	for _, n := range notes {
+		seen := map[string]struct{}{}
+		for _, label := range []string{n.Title, basenameNoExt(n.Path)} {
+			label = strings.TrimSpace(label)
+			if len([]rune(label)) < minMentionLen {
+				continue
+			}
+			key := strings.ToLower(label)
+			if _, dup := seen[key]; dup {
+				continue
+			}
+			seen[key] = struct{}{}
+			re, rerr := regexp.Compile(`(?i)\b` + regexp.QuoteMeta(label) + `\b`)
+			if rerr != nil {
+				continue
+			}
+			cands = append(cands, mentionCandidate{path: n.Path, label: label, re: re})
+		}
+	}
+
+	var issues []Issue
+	for _, n := range notes {
+		// Resolve the set of note paths this note already links to.
+		outs, err := l.index.Outlinks(n.Path)
+		if err != nil {
+			return nil, err
+		}
+		linked := make(map[string]struct{}, len(outs))
+		for _, o := range outs {
+			if o.TargetPath != "" {
+				linked[o.TargetPath] = struct{}{}
+			}
+		}
+
+		prose := mentionProse(n.Content)
+		emitted := map[string]struct{}{}
+		for _, c := range cands {
+			if c.path == n.Path {
+				continue // a note mentioning itself is not a missing link
+			}
+			if _, ok := linked[c.path]; ok {
+				continue // already linked → not "unlinked"
+			}
+			if _, done := emitted[c.path]; done {
+				continue // one issue per (source, target) pair
+			}
+			if !c.re.MatchString(prose) {
+				continue
+			}
+			emitted[c.path] = struct{}{}
+			issues = append(issues, Issue{
+				Severity: SeverityInfo,
+				File:     n.Path,
+				Rule:     "unlinked-mentions",
+				Message:  fmt.Sprintf("mentions %q (note %s) without a wikilink", c.label, c.path),
+				FixHint:  fmt.Sprintf("consider linking the first mention as [[%s]]", strings.TrimSuffix(c.path, ".md")),
+			})
+		}
+	}
+	return issues, nil
+}
+
+// mentionProse returns the scannable prose of a note: frontmatter, fenced/inline
+// code and existing wikilinks removed, so mention matching sees only free text.
+func mentionProse(content []byte) string {
+	src := fmBlockRe.ReplaceAllString(string(content), "")
+	src = parser.StripCode(src)
+	return wikilinkBlockRe.ReplaceAllString(src, " ")
+}
+
+// basenameNoExt returns the file name without directory or extension.
+func basenameNoExt(path string) string {
+	base := path
+	if idx := strings.LastIndex(base, "/"); idx >= 0 {
+		base = base[idx+1:]
+	}
+	if idx := strings.LastIndex(base, "."); idx > 0 {
+		base = base[:idx]
+	}
+	return base
 }

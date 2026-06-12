@@ -29,6 +29,7 @@ type noteResponse struct {
 	Path    string `json:"path"`
 	Title   string `json:"title"`
 	Content string `json:"content"`
+	Format  string `json:"format"` // "markdown" | "html" — drives the SPA's renderer choice
 	ETag    string `json:"etag"`
 	Size    int64  `json:"size"`
 	ModTime string `json:"mod_time"`
@@ -226,8 +227,8 @@ func (r *Router) createNote(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "invalid path: "+err.Error())
 		return
 	}
-	if !strings.HasSuffix(clean, ".md") {
-		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "path must end with .md")
+	if !r.deps.Vault.IsNoteFile(clean) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "path must be a note file (.md, or .html when html notes are enabled)")
 		return
 	}
 	if _, err := r.deps.Vault.Load(clean); err == nil {
@@ -441,10 +442,20 @@ func toNoteResponse(n *vault.Note) noteResponse {
 		Path:    n.Path,
 		Title:   n.Title,
 		Content: string(n.Content),
+		Format:  noteFormat(n.Path),
 		ETag:    n.ETag(),
 		Size:    n.Size,
 		ModTime: n.ModTime.UTC().Format(rfc3339Z),
 	}
+}
+
+// noteFormat classifies a note by extension so the SPA knows whether to render
+// it through the markdown pipeline or the sandboxed HTML iframe.
+func noteFormat(path string) string {
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		return "html"
+	}
+	return "markdown"
 }
 
 // quoteETag wraps the raw stamp in RFC 7232 strong-validator quotes.

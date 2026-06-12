@@ -22,6 +22,11 @@ var CSPHeader = strings.Join([]string{
 	"font-src 'self'",
 	"connect-src 'self'",
 	"worker-src 'self' blob:",
+	// frame-src 'self' admits the sandboxed srcdoc iframe that renders HTML
+	// notes (ADR-011). The iframe runs with sandbox="allow-scripts" WITHOUT
+	// allow-same-origin (opaque origin) plus its own injected restrictive CSP,
+	// so this does not widen the SPA's own execution surface.
+	"frame-src 'self'",
 	"frame-ancestors 'none'",
 	"form-action 'self'",
 	"base-uri 'self'",

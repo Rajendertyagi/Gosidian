@@ -20,7 +20,7 @@ func (s *Server) registerLintTool() {
 	s.impl.AddTool(mcp.NewTool("memory_lint",
 		mcp.WithDescription("Run structural health checks on a project's notes. Returns issues grouped by severity (error/warning/info). Rules check: broken wikilinks, orphan notes, missing frontmatter, unknown tags (closed vocabulary violation), plan status incoherent with hot.md Active plans. Zero issues of severity:error indicates a coherent vault. Scoped tokens are forced to their project."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to lint. Scoped tokens are forced to their project.")),
-		mcp.WithArray("rules", mcp.Description("Optional explicit list of rule names to run. Empty = run all default rules. Known rules: broken-wikilink, orphan-note, frontmatter-missing, frontmatter-tag-unknown, status-incoherent.")),
+		mcp.WithArray("rules", mcp.Description("Optional explicit list of rule names to run. Empty = run all default rules. Default rules: broken-wikilink, orphan-note, frontmatter-missing, frontmatter-tag-unknown, status-incoherent. Optional (opt-in, name it explicitly to run): unlinked-mentions — flags prose that names another note's title/basename without a wikilink (advisory, higher-noise).")),
 		mcp.WithString("min_severity", mcp.Description("Filter issues returned by minimum severity (error|warning|info). Empty returns all. Use 'warning' to skip informational issues, 'error' for CI gating.")),
 	), s.handleLint)
 }
@@ -67,10 +67,18 @@ func (s *Server) handleLint(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	}
 	summary := lint.Summarise(filtered)
 
+	// Echo the rules actually run, not a hardcoded default: an explicit
+	// `rules` argument (e.g. the opt-in unlinked-mentions) overrides the
+	// defaults, and a consumer reading this field must see what ran.
+	ranRules := rules
+	if len(ranRules) == 0 {
+		ranRules = lint.DefaultRules()
+	}
+
 	return mcp.NewToolResultJSON(map[string]any{
 		"issues":  filtered,
 		"summary": summary,
 		"project": project,
-		"rules":   lint.DefaultRules(),
+		"rules":   ranRules,
 	})
 }

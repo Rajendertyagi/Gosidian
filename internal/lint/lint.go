@@ -122,11 +122,12 @@ func DefaultRules() []string {
 	return out
 }
 
-// AllRules returns the known rule registry keyed by name. Exposed for the
-// MCP tool to validate `rules` input.
+// AllRules returns the known rule registry keyed by name — default plus
+// optional rules. Exposed for the MCP tool to validate/advertise `rules` input.
 func AllRules() map[string]Severity {
-	out := make(map[string]Severity, len(allRules))
-	for _, r := range allRules {
+	known := knownRules()
+	out := make(map[string]Severity, len(known))
+	for _, r := range known {
 		out[r.name] = r.defaultSeverity
 	}
 	return out
@@ -160,9 +161,10 @@ func (l *Linter) Run(ctx context.Context, project string, enabled []string, minS
 	return all, nil
 }
 
-// selectRules resolves the enabled list into ruleSpec instances in the
-// order declared by allRules. An empty list means "all default rules".
-// Unknown rule names return an error.
+// selectRules resolves the enabled list into ruleSpec instances in stable
+// registry order. An empty list means "all default rules" (allRules only —
+// optional rules must be requested by name). Named rules resolve against the
+// full registry (default + optional). Unknown rule names return an error.
 func selectRules(enabled []string) ([]ruleSpec, error) {
 	if len(enabled) == 0 {
 		return allRules, nil
@@ -172,7 +174,7 @@ func selectRules(enabled []string) ([]ruleSpec, error) {
 		want[n] = struct{}{}
 	}
 	out := make([]ruleSpec, 0, len(enabled))
-	for _, r := range allRules {
+	for _, r := range knownRules() {
 		if _, ok := want[r.name]; ok {
 			out = append(out, r)
 			delete(want, r.name)
