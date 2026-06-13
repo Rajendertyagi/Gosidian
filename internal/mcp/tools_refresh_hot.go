@@ -157,7 +157,7 @@ func (s *Server) buildRecentEntries(project string, limit int) []recentEntry {
 			if loadErr != nil {
 				continue
 			}
-			fm := parser.ParseFrontmatterFields(parser.ExtractFrontmatterRaw(note.Content))
+			fm := parser.ParseFrontmatterFields(parser.FrontmatterRawForPath(n.Path, note.Content))
 			if fmString(fm, "status") != "done" {
 				continue
 			}

@@ -6,41 +6,45 @@ effect on the next server restart.
 
 ## Theme
 
-gosidian ships three built-in theme presets (v1.10):
+The **Theme preset** dropdown in Settings lists the frontend presets
+defined in `web/src/styles/tokens.css`:
 
-| Preset | Default palette (5 roots) |
+| Preset | Tone |
 |---|---|
-| **Midnight Luxury** (default) | `#0B0C10` / `#1F2833` / `#C5C6C7` / `#66FCF1` / `#C5A021` |
-| **Light clean** | `#FAFAFA` / `#EFEFEF` / `#333333` / `#0066CC` / `#B8860B` |
-| **High contrast** (WCAG-AAA) | `#000000` / `#1A1A1A` / `#FFFFFF` / `#00FFFF` / `#FFFF00` |
+| `catppuccin-mocha` (default) | dark |
+| `tokyo-night` | dark |
+| `catppuccin-latte` | light |
+| `solarized-light` | light |
+| `custom` | dark (defaults to Mocha) |
 
-Selecting a named preset from the dropdown sets all five colors at
-once — the color pickers are hidden because the preset is the single
-source of truth.
+Each preset overrides the same set of CSS variables on
+`<html data-preset="…">`, so switching theme is a single class change.
+Selecting `custom` falls back to the Mocha palette as a base.
 
-Switching the preset to **Custom** unlocks the five color pickers so
-you can define an arbitrary palette. The five roots drive `--bg-base`,
-`--bg-elev-1`, `--text-secondary`, `--accent-cool`, and
-`--accent-gold`; every other design token in `app.css` is derived
-from them.
+The choice is stored **in the browser** (Pinia `ui` store, localStorage
+key `gosidian.ui`), not in `config.toml`.
 
-The choice persists in `config.toml` under `[theme]` with `preset =
-"midnight-luxury"` (or the selected variant). Environment variable
-`GOSIDIAN_THEME_PRESET` overrides the file setting at startup.
+> **Note (IMP-054):** the backend and frontend currently track *different*
+> preset catalogues — the names above are the ones the SPA actually
+> renders; the server-side preset list has diverged. The mismatch is
+> tracked as **IMP-054**.
 
 ## Language
 
-The topbar `<select class="lang-switcher">` offers five languages:
+The language selector lives in **Settings** and offers five languages:
 
 - **IT** (Italian) — complete
 - **EN** (English) — reference
-- **ES / FR / DE** — v1.10 scaffolding stubs; topbar strings
-  translated, everything else falls back to English
+- **ES / FR / DE** — scaffolding stubs; topbar strings translated,
+  everything else falls back to English
 
-Selecting a language navigates to `/api/i18n?lang=<code>&next=<path>`,
-which sets the `gosidian_lang` cookie (1-year TTL) and redirects
-back to the current page. MCP clients request a language through
-the standard `Accept-Language` header.
+The choice is a pure client-side preference: it persists in
+**localStorage** (Pinia `ui` store, key `gosidian.ui`) and switches the
+active `vue-i18n` locale in place. There is **no cookie, no `/api/i18n`
+endpoint, and no redirect**. On first boot — when no `gosidian.ui` entry
+exists yet — the store seeds the locale from the operator's server-side
+default `i18n.default_lang`, then falls back to English. MCP clients are
+unaffected by this picker.
 
 To contribute a complete translation, see the *Translating gosidian*
 section in [CONTRIBUTING.md](../../CONTRIBUTING.md).

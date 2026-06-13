@@ -86,6 +86,22 @@ updated: 2026-04-23
 - **`updated`** is informational (gosidian uses `mtime` for
   retrieval, not this field).
 
+### `.html` notes
+
+A single-file `.html` document can be a **first-class note** alongside
+`.md`, when the operator opts in. The feature is **off by default**;
+enable it with `[vault] html_notes = true` in `config.toml` (or the
+`GOSIDIAN_VAULT_HTML_NOTES` environment variable).
+
+- **Frontmatter** lives in a leading **HTML comment** at the top of the
+  file (instead of the YAML `---` fence used by markdown).
+- The body is rendered inside a **sandboxed iframe** rather than the
+  goldmark pipeline.
+- An `.html` note still **participates in the graph, full-text search,
+  and backlinks** exactly like a `.md` note.
+
+See **ADR-011** for the rationale and security boundary.
+
 ## Bootstrap templates
 
 Three templates ship with the binary and are seeded into

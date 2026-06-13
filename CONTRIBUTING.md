@@ -25,7 +25,7 @@ go build -o gosidian ./cmd/gosidian
 ./gosidian --vault ./testdata/vault --mcp-addr 127.0.0.1:8765
 ```
 
-Requirements: Go 1.22 or newer. No CGO required for the default build
+Requirements: Go 1.25 or newer. No CGO required for the default build
 (the SQLite driver is pure Go). Docker is optional but convenient for
 end-to-end tests.
 
@@ -81,10 +81,10 @@ lifecycle of a commit is:
 
 1. **Land on `main`** with a clear English commit message. That's it
    — no tag required.
-2. **A MINOR tag** (`v1.N.0`) is cut when a user-facing feature set
+2. **A MINOR tag** (`v2.N.0`) is cut when a user-facing feature set
    is ready to publish: new MCP tool, new page, new config surface,
    i18n additions, visible behaviour change.
-3. **A PATCH tag** (`v1.N.M`) exists *only* to fix a bug on a
+3. **A PATCH tag** (`v2.N.M`) exists *only* to fix a bug on a
    previously-published MINOR. If the bug is found before the first
    public release of the affected code, the fix goes into the next
    MINOR instead — no patch tag needed.

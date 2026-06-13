@@ -28,10 +28,8 @@ is already released; specific windows are negotiated case by case.
 
 ## Supported versions
 
-Only the latest minor release on the `v1.x` line receives security
-fixes. Older versions are patched only when the fix is trivial. Once
-`v2.0` ships, at least the last minor of `v1.x` will continue to get
-security fixes for 6 months.
+Only the latest minor release on the `v2.x` line receives security
+fixes. Older versions are patched only when the fix is trivial.
 
 ## Scope
 

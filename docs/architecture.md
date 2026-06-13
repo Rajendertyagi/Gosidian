@@ -10,8 +10,10 @@ cmd/gosidian/        # entry point + CLI subcommands
 internal/vault/      # file access + LRU cache + fsnotify
 internal/index/      # SQLite FTS5 + backlinks + tags
 internal/parser/     # goldmark + wiki-link / tag extraction
-internal/server/     # HTTP router, REST API (/api/v1), embedded Vue SPA
-internal/mcp/        # MCP tools + transport
+internal/server/     # HTTP router, embedded Vue SPA shell
+internal/api/v1/     # REST JSON handlers (/api/v1/*) + CSP/security
+internal/authz/      # RBAC predicate (fail-closed)
+internal/mcp/        # MCP tools + SSE server (server.go / tools.go)
 internal/auth/       # MCP bearer tokens
 internal/webauth/    # web login + invite + sessions
 internal/audit/      # append-only audit log
@@ -19,19 +21,21 @@ internal/gitsync/    # debounced commit/push
 internal/i18n/       # embedded translation catalogues
 internal/scaffold/   # bootstrap template seeder
 internal/lint/       # vault hygiene rules
+internal/insights/   # self-improve digest builder
 internal/config/     # TOML loader + env overrides
 ```
 
-The web UI source lives outside `internal/` under `web/` (a Vue 3 + Vite
-SPA); `npm run build` emits to `internal/server/web/dist`, which the Go
-binary embeds via `//go:embed`. See [Web UI overview](web-ui/overview.md).
+The web UI source lives outside `internal/` under `src/web/` (a Vue 3 +
+Vite SPA); `npm run build` emits a fingerprinted bundle that the Go
+binary embeds via `//go:embed` and serves under a strict CSP. See
+[Web UI overview](web-ui/overview.md).
 
 ## Read path
 
 A `memory_search` call crosses the following layers:
 
-1. **MCP transport** (`internal/mcp/transport`) validates the token
-   and dispatches by tool name.
+1. **MCP transport** (`internal/mcp`, `server.go` / `tools.go`)
+   validates the token and dispatches by tool name.
 2. **Tool handler** (`internal/mcp/tools_*.go`) parses arguments,
    resolves the project scope, applies the scope intersection for
    `projects[]` params, and calls…
@@ -64,6 +68,19 @@ A `memory_search` call crosses the following layers:
   violation.
 - **Closed tag vocabulary.** `memory_lint` enforces it.
 
+## Beyond markdown
+
+- **HTML notes** (ADR-011, opt-in via `[vault] html_notes`). When
+  enabled, single-file `.html` notes are first-class: enumerated,
+  indexed, and rendered inside a sandboxed `srcdoc` iframe
+  (`sandbox="allow-scripts"` **without** `allow-same-origin`), so a
+  note's scripts can never touch the host origin, cookies, or the
+  REST API. Default off.
+- **Graph analytics.** Backlinks/outlinks feed two MCP tools beyond
+  plain link listing: `memory_hubs` ranks the most-connected notes,
+  and `memory_path` finds the shortest wiki-link path between two
+  notes — both computed over the index, not the filesystem.
+
 ## ADRs
 
 Architectural decision records live in `<project>/memory/decisions.md`
@@ -88,6 +105,10 @@ ADRs in the reference implementation:
 - **ADR-007** — Semantic search deferred sine die. Structured
   retrieval beats fuzzy similarity for agent-first memory. Re-open
   triggers documented explicitly.
+- **ADR-011** — Single-file `.html` notes are a first-class note type
+  (opt-in). They render in a sandboxed `srcdoc` iframe with
+  `allow-scripts` but no `allow-same-origin`, isolating note scripts
+  from the host origin. Default off.
 
 Read the project's own `memory/decisions.md` (in a running gosidian
 instance) for the authoritative current list.

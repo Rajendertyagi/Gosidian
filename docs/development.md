@@ -7,15 +7,20 @@ Build, test, release. For contribution rules see
 
 ```bash
 git clone https://github.com/daniele-chiappa/gosidian.git
-cd gosidian
+cd gosidian/src                          # Go module lives in src/
 go test ./...                            # full test suite
 go build -o gosidian ./cmd/gosidian
 ./gosidian --vault ./testdata/vault
 ```
 
-**Requirements**: Go 1.22 or newer. No CGO required for the default
-build (the SQLite driver is pure Go). Docker is optional but
-convenient for end-to-end tests.
+The Go source lives under `src/` (the module root, `cmd/gosidian` +
+`internal/*`); the Vue 3 + Vite SPA lives under `src/web/`. `npm run
+build` (run from `src/web`) emits the bundle that `go build` from
+`src/` embeds via `//go:embed`.
+
+**Requirements**: Go 1.25 (and Node 24 for the SPA build). No CGO
+required for the default build (`CGO_ENABLED=0`; the SQLite driver is
+pure Go). Docker is optional but convenient for end-to-end tests.
 
 ## Test suite
 
@@ -24,9 +29,9 @@ go test ./...            # unit tests
 go test -race ./...      # with race detector (recommended before PR)
 ```
 
-Test packages cover: `attach`, `audit`, `auth`, `config`, `gitsync`,
-`i18n`, `index`, `lint`, `mcp`, `parser`, `server`, `trash`, `vault`,
-`webauth`.
+Test packages cover: `api/v1`, `attach`, `audit`, `auth`, `authz`,
+`config`, `gitsync`, `i18n`, `index`, `insights`, `lint`, `mcp`,
+`parser`, `server`, `trash`, `vault`, `webauth`.
 
 - **Handler tests** use `httptest.NewRecorder` + `s.ServeHTTP` (no
   live socket).
@@ -36,18 +41,24 @@ Test packages cover: `attach`, `audit`, `auth`, `config`, `gitsync`,
 ## Building the Docker image
 
 ```bash
-docker build -t gosidian:dev .
+docker build -f src/Dockerfile -t gosidian:dev ./src
 ```
 
-Multi-stage: `golang:1.25-alpine` builder → `alpine:3.20` runtime
-with `git` + `ca-certificates` (ADR-003 — `gitsync` needs `git` on
-PATH at runtime).
+3-stage (ADR-003):
+
+1. **`node:24-alpine`** — `npm ci && npm run build` of the `src/web`
+   SPA, producing the embeddable Vite bundle.
+2. **`golang:1.25-alpine`** — `CGO_ENABLED=0 go build` of the Go
+   binary with the SPA bundle embedded via `//go:embed`.
+3. **`alpine:3.20`** runtime with `git` + `ca-certificates` — the
+   final stage keeps `git` on PATH because `gitsync` shells out to it
+   at runtime (not distroless, by ADR-003).
 
 ## Build flags
 
 ```bash
 go build -trimpath \
-  -ldflags="-s -w -X main.version=v1.0.0" \
+  -ldflags="-s -w -X main.version=v2.x.x" \
   -o gosidian ./cmd/gosidian
 ```
 

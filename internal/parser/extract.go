@@ -101,6 +101,20 @@ func ExtractFrontmatterRaw(body []byte) string {
 	return m[1]
 }
 
+// FrontmatterRawForPath returns a note's raw YAML frontmatter, dispatching on
+// note kind by extension exactly as the indexer does (index.extractForPath):
+// .html notes carry the block inside a leading <!-- --> comment, every other
+// note uses the markdown --- ... --- convention. This is the single detection
+// path shared by the indexer, the linter and the MCP tools, so they can never
+// disagree on whether the same note has frontmatter or what its tags are. The
+// returned string feeds ParseFrontmatterFields regardless of note kind.
+func FrontmatterRawForPath(path string, body []byte) string {
+	if strings.HasSuffix(strings.ToLower(path), ".html") {
+		return ExtractHTMLFrontmatterRaw(body)
+	}
+	return ExtractFrontmatterRaw(body)
+}
+
 // ParseFrontmatterFields extracts the common scalar fields and `tags` from a
 // raw frontmatter block (the string returned by ExtractFrontmatterRaw).
 //

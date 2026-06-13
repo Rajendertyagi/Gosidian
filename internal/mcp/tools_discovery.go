@@ -156,7 +156,7 @@ func (s *Server) handleSkills(ctx context.Context, req mcp.CallToolRequest) (*mc
 			Title:          n.Title,
 			TriggerExcerpt: truncateExcerpt(trigger, 400),
 		}
-		raw := parser.ExtractFrontmatterRaw(note.Content)
+		raw := parser.FrontmatterRawForPath(n.Path, note.Content)
 		fm := parser.ParseFrontmatterFields(raw)
 		if v, ok := fm["description"].(string); ok {
 			entry.Description = v
@@ -264,7 +264,7 @@ func (s *Server) loadFrontmatter(path string) map[string]any {
 	if err != nil {
 		return map[string]any{}
 	}
-	raw := parser.ExtractFrontmatterRaw(note.Content)
+	raw := parser.FrontmatterRawForPath(path, note.Content)
 	return parser.ParseFrontmatterFields(raw)
 }
 

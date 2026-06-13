@@ -100,7 +100,7 @@ func (s *Server) readImportance(path string) int {
 	if err != nil {
 		return 3
 	}
-	raw := parser.ExtractFrontmatterRaw(note.Content)
+	raw := parser.FrontmatterRawForPath(path, note.Content)
 	fm := parser.ParseFrontmatterFields(raw)
 	v, ok := fm["importance"].(string)
 	if !ok || v == "" {

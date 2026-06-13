@@ -194,3 +194,27 @@ func TestMCP_Todos_IgnoresFenceAndVariants(t *testing.T) {
 		t.Errorf("expected 'the only real one', got %q", r.Todos[0].Text)
 	}
 }
+
+// TestPlanInfoFromFrontmatter_DispatchesByExtension locks in the MCP-layer half
+// of the frontmatter-detection unification: planInfoFromFrontmatter now takes a
+// path and reads the frontmatter through parser.FrontmatterRawForPath, so an
+// .html plan note is recognised as a plan with its status — before the fix the
+// tool parsed only the markdown convention and silently treated every .html
+// note as a non-plan (the BUG-012 class, latent across the MCP tools).
+func TestPlanInfoFromFrontmatter_DispatchesByExtension(t *testing.T) {
+	htmlPlan := []byte("<!--\n---\ntitle: plan-h\ntype: plan\nstatus: in-progress\ntags: [type:plan, status:in-progress]\n---\n-->\n<html><body><p>x</p></body></html>\n")
+	if isPlan, status := planInfoFromFrontmatter("proj/plans/h.html", htmlPlan); !isPlan || status != "in-progress" {
+		t.Fatalf("html plan: planInfoFromFrontmatter = (%v, %q), want (true, in-progress)", isPlan, status)
+	}
+
+	// Markdown notes must keep working through the new path-aware signature.
+	mdPlan := []byte("---\ntitle: plan-m\ntype: plan\nstatus: done\n---\n\n- [x] done\n")
+	if isPlan, status := planInfoFromFrontmatter("proj/plans/m.md", mdPlan); !isPlan || status != "done" {
+		t.Fatalf("markdown plan: planInfoFromFrontmatter = (%v, %q), want (true, done)", isPlan, status)
+	}
+
+	// A non-plan note (no type:plan) stays a non-plan regardless of kind.
+	if isPlan, _ := planInfoFromFrontmatter("proj/docs/d.html", []byte("<!--\n---\ntitle: d\ntags: [type:doc]\n---\n-->\n<html></html>\n")); isPlan {
+		t.Error("html doc note wrongly classified as a plan")
+	}
+}

@@ -313,7 +313,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 					}
 				}
 				if includeFrontmatter {
-					raw := parser.ExtractFrontmatterRaw(note.Content)
+					raw := parser.FrontmatterRawForPath(h.Path, note.Content)
 					hit.Frontmatter = parser.ParseFrontmatterFields(raw)
 				}
 			}
@@ -1171,7 +1171,7 @@ func (s *Server) handleGetFrontmatter(ctx context.Context, req mcp.CallToolReque
 	if err != nil {
 		return mcp.NewToolResultErrorf("cannot read %q: %v", path, err), nil
 	}
-	raw := parser.ExtractFrontmatterRaw(note.Content)
+	raw := parser.FrontmatterRawForPath(path, note.Content)
 	parsed := parser.ParseFrontmatterFields(raw)
 	return mcp.NewToolResultJSON(map[string]any{
 		"path":   path,

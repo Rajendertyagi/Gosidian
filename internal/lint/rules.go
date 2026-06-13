@@ -35,17 +35,13 @@ func knownRules() []ruleSpec {
 	return out
 }
 
-// rawFrontmatter returns a note's raw YAML frontmatter, dispatching on note
-// kind the same way the indexer does (index.extractForPath): HTML notes carry
-// the block inside a leading <!-- --> comment, every other note uses the
-// markdown convention. Keeping the frontmatter rules consistent with indexing
-// stops a well-formed .html note from being falsely flagged frontmatter-missing
-// (or having its tags silently skipped by frontmatter-tag-unknown).
+// rawFrontmatter returns a note's raw YAML frontmatter via the shared,
+// path-aware parser primitive (parser.FrontmatterRawForPath), so the linter
+// and the indexer can never disagree on whether a note has frontmatter or what
+// its tags are — the inconsistency that made well-formed .html notes falsely
+// flag frontmatter-missing (BUG-012).
 func rawFrontmatter(n projectNote) string {
-	if strings.HasSuffix(strings.ToLower(n.Path), ".html") {
-		return parser.ExtractHTMLFrontmatterRaw(n.Content)
-	}
-	return parser.ExtractFrontmatterRaw(n.Content)
+	return parser.FrontmatterRawForPath(n.Path, n.Content)
 }
 
 // notesInProject returns the notes under the given project prefix.

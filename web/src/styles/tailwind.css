@@ -8,3 +8,35 @@
  * extend with editor-specific styles (CodeMirror gutter, sidebar resize
  * handle, etc.).
  */
+
+/*
+ * Print scope (IMP-052). NoteView marks the rendered markdown <article> with
+ * .gosidian-print-target and toggles .gosidian-printing on <body> just before
+ * window.print(), then clears both on afterprint. Hiding everything else means
+ * only that one note reaches the page — not the surrounding plancia windows or
+ * app chrome. (Markdown only: HTML notes sit in a sandboxed iframe the browser
+ * clips to one page, tracked as IMP-053.) visibility (not display) keeps layout
+ * intact while the absolute-positioned target prints from the top-left.
+ */
+@media print {
+  /* Drop the browser's injected header/footer (page title / URL / date / page
+     number): a zero page margin removes the box they print into; the target
+     gets its own padding back for readability. */
+  @page {
+    margin: 0;
+  }
+  body.gosidian-printing * {
+    visibility: hidden;
+  }
+  body.gosidian-printing .gosidian-print-target,
+  body.gosidian-printing .gosidian-print-target * {
+    visibility: visible;
+  }
+  body.gosidian-printing .gosidian-print-target {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    padding: 1.2cm;
+  }
+}

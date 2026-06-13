@@ -29,7 +29,7 @@ MCP tools for *exactly* those fields.
 
 **Is**: a self-hosted personal knowledge base that doubles as
 agent-workable memory. One binary, one vault folder, one SQLite index.
-Users edit notes via a web UI (HTMX, no JavaScript framework) or any
+Users edit notes via a web UI (a Vue 3 SPA) or any
 external editor (Obsidian, vim, VS Code — the vault is just plain markdown
 files with YAML frontmatter). Agents connect over MCP via HTTP + SSE with
 bearer tokens; each token can be scoped to one project and to read/write
@@ -110,22 +110,23 @@ Key invariants:
 ## What makes it different
 
 Compared to Obsidian + community plugins: no plugin system, no Electron, no
-per-user account lock-in, but a real **MCP surface** (34+ tools) that
+per-user account lock-in, but a real **MCP surface** (50 tools) that
 treats the vault as a **machine-readable data layer** first, a human-
 readable note-taking app second.
 
-Compared to Logseq or Roam: server-side rendering, no JS framework, opt-in
-web auth with invite-only membership, and the whole thing runs in a single
-Alpine-based container under 50 MB.
+Compared to Logseq or Roam: a self-contained client-side Vue 3 SPA served
+from one binary, opt-in web auth with invite-only membership, and the whole
+thing runs in a single Alpine-based container under 50 MB.
 
 Compared to RAG-on-markdown systems: no embeddings, no vector store. The
 agent's MCP toolbelt is the retrieval layer, and it is deterministic.
 
 ## Status
 
-Gosidian is stable as of v1.7. The core API (MCP tool set, frontmatter
+Gosidian is stable as of v2.6.0. The core API (MCP tool set, frontmatter
 conventions, vault layout) is considered backward-compatible within
-major versions. Breaking changes ship as a v2 with a migration guide.
+major versions. The v2 line is already released; breaking changes from
+v1 are covered by the [migration guide](docs/migration-v2.md).
 
 Contributions, questions and forks are welcome. See the main README for
 quickstart and configuration, and `LICENSE` for the MIT terms.

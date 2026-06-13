@@ -16,6 +16,12 @@
  *
  * The HTML is the author's content rendered as-is (NOT sanitized): isolation,
  * not sanitization, is the boundary here.
+ *
+ * PRINTING: HTML notes are not printable yet (IMP-053). When the parent prints,
+ * the browser clips a sandboxed iframe to one page, and we cannot make the
+ * iframe print itself: a srcdoc inherits the parent CSP (script-src 'self'),
+ * which combines with the injected meta and blocks any inline print bridge. So
+ * NoteView shows the Print button for markdown notes only.
  */
 import { computed } from 'vue'
 

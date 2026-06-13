@@ -49,6 +49,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LDAP_USER_BASE_DN` | `ldap.user_base_dn` | empty |
 | `GOSIDIAN_LDAP_USER_FILTER` | `ldap.user_filter` | `(uid=%s)` (AD: `(sAMAccountName=%s)`) |
 | `GOSIDIAN_VAULT_CACHE_SIZE` | `vault.cache_size` | `128` (`0` disables) |
+| `GOSIDIAN_VAULT_HTML_NOTES` | `vault.html_notes` | `false` (treat single-file `.html` as first-class notes; ADR-011, sandboxed iframe) |
 | `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` |
 | `GOSIDIAN_SELF_IMPROVE_ENABLED` | `self_improve.enabled` | `false` |
 | `GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT` | `self_improve.target_project` | `insights` |
@@ -107,6 +108,12 @@ Behaviour:
   editing.
 - **No file = no change**: vaults without `[lint]` keep the
   baseline behaviour identically.
+
+> **Opt-in rule**: `unlinked-mentions` flags prose that names another
+> note's title/basename without linking to it. It is **advisory**
+> (`info` severity) and **not** in the default rule set — it is known
+> and selectable by name only, because it is higher-noise on a dense
+> vault. Request it explicitly when running `memory_lint`.
 
 ## CLI reference
 

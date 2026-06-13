@@ -7,11 +7,11 @@ wiring an agent.
 
 ## From source
 
-Requires Go 1.22 or newer.
+Requires Go 1.25 (the Go module lives under `src/`).
 
 ```bash
 git clone https://github.com/daniele-chiappa/gosidian.git
-cd gosidian
+cd gosidian/src
 go build -o gosidian ./cmd/gosidian
 ./gosidian --vault ./vault
 ```

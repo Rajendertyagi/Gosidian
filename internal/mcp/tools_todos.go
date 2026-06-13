@@ -94,7 +94,7 @@ func (s *Server) handleTodos(ctx context.Context, req mcp.CallToolRequest) (*mcp
 		}
 
 		// Plan enrichment: read type + status from frontmatter once.
-		isPlan, noteStatus := planInfoFromFrontmatter(note.Content)
+		isPlan, noteStatus := planInfoFromFrontmatter(n.Path, note.Content)
 		if planStatusFilter != "" {
 			if !isPlan || noteStatus != planStatusFilter {
 				continue
@@ -139,8 +139,8 @@ func truncatedFlag(have, cap int) bool {
 // planInfoFromFrontmatter returns (isPlan, status) by parsing the note's
 // frontmatter. isPlan is true when the tags array contains "type:plan" or
 // when the scalar `type` equals "plan".
-func planInfoFromFrontmatter(body []byte) (bool, string) {
-	raw := parser.ExtractFrontmatterRaw(body)
+func planInfoFromFrontmatter(path string, body []byte) (bool, string) {
+	raw := parser.FrontmatterRawForPath(path, body)
 	if raw == "" {
 		return false, ""
 	}

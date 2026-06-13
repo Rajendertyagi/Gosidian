@@ -27,6 +27,50 @@ func TestExtractFrontmatterRaw(t *testing.T) {
 	}
 }
 
+func TestFrontmatterRawForPath(t *testing.T) {
+	mdBody := []byte("---\ntitle: Hi\ntags: [a, b]\n---\n\nbody\n")
+	htmlBody := []byte("<!--\n---\ntitle: Hi\ntags: [a, b]\n---\n-->\n<html><body>x</body></html>\n")
+
+	cases := []struct {
+		name string
+		path string
+		body []byte
+		want string // substring the raw frontmatter must contain ("" = expect empty)
+	}{
+		{"markdown", "proj/note.md", mdBody, "title: Hi"},
+		{"html lower ext", "proj/note.html", htmlBody, "title: Hi"},
+		{"html upper ext", "proj/NOTE.HTML", htmlBody, "title: Hi"},
+		{"unknown ext falls back to markdown", "proj/note.txt", mdBody, "title: Hi"},
+		{"no extension falls back to markdown", "proj/note", mdBody, "title: Hi"},
+		{"markdown dispatch ignores comment-wrapped block", "proj/note.md", htmlBody, ""},
+		{"html dispatch ignores bare markdown block", "proj/note.html", mdBody, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			raw := FrontmatterRawForPath(tc.path, tc.body)
+			if tc.want == "" {
+				if raw != "" {
+					t.Fatalf("FrontmatterRawForPath(%q) = %q, want empty", tc.path, raw)
+				}
+				return
+			}
+			if !strings.Contains(raw, tc.want) {
+				t.Fatalf("FrontmatterRawForPath(%q) = %q, want substring %q", tc.path, raw, tc.want)
+			}
+		})
+	}
+
+	// The primitive must agree with the kind-specific extractor it dispatches
+	// to — same note, same result, regardless of which entry point a consumer
+	// uses. This is the invariant that keeps indexer/linter/MCP from drifting.
+	if FrontmatterRawForPath("a.md", mdBody) != ExtractFrontmatterRaw(mdBody) {
+		t.Error("markdown dispatch disagrees with ExtractFrontmatterRaw")
+	}
+	if FrontmatterRawForPath("a.html", htmlBody) != ExtractHTMLFrontmatterRaw(htmlBody) {
+		t.Error("html dispatch disagrees with ExtractHTMLFrontmatterRaw")
+	}
+}
+
 func TestParseFrontmatterFields(t *testing.T) {
 	raw := "title: The title\ndescription: one-liner\ntype: plan\nstatus: in-progress\nupdated: 2026-04-15\ntags: [foo, bar]\n"
 	got := ParseFrontmatterFields(raw)

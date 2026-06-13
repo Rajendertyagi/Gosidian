@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**48 tools** cover the full retrieval → write → workflow → self-check
+**50 tools** cover the full retrieval → write → workflow → self-check
 cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -35,6 +35,19 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_notes_by_tag(tag, project?)`
 - `memory_backlinks(path)`, `memory_outlinks(path,
   include_cross_project?)`
+
+## Graph (read-only, scope-aware)
+
+- `memory_hubs(project?, limit?)` — most-connected notes ("god nodes")
+  ranked by undirected wikilink degree, descending; the inverse signal
+  of orphan notes. `project` scopes to one top-level folder (degree
+  then counts only intra-project links); empty = vault-wide. `limit`
+  defaults to 20, max 100. Scoped tokens are forced to their project.
+- `memory_path(from, to, max_depth?)` — shortest path between two notes
+  over the undirected wikilink graph (resolved links only); returns the
+  ordered note paths inclusive of both endpoints, or `found:false` when
+  unconnected. `max_depth` defaults to 6, max 20. Both endpoints must
+  be inside the token's scope.
 
 ## Write (all support optional `if_match` ETag)
 
@@ -83,6 +96,11 @@ The single-step / pre-uploader split, the equivalent REST endpoint
   auto-throttling)
 - `memory_project_scaffold(project, template?, variables?)` — idempotent
   Karpathy-Wiki-Stack bootstrap
+- `memory_init_agent(project, existing_content?)` — produce the
+  init-prompt payload to (re)generate the thin agent `gosidian_block`
+  stub in the instruction file (CLAUDE.md / AGENTS.md / …). Augment mode
+  when `existing_content` is supplied (merge preserving sections),
+  from-scratch otherwise. Read-only: the agent materialises the file.
 - `memory_refresh_hot(project)` — regenerate the "Recent decisions"
   section of `hot.md` between opt-in markers
 - `memory_list_bootstrap_templates()` — discover available templates

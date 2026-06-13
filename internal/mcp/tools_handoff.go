@@ -131,7 +131,7 @@ func (s *Server) handlePendingHandoffs(ctx context.Context, req mcp.CallToolRequ
 		if loadErr != nil {
 			continue
 		}
-		raw := parser.ExtractFrontmatterRaw(note.Content)
+		raw := parser.FrontmatterRawForPath(n.Path, note.Content)
 		fm := parser.ParseFrontmatterFields(raw)
 		if fmString(fm, "to_agent") != forAgent {
 			continue

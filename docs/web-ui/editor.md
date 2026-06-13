@@ -1,14 +1,17 @@
 # Editor
 
-The note editor at `/notes/<path>` is a plain markdown textarea with
-live preview. No rich-text, no WYSIWYG gymnastics — the editor is
-intentionally thin because the vault is the source of truth and many
-users edit notes from Obsidian, a terminal editor, or another markdown
-tool on the filesystem.
+A note opens as a **plancia window** with a **View / Edit** toggle in
+the window header. It defaults to *view* (rendered preview); flipping
+to *edit* mounts the editor in the same window — no second window. The
+editor itself is **CodeMirror 6**, loaded lazily so a window that's
+only ever read never pulls the editor chunk. No rich-text, no WYSIWYG
+gymnastics — the editor is intentionally thin because the vault is the
+source of truth and many users edit notes from Obsidian, a terminal
+editor, or another markdown tool on the filesystem.
 
 ## Modes
 
-A toolbar above the editor toggles four layout modes:
+While in *edit*, a toolbar above the editor toggles four layout modes:
 
 - **Editor** — full-width textarea, no preview
 - **Split** — editor + preview side-by-side
@@ -30,19 +33,34 @@ rendered with a `broken` style so authors notice typos immediately.
 - **History** (`/notes/<path>/history`) lists previous states captured
   by git sync when enabled — with a one-click `restore` action.
 
-## Focus mode
+## Print / Save as PDF
 
-The floating `maximize` button (or the `F` key) toggles **focus mode**:
-hides topbar + sidebar + attachment pane so only the editor + preview
-stay on screen. Re-toggle to restore. The setting is persisted in
-local storage.
+In **view mode**, a **Print** button appears in the note's header — but
+**only for Markdown notes** (`.html` notes are not printable; the
+sandboxed iframe the browser clips to a single page is out of reach —
+see IMP-053). Clicking it opens the browser's native print dialog, from
+which you typically pick *Save as PDF*.
+
+The print stylesheet (`@media print`) shows **only this note's rendered
+article** and hides the rest of the plancia (topbar, sidebar, other
+windows) plus the browser's own header/footer chrome, so a single,
+clean note reaches the page. The button calls `printNote()`, which
+tags the article with the `gosidian-print-target` class, fires
+`window.print()`, and removes the class again on `afterprint`.
+
+## Maximize / window controls
+
+There is no dedicated "focus mode" anymore — to give a note the full
+screen, use the plancia window's **maximize** control. See
+[Overview → window controls](overview.md) for the full set of window
+affordances (maximize, minimize, close, drag, resize).
 
 ## Command palette
 
 `Cmd+K` / `Ctrl+K` opens a fuzzy finder across notes, projects, tags,
-and built-in actions (go to graph, create note, toggle focus mode,
-…). Keyboard-first: arrow keys to select, `Enter` to run, `Esc` to
-close. Recent selections are remembered for quick re-access.
+and built-in actions (go to graph, create note, …). Keyboard-first:
+arrow keys to select, `Enter` to run, `Esc` to close. Recent
+selections are remembered for quick re-access.
 
 ## Not supported in-editor
 

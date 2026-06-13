@@ -43,6 +43,7 @@ const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
 
 const rootEl = ref<HTMLElement | null>(null)
+const articleEl = ref<HTMLElement | null>(null)
 const note = ref<Note | null>(null)
 const draft = ref<string>('')
 const previewHTML = ref<string>('')
@@ -218,6 +219,25 @@ async function copySource() {
   }, 1500)
 }
 
+// Print the rendered markdown note as a single document — the basis for the
+// browser's "Save as PDF". A print stylesheet (@media print) shows only this
+// note's <article> and hides the rest of the plancia, so ONLY this note reaches
+// the page. Markdown only for now: HTML notes live in a sandboxed iframe the
+// browser clips to one page and we can't reach to print in full (IMP-053).
+function printNote() {
+  const el = articleEl.value
+  if (!el) return
+  el.classList.add('gosidian-print-target')
+  document.body.classList.add('gosidian-printing')
+  const cleanup = () => {
+    el.classList.remove('gosidian-print-target')
+    document.body.classList.remove('gosidian-printing')
+    window.removeEventListener('afterprint', cleanup)
+  }
+  window.addEventListener('afterprint', cleanup)
+  window.print()
+}
+
 function openHistory() {
   if (!note.value) return
   openWindow({
@@ -304,6 +324,14 @@ watch(path, load)
       </template>
 
       <button
+        v-if="note && mode === 'view' && !isHtml"
+        type="button"
+        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        title="Print / Save as PDF"
+        @click="printNote"
+      >Print</button>
+
+      <button
         type="button"
         class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
         :disabled="!note"
@@ -349,7 +377,7 @@ watch(path, load)
         <HTMLPreview :html="note.content" />
       </template>
       <!-- Markdown note: prose-rendered preview -->
-      <article v-else class="p-6 max-w-3xl mx-auto">
+      <article v-else ref="articleEl" class="p-6 max-w-3xl mx-auto">
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">
           {{ note.path }} · etag {{ note.etag.slice(0, 12) }} · {{ note.size }} bytes
         </p>

@@ -8,6 +8,34 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.7.0] — 2026-06-13 — "print to PDF + unified frontmatter detection"
+
+MINOR release. Adds a Print / Save-as-PDF action for Markdown notes in the web
+UI, and unifies frontmatter detection across the indexer, linter and MCP tools
+so they can no longer disagree on a note — fixing cases where MCP tools ignored
+the frontmatter of `.html` notes. Purely additive; existing deployments need no
+migration.
+
+### Added
+
+- **Print / Save as PDF for Markdown notes.** A Print button in the note header
+  (view mode) prints just that note through the browser's native print /
+  Save-as-PDF dialog. A scoped `@media print` stylesheet shows only the rendered
+  note — hiding the rest of the plancia and the browser's own header/footer
+  chrome — so a single, clean page reaches the printout. HTML notes are not
+  printable yet (the browser clips the sandboxed iframe to a single page).
+
+### Fixed
+
+- **Frontmatter detection unified across subsystems.** A single path-aware
+  parser primitive now backs the indexer, the linter and every MCP tool, so they
+  can never disagree on whether a note has frontmatter or what its tags are. This
+  fixes several MCP tools (`memory_todos`, `memory_importance`,
+  `memory_refresh_hot`, `memory_handoff`, and the discovery tools) that
+  previously read no frontmatter from `.html` notes — silently skipping their
+  tags, status, and plan metadata. A cross-subsystem consistency test guards
+  against the two detection paths drifting again.
+
 ## [2.6.0] — 2026-06-12 — "graph analytics + HTML notes"
 
 MINOR release. Two additive feature tracks: graph-analytics MCP tools over the

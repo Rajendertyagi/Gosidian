@@ -34,7 +34,7 @@ Other installation paths (source, custom compose, bare-metal):
   folder in Obsidian, VS Code, `vim`, or any editor you already use.
   Zero lock-in: delete `.gosidian/` and you have a pure Obsidian
   vault.
-- **An MCP server.** 48 typed tools let agents bootstrap a session,
+- **An MCP server.** 50 typed tools let agents bootstrap a session,
   search, read, write, link, handoff, self-check, audit. Bearer-token
   authentication with per-project scoping.
 - **A web UI.** A Vue 3 single-page app served from the same binary
@@ -78,7 +78,7 @@ is a cache — drop it and it rebuilds.
 - **Plancia** tiling window manager (niri-style): notes, graph, search
   and config forms open as resizable, side-by-side windows in a
   horizontally-scrollable workspace, restorable from the URL
-- MCP server over HTTP + SSE with 48 typed tools
+- MCP server over HTTP + SSE with 50 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
   restriction; cascade-revoke on user disable
 - Multi-user web login with **role-based access** (owner / member /
@@ -88,9 +88,16 @@ is a cache — drop it and it rebuilds.
   **LDAP / Active Directory** login with guest auto-provisioning
 - Optional git sync (debounced commits, push with token auth)
 - SQLite FTS5 full-text search + ETag optimistic locking
+- First-class `.html` notes, rendered in a sandboxed iframe (off by
+  default, opt-in per project)
+- Graph analytics over the wikilink graph: `memory_hubs` (most-linked
+  notes) and `memory_path` (shortest path between two notes)
+- Opt-in **self-improve loop**: agents record usage-friction insights
+  per token, off by default
+- Print / Save-as-PDF for any markdown note straight from the web UI
 - Internationalization (IT + EN complete; ES / FR / DE scaffolding)
-- Three theme presets (Midnight Luxury, Light clean, High contrast)
-  + custom palette
+- Light & dark theme presets (Catppuccin, Tokyo Night, Solarized) +
+  custom palette
 - Opinionated [Karpathy-Wiki-Stack](docs/vault/conventions.md#karpathy-wiki-stack-project-shape)
   project layout with one-call scaffolding
 - Optional [global projects](docs/vault/global-projects.md) for skills,

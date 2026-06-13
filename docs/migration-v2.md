@@ -105,14 +105,14 @@ spec lives at `internal/api/v1/spec/openapi.yaml`.
 
 ## Downgrade path
 
-Pinning the Docker tag to the last v1.x release (e.g. `v1.13.0`)
+Pinning the Docker tag to the last v1.x release (e.g. `v1.12.0`)
 restores the legacy behaviour. The vault on disk is forward- and
 backward-compatible: notes, attachments, the SQLite index, and
 git-sync metadata are unchanged across the cutover.
 
 ```sh
 # In your docker-compose.yml
-image: gosidian:v1.13.0   # or ghcr.io/daniele-chiappa/gosidian:v1.13.0
+image: gosidian:v1.12.0   # or ghcr.io/daniele-chiappa/gosidian:v1.12.0
 ```
 
 The webauth `accounts.json` file is also unchanged; existing users

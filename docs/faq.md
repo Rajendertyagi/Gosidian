@@ -82,16 +82,19 @@ Multi-tenancy would require cross-tenant user management, quota
 enforcement, and data partitioning that would widen the blast radius
 of every security fix. Out of scope for the foreseeable future.
 
-## How stable is v1.0.0?
+## How stable is v2.x?
 
-gosidian has been used internally since mid-2026 through nine
-private iterations (v1.0 through v1.9). The v1.0.0 public tag is the
-first external release, not "the first cut". SemVer applies from
-here: `v1.x` preserves backward compatibility on the MCP tool
-surface, web URL contract, and vault layout.
+gosidian has been through a full v1.x line (the HTMX-rendered UI) and
+the v2.0 SPA cutover; the current release is **v2.6.0**. SemVer
+applies: within `v2.x`, backward compatibility on the MCP tool
+surface, the web URL contract, and the vault layout is preserved.
+v2.0 was a deliberate major bump because it retired the legacy HTML /
+HTMX-partial endpoints in favour of the REST API at `/api/v1/*` — see
+the [v2 migration guide](migration-v2.md) for the route map and the
+downgrade path.
 
-That said, **this is a young open-source project**. File issues,
-expect occasional friction. Security advisories ship through
+That said, **this is still a young open-source project**. File
+issues, expect occasional friction. Security advisories ship through
 [SECURITY.md](../SECURITY.md). PRs are reviewed on best effort.
 
 ## Can I self-host it "seriously"?
@@ -102,12 +105,13 @@ Docker Compose + reverse proxy recipe. Backup the vault + the
 
 ## What's the roadmap?
 
-The short list as of v1.0.0:
+The short list as of v2.6.0:
 
-- **v1.1** — UI polish iterations, more localisation, theme refinements
-- **v1.2+** — Features requested by early adopters (file an issue)
+- **v2.x** — incremental SPA polish, more localisation, theme
+  refinements, and features requested by adopters (file an issue)
 - **Deferred** — Semantic search (ADR-007), multi-tenant mode,
-  real-time collaborative editing
+  real-time collaborative editing, the whole-vault zip download
+  parked during the v2.0 cutover (see [migration guide](migration-v2.md))
 
 Reopening the semantic search question depends on usage evidence, not
 dates. See ADR-007 triggers.
