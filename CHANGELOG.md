@@ -8,6 +8,23 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.7.2] — 2026-06-15 — "dependency maintenance"
+
+PATCH release. Routine dependency maintenance and a transitive security fix.
+No behaviour changes; existing deployments need no migration.
+
+### Security
+- **esbuild pinned to `^0.28.1`** via an npm `overrides` entry, resolving
+  `GHSA-gv7w-rqvm-qjhr` (missing binary integrity verification). The project
+  uses esbuild only as a build-time tool (via Vite) and does not ship it in the
+  runtime image, so real-world exposure was low — patched as hygiene. The fix
+  stays on Vite 6; the Vite 6→8 major upgrade is intentionally deferred.
+
+### Changed
+- Bumped `golang.org/x/crypto` 0.52→0.53 and `golang.org/x/term` 0.43→0.44
+  (plus transitive `x/sys`, `x/text`, `x/net`).
+- Updated the Alpine runtime base image from 3.20 to 3.24.
+
 ## [2.7.1] — 2026-06-15 — "git-sync backup health + note download"
 
 PATCH release. A degraded git-sync backup no longer marks the container

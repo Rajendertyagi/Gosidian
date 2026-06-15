@@ -1,2 +1,0 @@
-import{n as e}from"./index-ooM2UP9z.js";async function c(){const{data:t}=await e.get("/projects");return t.items}async function s(t){const{data:n}=await e.post("/projects",{name:t});return n}async function r(t,n){const{data:a}=await e.put(`/projects/${encodeURIComponent(t)}`,n);return a}async function i(t){await e.delete(`/projects/${encodeURIComponent(t)}`)}export{s as c,i as d,c as l,r as u};
-//# sourceMappingURL=projects-BHl_Oly9.js.map
