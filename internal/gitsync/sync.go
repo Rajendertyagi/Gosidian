@@ -186,6 +186,40 @@ func (s *Sync) recordCommitSuccess() {
 	statusGauge.Set(statusCodeHealthy)
 }
 
+// repoCorruptionSignatures are substrings git emits when the local repository
+// is structurally broken — an empty/corrupt loose object or an unreadable HEAD
+// (the BUG-015 class). Deliberately excludes "non-fast-forward"/"rejected",
+// which signal a benign remote divergence handled fail-loud per ADR-002, not
+// corruption.
+var repoCorruptionSignatures = []string{
+	"bad object",   // "fatal: bad object HEAD"
+	"object file",  // "error: object file .git/objects/.. is empty"
+	"loose object", // "error: loose object .. is corrupt"
+	"corrupt",
+}
+
+// isRepoCorruption reports whether err looks like local .git corruption that
+// requires manual repair, as opposed to an ordinary git failure such as a
+// rejected non-fast-forward push. Used by flush to wrap the error with an
+// actionable hint so /healthz surfaces "run git fsck" instead of a raw,
+// opaque git message. Case-insensitive.
+func isRepoCorruption(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	// Divergence (remote ahead) is not corruption — keep it fail-loud as-is.
+	if strings.Contains(msg, "non-fast-forward") || strings.Contains(msg, "rejected") {
+		return false
+	}
+	for _, sig := range repoCorruptionSignatures {
+		if strings.Contains(msg, sig) {
+			return true
+		}
+	}
+	return false
+}
+
 // TriggerCommit resets the debounce timer. When it fires, a commit (and
 // optional push) is executed. Safe to call from multiple goroutines.
 func (s *Sync) TriggerCommit() {
@@ -235,6 +269,10 @@ func (s *Sync) flush() {
 
 	if err := s.commitAndPush(); err != nil {
 		metrics.GitSyncCommits.WithLabelValues("failure").Inc()
+		if isRepoCorruption(err) {
+			err = fmt.Errorf("repository corruption detected — manual repair "+
+				"required (run `git fsck --full` in the vault; see BUG-015): %w", err)
+		}
 		s.recordError(err)
 		log.Printf("gitsync: %v", err)
 		return

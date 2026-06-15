@@ -33,25 +33,39 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out := payload{
-		Status:  "ok",
 		Version: s.version,
 		Vault:   s.vault.Root,
 		GitSync: buildGitSyncHealth(s.gitSync, s.gitSyncOn),
 	}
 
+	// Liveness/readiness is decided by the *core* (can we read the index?),
+	// NOT by the git-sync backup. A degraded backup still serves reads and
+	// writes, so it must never flip the container to unhealthy — the
+	// container HEALTHCHECK (cmd/gosidian/healthcheck.go) exits non-zero on
+	// any status != "ok". Backup degradation stays observable via
+	// git_sync.healthy below and the Prometheus gauge gosidian_gitsync_status
+	// (=2). See BUG-015 and ADR-002 (push-only, fail-loud, manual reconcile).
 	notes, err := s.index.AllNotes()
-	if err != nil {
-		out.Status = "degraded"
-		writeJSON(w, http.StatusServiceUnavailable, out)
-		return
+	indexOK := err == nil
+	status, code := topLevelStatus(indexOK)
+	out.Status = status
+	if indexOK {
+		out.Notes = len(notes)
 	}
-	out.Notes = len(notes)
-	// Degraded gitsync is not enough to fail readiness — the service still
-	// serves reads and writes — but we surface it so the caller can alert.
-	if out.GitSync.Enabled && !out.GitSync.Healthy {
-		out.Status = "degraded"
+	writeJSON(w, code, out)
+}
+
+// topLevelStatus maps the *core* health (is the index readable?) to the
+// /healthz top-level status and HTTP code consumed by the container
+// HEALTHCHECK, which treats any status != "ok" as a failure. It deliberately
+// takes no git-sync input: a degraded backup is reported in the git_sync
+// sub-object and the Prometheus gauge, never in this readiness gate — a stuck
+// backup must not mark the container unhealthy (BUG-015).
+func topLevelStatus(indexOK bool) (string, int) {
+	if !indexOK {
+		return "degraded", http.StatusServiceUnavailable
 	}
-	writeJSON(w, http.StatusOK, out)
+	return "ok", http.StatusOK
 }
 
 // buildGitSyncHealth condenses the subsystem state into the JSON payload.

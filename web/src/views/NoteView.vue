@@ -238,6 +238,24 @@ function printNote() {
   window.print()
 }
 
+// Download the note's original source file (the raw .md / .html as stored in
+// the vault) as-is. Purely client-side: the saved content is already in
+// memory, so we wrap it in a Blob and synthesise an <a download>.
+function downloadOriginal() {
+  if (!note.value) return
+  const filename = note.value.path.split('/').pop() || note.value.title || 'note'
+  const mime = filename.toLowerCase().endsWith('.html') ? 'text/html' : 'text/markdown'
+  const blob = new Blob([note.value.content], { type: `${mime};charset=utf-8` })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+
 function openHistory() {
   if (!note.value) return
   openWindow({
@@ -330,6 +348,14 @@ watch(path, load)
         title="Print / Save as PDF"
         @click="printNote"
       >Print</button>
+
+      <button
+        type="button"
+        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        :disabled="!note"
+        title="Download original file"
+        @click="downloadOriginal"
+      >Download</button>
 
       <button
         type="button"

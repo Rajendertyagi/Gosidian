@@ -2,6 +2,7 @@ package gitsync
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -316,6 +317,32 @@ func TestSync_RefreshGitignore_ManagedBlock(t *testing.T) {
 	}
 	if !strings.Contains(string(got3), "*.bak") {
 		t.Errorf("user-managed lines lost on second refresh: %s", got3)
+	}
+}
+
+func TestIsRepoCorruption(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		// Positive: the BUG-015 corruption class.
+		{"bad object HEAD", errors.New("fatal: bad object HEAD"), true},
+		{"empty object file", errors.New("error: object file .git/objects/85/e894de9b is empty"), true},
+		{"loose object corrupt", errors.New("error: loose object 85e894 is corrupt"), true},
+		{"upper-case", errors.New("FATAL: BAD OBJECT HEAD"), true},
+		// Negative: divergence is fail-loud per ADR-002, not corruption.
+		{"non-fast-forward", errors.New("! [rejected] main -> main (non-fast-forward)"), false},
+		{"rejected", errors.New("updates were rejected because the remote contains work"), false},
+		// Negative: ordinary failures / nil.
+		{"nothing to commit", errors.New("nothing to commit, working tree clean"), false},
+		{"network", errors.New("git push: could not resolve host"), false},
+		{"nil", nil, false},
+	}
+	for _, tc := range cases {
+		if got := isRepoCorruption(tc.err); got != tc.want {
+			t.Errorf("%s: isRepoCorruption(%v) = %v, want %v", tc.name, tc.err, got, tc.want)
+		}
 	}
 }
 

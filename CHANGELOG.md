@@ -8,6 +8,27 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.7.1] — 2026-06-15 — "git-sync backup health + note download"
+
+PATCH release. A degraded git-sync backup no longer marks the container
+unhealthy, and a Download button is added to the note header. Purely additive
+plus a health-reporting fix; existing deployments need no migration.
+
+### Added
+- **Download original file** — a Download button in the note header saves the
+  note's raw source file (`.md` or `.html`) as-is, fully client-side (no server
+  round-trip).
+
+### Fixed
+- **A degraded git-sync backup no longer fails container health.** When the
+  git-sync backup is degraded — for example a push blocked by remote divergence
+  or local repository corruption — the container is no longer reported
+  `unhealthy`: `/healthz` readiness is now gated on the index (core) alone,
+  while backup degradation stays observable in the `git_sync.healthy` field and
+  the Prometheus gauge `gosidian_gitsync_status`. git-sync additionally
+  classifies local repository corruption (`bad object` / empty object file) and
+  surfaces an actionable error in place of a raw git message.
+
 ## [2.7.0] — 2026-06-13 — "print to PDF + unified frontmatter detection"
 
 MINOR release. Adds a Print / Save-as-PDF action for Markdown notes in the web

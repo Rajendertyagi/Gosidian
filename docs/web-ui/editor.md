@@ -48,6 +48,13 @@ clean note reaches the page. The button calls `printNote()`, which
 tags the article with the `gosidian-print-target` class, fires
 `window.print()`, and removes the class again on `afterprint`.
 
+## Download
+
+A **Download** button in the note header saves the note's **original
+source file** as-is (the raw `.md` or `.html`, with its filename). It is
+fully client-side: the saved content is already loaded, so `downloadOriginal()`
+wraps it in a `Blob` and triggers an `<a download>` — no server round-trip.
+
 ## Maximize / window controls
 
 There is no dedicated "focus mode" anymore — to give a note the full
