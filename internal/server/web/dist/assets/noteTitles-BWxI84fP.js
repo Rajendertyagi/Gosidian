@@ -1,0 +1,2 @@
+import{i as e}from"./index-DUdwGCo_.js";async function t(t,n=10){let{data:r}=await e.get(`/note-titles`,{params:{q:t,limit:n}});return r.items}export{t};
+//# sourceMappingURL=noteTitles-BWxI84fP.js.map

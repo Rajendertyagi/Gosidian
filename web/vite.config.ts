@@ -53,18 +53,12 @@ export default defineConfig({
     rollupOptions: {
       output: {
         // Split heavy chunks (graph, editor) so the initial shell
-        // stays small on first load.
-        manualChunks: {
-          'graph': ['cytoscape', 'cytoscape-fcose'],
-          'editor': [
-            '@codemirror/state',
-            '@codemirror/view',
-            '@codemirror/lang-markdown',
-            '@codemirror/autocomplete',
-            '@codemirror/commands',
-            '@codemirror/search',
-            '@codemirror/language',
-          ],
+        // stays small on first load. Vite 8 / Rolldown dropped the
+        // object form of manualChunks — use the function form (module
+        // id → chunk name), which both Rollup and Rolldown accept.
+        manualChunks(id) {
+          if (/node_modules\/cytoscape(-fcose)?\//.test(id)) return 'graph'
+          if (/node_modules\/@codemirror\//.test(id)) return 'editor'
         },
       },
     },

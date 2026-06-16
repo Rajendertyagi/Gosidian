@@ -8,6 +8,34 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.8.0] — 2026-06-16 — "Vite 8 + Vue toolchain upgrade"
+
+MINOR release. A full build-toolchain upgrade with no behaviour change for end
+users — the SPA looks and works the same. Existing deployments need no
+migration.
+
+### Changed
+- **Build toolchain upgraded to Vite 8** (bundler is now Rolldown), together
+  with `@vitejs/plugin-vue` 5→6, Vitest 3→4, TypeScript 5.5→5.9, vue-tsc 2→3,
+  `@vue/tsconfig` 0.5→0.9, `@intlify/unplugin-vue-i18n` 4→11 and **vue-i18n
+  9→11**. The i18n catalogs are still AOT-precompiled, so the SPA keeps running
+  under the strict `script-src 'self'` CSP with no runtime `eval`.
+- `rollupOptions.output.manualChunks` migrated to the function form (Rolldown
+  no longer accepts the object form); the graph/editor code-split is unchanged.
+- Bundle output is marginally smaller with Rolldown.
+
+### Security
+- `npm audit` is clean (0 vulnerabilities): patched pre-existing DOMPurify,
+  `form-data` (high-severity CRLF injection) and `js-yaml` advisories, and the
+  esbuild advisory (`GHSA-gv7w-rqvm-qjhr`) stays pinned out via an `overrides`
+  entry (esbuild is now only a build-time transitive of the i18n plugin).
+
+### Internal
+- The browser canary now also boots the **authenticated** app shell under the
+  production CSP (via an injected auth state, no seeded user), not just the
+  login page — closing the gap that let a vue-i18n runtime-compiler regression
+  reach a real browser during this upgrade.
+
 ## [2.7.2] — 2026-06-15 — "dependency maintenance"
 
 PATCH release. Routine dependency maintenance and a transitive security fix.

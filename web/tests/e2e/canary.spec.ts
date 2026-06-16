@@ -48,25 +48,48 @@ test('BUG-009: SPA shell boots under strict CSP without runtime eval', async ({ 
   expect(pageErrors).toEqual([])
 })
 
-test('AppShell mounts after login (no blank #app, TopBar nav present)', async ({ page }) => {
-  // Defensive: this depends on a known seeded user existing in the
-  // target vault. Defaults to the v2spa container's `owner` /
-  // `testpass123` seed; override via PLAYWRIGHT_USER /
-  // PLAYWRIGHT_PASS env when running against another instance
-  // (prod 8080 ships with a different account).
-  const user = process.env.PLAYWRIGHT_USER ?? 'owner'
-  const pass = process.env.PLAYWRIGHT_PASS ?? 'testpass123'
-  await page.goto('/login', { waitUntil: 'domcontentloaded' })
-  await page.fill('input[type="text"], input#username, input[name="username"]', user)
-  await page.fill('input[type="password"]', pass)
-  await page.click('button[type="submit"]')
+test('AppShell mounts under CSP with no runtime i18n compile (auth-shell BUG-009 variant)', async ({
+  page,
+  context,
+}) => {
+  // The /login canary above only covers the unauthenticated entry point —
+  // and LoginView never calls t(). vue-i18n's message compiler only trips
+  // once a t()-using component mounts (TopBar/Sidebar/WindowManager), which
+  // happens in the AUTHENTICATED shell. A vite8/intlify11 build paired with
+  // a mismatched vue-i18n runtime once shipped messages the runtime had to
+  // compile on the fly, throwing SyntaxError and blanking the shell — green
+  // on /login, broken after login.
+  //
+  // Inject a fake auth state so the shell mounts without a seeded user (the
+  // API calls 401, but the i18n SyntaxError — if any — fires at component
+  // setup, before/independent of the network). No credentials needed → this
+  // runs in CI against any instance.
+  await context.addInitScript(() => {
+    localStorage.setItem(
+      'gosidian.auth',
+      JSON.stringify({ token: 'canary-fake-token', user: { username: 'canary', role: 'owner' } }),
+    )
+  })
 
-  // After login we expect to land on / with the AppShell + TopBar
-  // visible. Use a generic landmark that's stable across phases:
-  // the brand label.
-  await expect(page.locator('text=gosidian').first()).toBeVisible({ timeout: 8000 })
+  const pageErrors: string[] = []
+  const consoleErrors: string[] = []
+  page.on('pageerror', (e) => pageErrors.push(`${e.message}\n${e.stack ?? ''}`))
+  page.on('console', (msg) => {
+    if (msg.type() === 'error') consoleErrors.push(msg.text())
+  })
 
-  // BUG-009 symptom check: the app root must not be empty.
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  // Give the shell a beat to mount its t()-calling components.
+  await page.waitForTimeout(1500)
+
+  // A blank #app means a component setup() threw during mount.
   const appHTML = await page.locator('#app').innerHTML()
-  expect(appHTML.length).toBeGreaterThan(50)
+  expect(appHTML.length, 'authenticated #app is blank — a component setup() crashed').toBeGreaterThan(100)
+
+  // No vue-i18n runtime compiler / eval / CSP error may fire on the shell.
+  for (const text of [...consoleErrors, ...pageErrors]) {
+    expect(text, `i18n/eval/CSP error on shell: ${text}`).not.toMatch(
+      /message-compiler|new Function|eval(error)?|blocked by csp/i,
+    )
+  }
 })
