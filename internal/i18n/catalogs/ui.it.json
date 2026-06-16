@@ -49,9 +49,42 @@
     "filter_placeholder": "Filtra note…",
     "expand_all": "Espandi tutto",
     "collapse_all": "Chiudi tutto",
+    "new_note_here": "Nuova nota in questa cartella",
     "download_project": "Scarica progetto come zip",
     "download_vault": "Scarica tutto il vault",
     "download_vault_help": "Scarica un archivio zip dell'intero vault (escluso .gosidian/). Solo owner."
+  },
+  "note": {
+    "print": "Stampa / Salva come PDF",
+    "download": "Scarica il file originale",
+    "copy": "Copia il sorgente della nota",
+    "copied": "Copiato!",
+    "history": "Cronologia",
+    "unsaved": "Modifiche non salvate"
+  },
+  "note_create": {
+    "title": "Nuova nota",
+    "location_prefix": "in",
+    "kind_markdown": "Markdown",
+    "kind_image": "Immagine",
+    "name_label": "Nome",
+    "name_placeholder": "nome-nota",
+    "title_label": "Titolo",
+    "optional": "(opzionale)",
+    "title_placeholder": "Titolo della nota",
+    "image_label": "Immagine",
+    "caption_label": "Caption",
+    "caption_hint": "(consigliata — entra in FTS)",
+    "caption_placeholder": "Descrivi l'immagine: è il testo che un agente recupera.",
+    "submit": "Crea",
+    "submitting": "Creazione…",
+    "cancel": "Annulla",
+    "err_choose_image": "Scegli un file immagine.",
+    "err_failed": "Creazione fallita",
+    "window_title": "Nuova nota · {name}"
+  },
+  "media": {
+    "not_found": "Immagine non trovata"
   },
   "nav": {
     "projects": "Progetti",

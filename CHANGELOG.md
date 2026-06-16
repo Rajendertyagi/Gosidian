@@ -8,6 +8,27 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.9.1] — 2026-06-16 — "i18n fix for the v2.9.0 UI"
+
+PATCH release. The UI components added in v2.9.0 shipped with hardcoded strings
+instead of going through the i18n catalogs, so the note-creation form, the
+media-note placeholder, the tree `+` button and the note-header icon buttons
+ignored the active locale (an English UI showed Italian, and an Italian
+operator saw stray English). No behaviour or API change; no migration.
+
+### Fixed
+- **Localized the v2.9.0 UI strings.** `NoteCreateView`, `MediaPreview`, the
+  tree folder `+` button and the `NoteView` header icons (Print / Download /
+  Copy / History) now read from the i18n catalogs (new `note`, `note_create`,
+  `media` namespaces + `tree.new_note_here`) via `t()` instead of hardcoded
+  text. Strings ship for `it`/`en`; other locales fall back to `en` through the
+  catalog's normal fallback chain.
+
+### Changed
+- Refreshed the README demo GIF (now rendered entirely in English) and
+  consolidated the recording storyboard into `web/scripts/record-demo.mjs`,
+  parametrized via `DEMO_LOCALE` / `DEMO_PRESET`.
+
 ## [2.9.0] — 2026-06-16 — "Image media notes, manual creation & cheap asset ingestion"
 
 MINOR release. Images become first-class, addressable notes; the web UI gets

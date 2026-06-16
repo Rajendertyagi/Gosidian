@@ -11,6 +11,7 @@
  * ported (IMP-058); the backend (POST /notes, POST /attach) was already there.
  */
 import { ref, computed, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { createNote } from '@/api/notes'
 import { attachFile } from '@/api/attach'
 import { useTreeStore } from '@/stores/tree'
@@ -20,6 +21,7 @@ import { planciaKey } from '@/composables/usePlanciaSync'
 const props = defineProps<{ path?: string }>()
 const emit = defineEmits<{ close: [] }>()
 
+const { t } = useI18n()
 const treeStore = useTreeStore()
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
@@ -58,7 +60,7 @@ function frontmatter(extra = ''): string {
 async function submit() {
   if (!slug.value || creating.value) return
   if (kind.value === 'image' && !file.value) {
-    error.value = 'Scegli un file immagine.'
+    error.value = t('note_create.err_choose_image')
     return
   }
   creating.value = true
@@ -85,7 +87,7 @@ async function submit() {
     })
     emit('close')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Creazione fallita'
+    error.value = e instanceof Error ? e.message : t('note_create.err_failed')
   } finally {
     creating.value = false
   }
@@ -94,9 +96,9 @@ async function submit() {
 
 <template>
   <div class="p-6 max-w-xl mx-auto">
-    <h1 class="text-lg font-semibold mb-1">Nuova nota</h1>
+    <h1 class="text-lg font-semibold mb-1">{{ t('note_create.title') }}</h1>
     <p class="text-sm text-text-muted mb-5">
-      in <span class="font-mono">{{ folder || '(root)' }}/</span>
+      {{ t('note_create.location_prefix') }} <span class="font-mono">{{ folder || '(root)' }}/</span>
     </p>
 
     <!-- Kind toggle -->
@@ -106,13 +108,13 @@ async function submit() {
         class="px-3 py-1"
         :class="kind === 'markdown' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
         @click="kind = 'markdown'"
-      >Markdown</button>
+      >{{ t('note_create.kind_markdown') }}</button>
       <button
         type="button"
         class="px-3 py-1"
         :class="kind === 'image' ? 'bg-accent text-accent-fg' : 'hover:bg-surface-hover'"
         @click="kind = 'image'"
-      >Immagine</button>
+      >{{ t('note_create.kind_image') }}</button>
     </div>
 
     <form
@@ -120,11 +122,11 @@ async function submit() {
       @submit.prevent="submit"
     >
       <label class="block">
-        <span class="text-sm text-text-muted">Nome</span>
+        <span class="text-sm text-text-muted">{{ t('note_create.name_label') }}</span>
         <input
           v-model="name"
           type="text"
-          placeholder="nome-nota"
+          :placeholder="t('note_create.name_placeholder')"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
         >
         <span
@@ -134,18 +136,18 @@ async function submit() {
       </label>
 
       <label class="block">
-        <span class="text-sm text-text-muted">Titolo <span class="opacity-60">(opzionale)</span></span>
+        <span class="text-sm text-text-muted">{{ t('note_create.title_label') }} <span class="opacity-60">{{ t('note_create.optional') }}</span></span>
         <input
           v-model="title"
           type="text"
-          :placeholder="slug || 'Titolo della nota'"
+          :placeholder="slug || t('note_create.title_placeholder')"
           class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
         >
       </label>
 
       <template v-if="kind === 'image'">
         <label class="block">
-          <span class="text-sm text-text-muted">Immagine</span>
+          <span class="text-sm text-text-muted">{{ t('note_create.image_label') }}</span>
           <input
             type="file"
             accept="image/*"
@@ -154,11 +156,11 @@ async function submit() {
           >
         </label>
         <label class="block">
-          <span class="text-sm text-text-muted">Caption <span class="opacity-60">(consigliata — entra in FTS)</span></span>
+          <span class="text-sm text-text-muted">{{ t('note_create.caption_label') }} <span class="opacity-60">{{ t('note_create.caption_hint') }}</span></span>
           <textarea
             v-model="caption"
             rows="3"
-            placeholder="Descrivi l'immagine: è il testo che un agente recupera."
+            :placeholder="t('note_create.caption_placeholder')"
             class="mt-1 w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
           />
         </label>
@@ -174,12 +176,12 @@ async function submit() {
           type="submit"
           class="px-3 py-2 rounded bg-accent text-accent-fg hover:bg-accent-hover disabled:opacity-50"
           :disabled="!slug || creating"
-        >{{ creating ? 'Creazione…' : 'Crea' }}</button>
+        >{{ creating ? t('note_create.submitting') : t('note_create.submit') }}</button>
         <button
           type="button"
           class="px-3 py-2 rounded hover:bg-surface-hover"
           @click="emit('close')"
-        >Annulla</button>
+        >{{ t('note_create.cancel') }}</button>
       </div>
     </form>
   </div>

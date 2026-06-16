@@ -10,8 +10,11 @@
  * img-src already allows (markdown-embedded attachments use the same path).
  */
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { MediaRef } from '@/api/notes'
 import MarkdownPreview from './MarkdownPreview.vue'
+
+const { t } = useI18n()
 
 const props = defineProps<{
   media: MediaRef
@@ -50,7 +53,7 @@ const metaLabel = computed(() => {
         v-else
         class="flex items-center justify-center rounded border border-dashed border-warning/50 bg-warning/5 px-4 py-10 text-sm text-warning"
       >
-        Immagine non trovata: <span class="ml-1 font-mono">{{ media.path }}</span>
+        {{ t('media.not_found') }}: <span class="ml-1 font-mono">{{ media.path }}</span>
       </div>
       <figcaption class="mt-2 text-xs text-text-muted font-mono">
         {{ metaLabel }}

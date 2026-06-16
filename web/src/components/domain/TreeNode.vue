@@ -11,6 +11,7 @@
  */
 import type { TreeNode as TN } from '@/api/tree'
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore } from '@/stores/windows'
@@ -18,6 +19,7 @@ import { useAuthStore } from '@/stores/auth'
 import { planciaKey } from '@/composables/usePlanciaSync'
 
 const props = defineProps<{ node: TN }>()
+const { t } = useI18n()
 const recents = useRecentlyViewed()
 const windows = useWindowsStore()
 const auth = useAuthStore()
@@ -56,7 +58,7 @@ function createHere() {
   windows.open({
     type: 'create',
     key: planciaKey('create', props.node.path),
-    title: `Nuova nota · ${props.node.name}`,
+    title: t('note_create.window_title', { name: props.node.name }),
     props: { path: props.node.path },
   })
 }
@@ -79,8 +81,8 @@ function createHere() {
             v-if="auth.canWrite"
             type="button"
             class="rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-text group-hover/row:opacity-100 focus-visible:opacity-100"
-            title="Nuova nota in questa cartella"
-            aria-label="Nuova nota in questa cartella"
+            :title="t('tree.new_note_here')"
+            :aria-label="t('tree.new_note_here')"
             @click.stop.prevent="createHere"
           >
             <Plus class="h-3.5 w-3.5" />

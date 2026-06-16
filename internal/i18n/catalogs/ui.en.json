@@ -49,9 +49,42 @@
     "filter_placeholder": "Filter notes…",
     "expand_all": "Expand all",
     "collapse_all": "Collapse all",
+    "new_note_here": "New note in this folder",
     "download_project": "Download project as zip",
     "download_vault": "Download whole vault",
     "download_vault_help": "Download a zip archive of the entire vault (excluding .gosidian/). Owner only."
+  },
+  "note": {
+    "print": "Print / Save as PDF",
+    "download": "Download original file",
+    "copy": "Copy note source",
+    "copied": "Copied!",
+    "history": "History",
+    "unsaved": "Unsaved changes"
+  },
+  "note_create": {
+    "title": "New note",
+    "location_prefix": "in",
+    "kind_markdown": "Markdown",
+    "kind_image": "Image",
+    "name_label": "Name",
+    "name_placeholder": "note-name",
+    "title_label": "Title",
+    "optional": "(optional)",
+    "title_placeholder": "Note title",
+    "image_label": "Image",
+    "caption_label": "Caption",
+    "caption_hint": "(recommended — enters FTS)",
+    "caption_placeholder": "Describe the image: it's the text an agent retrieves.",
+    "submit": "Create",
+    "submitting": "Creating…",
+    "cancel": "Cancel",
+    "err_choose_image": "Choose an image file.",
+    "err_failed": "Creation failed",
+    "window_title": "New note · {name}"
+  },
+  "media": {
+    "not_found": "Image not found"
   },
   "nav": {
     "projects": "Projects",

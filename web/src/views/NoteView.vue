@@ -14,6 +14,7 @@
  * window via the injected `openWindow`.
  */
 import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { useDebounceFn } from '@vueuse/core'
 import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
@@ -38,6 +39,7 @@ type EditorLayout = 'editor' | 'split' | 'stacked' | 'preview'
 const props = defineProps<{ path: string; mode?: Mode }>()
 const emit = defineEmits<{ title: [string]; dirty: [boolean]; close: [] }>()
 
+const { t } = useI18n()
 const auth = useAuthStore()
 const recents = useRecentlyViewed()
 const treeStore = useTreeStore()
@@ -309,7 +311,7 @@ watch(path, load)
   <div ref="rootEl" class="flex flex-col h-full">
     <header class="flex items-center gap-2 px-4 py-2 border-b border-border bg-bg-elevated">
       <span class="font-semibold truncate">{{ note?.title || note?.path || path }}</span>
-      <span v-if="dirty" class="text-xs text-warning" title="Unsaved changes">●</span>
+      <span v-if="dirty" class="text-xs text-warning" :title="t('note.unsaved')">●</span>
       <span v-else-if="lastSavedAt" class="text-xs text-success">saved {{ lastSavedAt }}</span>
 
       <div class="flex-1" />
@@ -360,8 +362,8 @@ watch(path, load)
         v-if="note && mode === 'view' && !isHtml && !isMedia"
         type="button"
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
-        title="Print / Save as PDF"
-        aria-label="Print / Save as PDF"
+        :title="t('note.print')"
+        :aria-label="t('note.print')"
         @click="printNote"
       >
         <Printer class="h-3.5 w-3.5" />
@@ -371,8 +373,8 @@ watch(path, load)
         type="button"
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
         :disabled="!note"
-        title="Download original file"
-        aria-label="Download original file"
+        :title="t('note.download')"
+        :aria-label="t('note.download')"
         @click="downloadOriginal"
       >
         <Download class="h-3.5 w-3.5" />
@@ -383,8 +385,8 @@ watch(path, load)
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
         :class="{ 'text-success': copied }"
         :disabled="!note"
-        :title="copied ? 'Copied!' : 'Copy note source'"
-        :aria-label="copied ? 'Copied!' : 'Copy note source'"
+        :title="copied ? t('note.copied') : t('note.copy')"
+        :aria-label="copied ? t('note.copied') : t('note.copy')"
         @click="copySource"
       >
         <Check
@@ -400,8 +402,8 @@ watch(path, load)
       <button
         type="button"
         class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
-        title="History"
-        aria-label="History"
+        :title="t('note.history')"
+        :aria-label="t('note.history')"
         @click="openHistory"
       >
         <GitBranch class="h-3.5 w-3.5" />
