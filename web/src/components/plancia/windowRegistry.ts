@@ -17,6 +17,9 @@ const lazy = (loader: () => Promise<unknown>): Component =>
 export const windowRegistry: Record<string, Component> = {
   // One note window with an in-place view/edit toggle (no separate edit window).
   note: lazy(() => import('@/views/NoteView.vue')),
+  // Manual note creation (markdown or image media note), opened from a tree
+  // folder's + button (IMP-058).
+  create: lazy(() => import('@/views/NoteCreateView.vue')),
   graph: lazy(() => import('@/views/GraphView.vue')),
   search: lazy(() => import('@/views/SearchView.vue')),
   projects: lazy(() => import('@/views/ProjectsView.vue')),

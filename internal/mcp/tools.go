@@ -203,6 +203,7 @@ func (s *Server) registerTools() {
 	), s.handleOutlinks)
 
 	s.registerAttachmentTools()
+	s.registerMediaTools()
 	s.registerAuditTools()
 	s.registerBootstrapTool()
 	s.registerDiscoveryTools()
@@ -496,10 +497,12 @@ func (s *Server) handleNotesByTag(ctx context.Context, req mcp.CallToolRequest) 
 }
 
 type noteContent struct {
-	Path    string `json:"path"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	ETag    string `json:"etag"`
+	Path    string          `json:"path"`
+	Title   string          `json:"title"`
+	Content string          `json:"content"`
+	ETag    string          `json:"etag"`
+	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
+	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
 }
 
 func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -518,12 +521,17 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if err != nil {
 		return mcp.NewToolResultErrorf("cannot read %q: %v", path, err), nil
 	}
-	return mcp.NewToolResultJSON(noteContent{
+	nc := noteContent{
 		Path:    note.Path,
 		Title:   note.Title,
 		Content: string(note.Content),
 		ETag:    note.ETag(),
-	})
+	}
+	if ref, ok := s.vault.MediaRefForNote(note.Path, note.Content); ok {
+		nc.Kind = "image"
+		nc.Media = ref
+	}
+	return mcp.NewToolResultJSON(nc)
 }
 
 // checkIfMatch verifies that the caller's expected etag matches the current

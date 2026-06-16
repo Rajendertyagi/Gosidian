@@ -11,13 +11,16 @@
  */
 import type { TreeNode as TN } from '@/api/tree'
 import { computed } from 'vue'
+import { Plus } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useWindowsStore } from '@/stores/windows'
+import { useAuthStore } from '@/stores/auth'
 import { planciaKey } from '@/composables/usePlanciaSync'
 
 const props = defineProps<{ node: TN }>()
 const recents = useRecentlyViewed()
 const windows = useWindowsStore()
+const auth = useAuthStore()
 
 const expandedKey = computed(() => `gosidian.tree.open:${props.node.path}`)
 
@@ -47,6 +50,16 @@ function openNote() {
     props: { path: props.node.path },
   })
 }
+
+// Open the creation window pre-targeted to this folder (the + on a folder row).
+function createHere() {
+  windows.open({
+    type: 'create',
+    key: planciaKey('create', props.node.path),
+    title: `Nuova nota · ${props.node.name}`,
+    props: { path: props.node.path },
+  })
+}
 </script>
 
 <template>
@@ -58,10 +71,20 @@ function openNote() {
         class="group"
       >
         <summary
-          class="flex items-center gap-1.5 py-0.5 px-1 rounded cursor-pointer hover:bg-surface-hover select-none"
+          class="group/row flex items-center gap-1.5 py-0.5 px-1 rounded cursor-pointer hover:bg-surface-hover select-none"
         >
           <span class="opacity-60 group-open:rotate-90 transition-transform">▸</span>
           <span class="flex-1 truncate">{{ node.name }}</span>
+          <button
+            v-if="auth.canWrite"
+            type="button"
+            class="rounded p-0.5 text-text-muted opacity-0 transition-opacity hover:bg-surface-hover hover:text-text group-hover/row:opacity-100 focus-visible:opacity-100"
+            title="Nuova nota in questa cartella"
+            aria-label="Nuova nota in questa cartella"
+            @click.stop.prevent="createHere"
+          >
+            <Plus class="h-3.5 w-3.5" />
+          </button>
           <span
             v-if="node.note_count"
             class="text-xs text-text-muted px-1"

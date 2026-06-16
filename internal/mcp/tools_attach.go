@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/base64"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,14 +13,36 @@ import (
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
+// bridgeHintThreshold is the base64 length above which an upload is wasteful
+// enough to warrant redirecting the agent to the bridge dir (IMP-059).
+const bridgeHintThreshold = 128 << 10
+
+// bridgeHint returns a redirect message when a base64 upload is large enough to
+// be wasteful. It always points at the HTTP upload endpoint (the primary cheap
+// path, always available) and adds the bridge dir when one is configured.
+// Surfaced in the tool result so the agent learns the efficient path next time.
+func (s *Server) bridgeHint(dataB64 string) string {
+	if len(dataB64) <= bridgeHintThreshold {
+		return ""
+	}
+	msg := fmt.Sprintf("this base64 upload pushed ~%d KiB through the context (≈ that many tokens). "+
+		"Cheaper: POST the file (multipart, field 'file') with your bearer token to the upload endpoint — it is your MCP /sse URL with /sse replaced by /upload (e.g. .../mcp/sse -> .../mcp/upload, or legacy :8765/sse -> :8765/upload). The bytes go over HTTP, not the context; the response carries the path to reference.",
+		len(dataB64)>>10)
+	if s.bridgeDir != "" {
+		msg += fmt.Sprintf(" Or stage it in the bridge dir %q and pass bridge_filename.", s.bridgeDir)
+	}
+	return msg
+}
+
 // registerAttachmentTools adds the four attachment-related tools.
 // Called from registerTools().
 func (s *Server) registerAttachmentTools() {
 	s.impl.AddTool(mcp.NewTool("memory_upload_attachment",
-		mcp.WithDescription("Upload a file attachment to the vault. Provide EITHER base64 data OR a source_path (server-side filesystem path). source_path avoids passing large files through the context — the server reads the file directly. The path must be inside the vault or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS). Supported types: png, jpg, jpeg, gif, webp, svg, pdf, csv, json, txt, zip, docx, xlsx. Max 10 MiB."),
-		mcp.WithString("data", mcp.Description("Base64-encoded file content. Required unless source_path is provided.")),
-		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use this only when gosidian and the agent share the same filesystem (local install, Docker volume mount, co-located deploy). For remote setups (SSH tunnel, separate host) use 'data' instead — source_path will fail with a hint pointing you back here. Must be inside the vault or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
-		mcp.WithString("filename", mcp.Description("Original filename for extension validation and link text. Required with data, optional with source_path (defaults to basename).")),
+		mcp.WithDescription("Upload a file attachment to the vault. CHEAPEST for large files: POST the bytes (multipart, field 'file') with your bearer token to the upload endpoint — your MCP /sse URL with /sse replaced by /upload (e.g. .../mcp/sse -> .../mcp/upload, or legacy :8765/sse -> :8765/upload); the bytes travel over HTTP, not the model context. This tool takes ONE source: base64 `data`, a server-side `source_path`, or `bridge_filename` (a file staged in the bridge dir, co-located). bridge_filename/source_path/POST all avoid pushing bytes through the context as base64 (~1 token/char). Supported types: png, jpg, jpeg, gif, webp, svg, pdf, csv, json, txt, zip, docx, xlsx. Max 10 MiB."),
+		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). The server reads it from there and consumes it — near-zero token cost (no base64 through the context).")),
+		mcp.WithString("data", mcp.Description("Base64-encoded file content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Required only when neither of those is used.")),
+		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use this when gosidian and the agent share a filesystem (local install, Docker volume mount, co-located deploy). For remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
+		mcp.WithString("filename", mcp.Description("Original filename for extension validation and link text. Required with data, optional with source_path/bridge_filename (defaults to basename).")),
 		mcp.WithString("project", mcp.Description("Optional project to store the attachment in. Empty stores at vault root.")),
 	), s.handleUploadAttachment)
 
@@ -39,27 +62,56 @@ func (s *Server) registerAttachmentTools() {
 	), s.handleAttachmentInfo)
 
 	s.impl.AddTool(mcp.NewTool("memory_upload_resource",
-		mcp.WithDescription("Upload a file resource to the vault, decoupled from any specific note. Use this when an agent needs to stage multiple files (\"upload all, verify, then attach\" pattern) — the response carries the resource handle (path, url, hash, mime, kind, size) but NO embed markdown, so the caller chooses when/where to insert it. Storage is identical to memory_upload_attachment (<project>/attachments/<hash>.<ext>); the difference is purely API ergonomic. Provide EITHER base64 data OR source_path. Magic-bytes verification rejects MIME spoofs (e.g. JS payload declared as .png). Same 10 MiB cap. Supported extensions: png/jpg/jpeg/gif/webp/svg + pdf/csv/json/txt/zip/docx/xlsx."),
+		mcp.WithDescription("Upload a file resource to the vault, decoupled from any specific note (returns the handle path/url/hash/mime/kind/size, NO embed markdown). CHEAPEST for large files: POST the bytes (multipart, field 'file') with your bearer token to the upload endpoint — your MCP /sse URL with /sse replaced by /upload (e.g. .../mcp/sse -> .../mcp/upload, or legacy :8765/sse -> :8765/upload); same response shape, bytes over HTTP not the context. This tool takes ONE source: base64 `data`, `source_path`, or `bridge_filename` (staged file, co-located). Storage is <project>/attachments/<hash>.<ext>. Magic-bytes verification rejects MIME spoofs. Same 10 MiB cap. Supported extensions: png/jpg/jpeg/gif/webp/svg + pdf/csv/json/txt/zip/docx/xlsx."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Vault project to store the resource in. Required (resources without a project context are rare and intentionally not auto-routed).")),
-		mcp.WithString("data", mcp.Description("Base64-encoded file content. Required unless source_path is provided.")),
-		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use this only when gosidian and the agent share the same filesystem (local install, Docker volume mount, co-located deploy). For remote setups (SSH tunnel, separate host) use 'data' instead — source_path will fail with a hint pointing you back here. Must be inside the vault or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
-		mcp.WithString("filename", mcp.Description("Original filename for extension validation. Required with data, optional with source_path (defaults to basename).")),
+		mcp.WithString("bridge_filename", mcp.Description("PREFERRED for images/binaries: the basename of a file you staged in the server's bridge dir (GOSIDIAN_MCP_BRIDGE_DIR). Read and consumed server-side — near-zero token cost.")),
+		mcp.WithString("data", mcp.Description("Base64-encoded file content. Costly for large files (~1 token/char) — prefer bridge_filename/source_path. Required only when neither of those is used.")),
+		mcp.WithString("source_path", mcp.Description("Absolute filesystem path to the file — RESOLVED ON THE SERVER, not the client. Use when gosidian and the agent share a filesystem. For remote setups use 'data' or bridge_filename. Must be inside the vault, the bridge dir, or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS).")),
+		mcp.WithString("filename", mcp.Description("Original filename for extension validation. Required with data, optional with source_path/bridge_filename (defaults to basename).")),
 		mcp.WithString("kind", mcp.Description("Hint for caller branching: image | document | auto (default). Echoed back in the response — server resolves auto from the validated MIME family.")),
 	), s.handleUploadResource)
 }
 
-func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	sourcePath := req.GetString("source_path", "")
-	dataB64 := req.GetString("data", "")
-	filename := req.GetString("filename", "")
-	project := req.GetString("project", "")
-
-	if sourcePath == "" && dataB64 == "" {
-		return mcp.NewToolResultError("provide either data (base64) or source_path"), nil
+// storeAttachmentFromRequest validates and stores an uploaded file from one of
+// `bridge_filename` (a file staged in the bridge dir), a server-side
+// `source_path`, or base64 `data`, applying the same auth and size checks as
+// the upload tools. Returns the stored result plus its byte size, or a
+// ready-to-return tool error result. Shared by the two upload tools and by
+// memory_create_media_note so the validation logic lives in one place.
+func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filename, dataB64, sourcePath, bridgeFilename string) (*attach.Result, int64, *mcp.CallToolResult) {
+	// Bridge upload (IMP-059): the agent staged a file in the bridge dir and
+	// passes only its basename. We resolve it under the bridge dir (an allowed
+	// root), store it, then consume the staged copy. Near-zero token cost.
+	if bridgeFilename != "" {
+		if s.bridgeDir == "" {
+			return nil, 0, mcp.NewToolResultError("bridge_filename given but no bridge dir is configured (set GOSIDIAN_MCP_BRIDGE_DIR)")
+		}
+		staged := filepath.Join(s.bridgeDir, filepath.Base(bridgeFilename))
+		if filename == "" {
+			filename = filepath.Base(bridgeFilename)
+		}
+		ext := strings.ToLower(filepath.Ext(filename))
+		testRel := attach.RelPath(project, "test"+ext)
+		if _, errRes := s.authorizeWrite(ctx, testRel); errRes != nil {
+			return nil, 0, errRes
+		}
+		res, err := attach.StoreFromPath(s.vault, staged, filename, project, s.effectiveUploadRoots())
+		if err != nil {
+			return nil, 0, mcp.NewToolResultError(err.Error())
+		}
+		var size int64
+		if abs, absErr := s.vault.Abs(res.Path); absErr == nil {
+			if fi, stErr := os.Stat(abs); stErr == nil {
+				size = fi.Size()
+			}
+		}
+		_ = os.Remove(staged) // consume the staging copy (best-effort)
+		return res, size, nil
 	}
 
-	var res *attach.Result
-	var dataSize int64
+	if sourcePath == "" && dataB64 == "" {
+		return nil, 0, mcp.NewToolResultError("provide one of: bridge_filename (staged file), source_path (server path), or data (base64)")
+	}
 
 	if sourcePath != "" {
 		// Server-side filesystem read — no base64 through context.
@@ -70,51 +122,68 @@ func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolReq
 		ext := strings.ToLower(filepath.Ext(filename))
 		testRel := attach.RelPath(project, "test"+ext)
 		if _, errRes := s.authorizeWrite(ctx, testRel); errRes != nil {
-			return errRes, nil
+			return nil, 0, errRes
 		}
-		var err error
-		res, err = attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
+		res, err := attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
 		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return nil, 0, mcp.NewToolResultError(err.Error())
 		}
 		// For audit: stat the stored file to get size.
+		var size int64
 		if abs, absErr := s.vault.Abs(res.Path); absErr == nil {
 			if fi, stErr := os.Stat(abs); stErr == nil {
-				dataSize = fi.Size()
+				size = fi.Size()
 			}
 		}
-	} else {
-		// Base64 path — original flow.
-		if filename == "" {
-			return mcp.NewToolResultError("filename is required when using data (base64)"), nil
-		}
-		data, err := base64.StdEncoding.DecodeString(dataB64)
-		if err != nil {
-			return mcp.NewToolResultError("invalid base64: " + err.Error()), nil
-		}
-
-		ext := strings.ToLower(filepath.Ext(filename))
-		testRel := attach.RelPath(project, "test"+ext)
-		tok, errRes := s.authorizeWrite(ctx, testRel)
-		if errRes != nil {
-			return errRes, nil
-		}
-		if errRes := s.checkWriteLimits(tok, len(data)); errRes != nil {
-			return errRes, nil
-		}
-
-		res, err = attach.Store(s.vault, data, filename, project)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		dataSize = int64(len(data))
+		return res, size, nil
 	}
 
+	// Base64 path.
+	if filename == "" {
+		return nil, 0, mcp.NewToolResultError("filename is required when using data (base64)")
+	}
+	data, err := base64.StdEncoding.DecodeString(dataB64)
+	if err != nil {
+		return nil, 0, mcp.NewToolResultError("invalid base64: " + err.Error())
+	}
+	ext := strings.ToLower(filepath.Ext(filename))
+	testRel := attach.RelPath(project, "test"+ext)
+	tok, errRes := s.authorizeWrite(ctx, testRel)
+	if errRes != nil {
+		return nil, 0, errRes
+	}
+	if errRes := s.checkWriteLimits(tok, len(data)); errRes != nil {
+		return nil, 0, errRes
+	}
+	res, err := attach.Store(s.vault, data, filename, project)
+	if err != nil {
+		return nil, 0, mcp.NewToolResultError(err.Error())
+	}
+	return res, int64(len(data)), nil
+}
+
+func (s *Server) handleUploadAttachment(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	dataB64 := req.GetString("data", "")
+	res, dataSize, errRes := s.storeAttachmentFromRequest(
+		ctx,
+		req.GetString("project", ""),
+		req.GetString("filename", ""),
+		dataB64,
+		req.GetString("source_path", ""),
+		req.GetString("bridge_filename", ""),
+	)
+	if errRes != nil {
+		return errRes, nil
+	}
 	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", dataSize)
-	return mcp.NewToolResultJSON(map[string]any{
+	out := map[string]any{
 		"path":     res.Path,
 		"markdown": res.Markdown,
-	})
+	}
+	if h := s.bridgeHint(dataB64); h != "" {
+		out["hint"] = h
+	}
+	return mcp.NewToolResultJSON(out)
 }
 
 // handleUploadResource is the editor-decoupled twin of
@@ -142,53 +211,9 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 		return mcp.NewToolResultError("kind must be one of: image, document, auto"), nil
 	}
 
-	if sourcePath == "" && dataB64 == "" {
-		return mcp.NewToolResultError("provide either data (base64) or source_path"), nil
-	}
-
-	var res *attach.Result
-	var dataSize int64
-
-	if sourcePath != "" {
-		if filename == "" {
-			filename = filepath.Base(sourcePath)
-		}
-		ext := strings.ToLower(filepath.Ext(filename))
-		testRel := attach.RelPath(project, "test"+ext)
-		if _, errRes := s.authorizeWrite(ctx, testRel); errRes != nil {
-			return errRes, nil
-		}
-		res, err = attach.StoreFromPath(s.vault, sourcePath, filename, project, s.effectiveUploadRoots())
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		if abs, absErr := s.vault.Abs(res.Path); absErr == nil {
-			if fi, stErr := os.Stat(abs); stErr == nil {
-				dataSize = fi.Size()
-			}
-		}
-	} else {
-		if filename == "" {
-			return mcp.NewToolResultError("filename is required when using data (base64)"), nil
-		}
-		data, err := base64.StdEncoding.DecodeString(dataB64)
-		if err != nil {
-			return mcp.NewToolResultError("invalid base64: " + err.Error()), nil
-		}
-		ext := strings.ToLower(filepath.Ext(filename))
-		testRel := attach.RelPath(project, "test"+ext)
-		tok, errRes := s.authorizeWrite(ctx, testRel)
-		if errRes != nil {
-			return errRes, nil
-		}
-		if errRes := s.checkWriteLimits(tok, len(data)); errRes != nil {
-			return errRes, nil
-		}
-		res, err = attach.Store(s.vault, data, filename, project)
-		if err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
-		}
-		dataSize = int64(len(data))
+	res, dataSize, errRes := s.storeAttachmentFromRequest(ctx, project, filename, dataB64, sourcePath, req.GetString("bridge_filename", ""))
+	if errRes != nil {
+		return errRes, nil
 	}
 
 	s.auditWrite(ctx, audit.ActionUploadAttachment, res.Path, "", dataSize)
@@ -205,7 +230,7 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 		}
 	}
 
-	return mcp.NewToolResultJSON(map[string]any{
+	out := map[string]any{
 		"path":              res.Path,
 		"url":               "/vault-files/" + res.Path,
 		"mime":              mime,
@@ -213,7 +238,11 @@ func (s *Server) handleUploadResource(ctx context.Context, req mcp.CallToolReque
 		"size":              dataSize,
 		"original_filename": filename,
 		"hash":              strings.TrimSuffix(res.Filename, ext),
-	})
+	}
+	if h := s.bridgeHint(dataB64); h != "" {
+		out["hint"] = h
+	}
+	return mcp.NewToolResultJSON(out)
 }
 
 // allowedExtSet builds a set of allowed extensions for vault.ListAttachments.

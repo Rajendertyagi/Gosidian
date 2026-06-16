@@ -64,6 +64,7 @@ type Server struct {
 	limiter            *writeLimiter
 	maxNoteBytes       int64
 	allowedUploadRoots []string
+	bridgeDir          string
 	// events is optional. When wired, MCP write handlers (create,
 	// update, delete) publish on the `note` and `tree` topics so the
 	// SPA SSE stream can invalidate caches in real time. nil keeps
@@ -191,9 +192,23 @@ func (s *Server) SetAllowedUploadRoots(roots []string) {
 	s.allowedUploadRoots = roots
 }
 
-// effectiveUploadRoots returns the allowed roots with the vault root prepended.
+// SetBridgeDir configures the staging directory for bridge_filename uploads
+// (IMP-059): an agent stages a file there cheaply (via a shared mount) and
+// references it by bare filename; the server reads and consumes it. Empty
+// disables the feature. The dir is automatically an allowed source_path root.
+func (s *Server) SetBridgeDir(dir string) { s.bridgeDir = dir }
+
+// BridgeDir returns the configured staging directory (empty when unset).
+func (s *Server) BridgeDir() string { return s.bridgeDir }
+
+// effectiveUploadRoots returns the allowed roots with the vault root prepended
+// and the bridge dir (when set) appended.
 func (s *Server) effectiveUploadRoots() []string {
-	return append([]string{s.vault.Root}, s.allowedUploadRoots...)
+	roots := append([]string{s.vault.Root}, s.allowedUploadRoots...)
+	if s.bridgeDir != "" {
+		roots = append(roots, s.bridgeDir)
+	}
+	return roots
 }
 
 // SetAuditLog wires the audit sink for mutating tool handlers.
@@ -314,7 +329,16 @@ func (s *Server) Handler(basePath string) http.Handler {
 	if s.tokens != nil && !s.tokens.Empty() {
 		handler = s.requireToken(sse)
 	}
-	return handler
+
+	// Mount a sibling HTTP upload endpoint at <basePath>/upload, sharing the
+	// same MCP bearer auth (IMP-059). It lets agents POST file bytes over HTTP
+	// instead of pushing them through the model context as base64 — the primary
+	// cheap-ingestion path. The SSE handler keeps exact-matching
+	// <basePath>/sse and /message under the catch-all.
+	mux := http.NewServeMux()
+	mux.HandleFunc(basePath+"/upload", s.handleHTTPUpload)
+	mux.Handle("/", handler)
+	return mux
 }
 
 // ServeSSE starts a standalone HTTP listener serving the MCP SSE endpoint

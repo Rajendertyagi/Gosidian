@@ -190,6 +190,20 @@ func TestLint_FrontmatterTagUnknown_AcceptsInsight(t *testing.T) {
 	}
 }
 
+func TestLint_FrontmatterTagUnknown_AcceptsImage(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	// type:image is in the built-in vocabulary (ADR-013 media notes), so an
+	// image media note lints clean.
+	seed(t, v, idx, "proj/pic.md", "---\ntitle: pic\ntype: image\nmedia: proj/attachments/x.png\ntags: [proj, type:image]\n---\n\ncaption\n")
+	issues, err := l.Run(context.Background(), "proj", []string{"frontmatter-tag-unknown"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected 0 issues for type:image, got %d: %+v", len(issues), issues)
+	}
+}
+
 func TestLint_FrontmatterTagUnknown_ExtraAllowed(t *testing.T) {
 	// Same vault as TestLint_FrontmatterTagUnknown, but the linter has
 	// been extended via WithExtraAllowedTags. The 3 tags that were

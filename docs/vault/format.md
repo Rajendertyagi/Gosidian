@@ -102,6 +102,38 @@ enable it with `[vault] html_notes = true` in `config.toml` (or the
 
 See **ADR-011** for the rationale and security boundary.
 
+### Image media notes
+
+An image can be a **first-class note** (ADR-013). The note stays a normal
+`.md` whose frontmatter declares `type: image` and a `media:` pointer to an
+image attachment; the body is the **caption/transcript** — the searchable
+text (it lands in full-text search and is what an agent retrieves; the image
+bytes are not indexed). Off by default; enable with `[vault] media_notes =
+true` (or the `GOSIDIAN_VAULT_MEDIA_NOTES` environment variable).
+
+```markdown
+---
+title: Architecture diagram
+type: image
+media: project/attachments/abc123.png
+tags: [project, type:image]
+---
+
+The plancia in tiling mode with three side-by-side windows… (caption → FTS)
+```
+
+- The note participates in tags, links, backlinks, graph and full-text
+  search **exactly like any markdown note** — it *is* one.
+- On read the backend resolves `media:` and exposes `kind: "image"` plus a
+  `media` object (`url`, `mime`, `size`); the web UI renders the image +
+  caption, and a broken pointer degrades to a placeholder.
+- **Images only** (`png/jpg/jpeg/gif/webp/svg`); video is intentionally not
+  supported (a git-synced vault should not carry large binaries).
+- Create one from the web UI (the `+` on a tree folder → **Immagine**) or via
+  the MCP tool `memory_create_media_note` (upload + note, atomic).
+
+See **ADR-013** for the rationale.
+
 ## Bootstrap templates
 
 Three templates ship with the binary and are seeded into

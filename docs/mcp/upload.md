@@ -1,13 +1,15 @@
 # Upload flow
 
-gosidian exposes three equivalent ways to put a binary file (image,
-PDF, CSV, …) into a vault project under `<project>/attachments/`:
+gosidian exposes several ways to put a binary file (image, PDF, CSV, …)
+into a vault project under `<project>/attachments/`:
 
 | Strada | Quando preferirla |
 |---|---|
-| **REST `/api/upload`** | The agent only speaks HTTP. Already used by the web UI editor for drag-and-drop. The single-port mount means the same SSH tunnel that forwards `/mcp/sse` also forwards this endpoint — no extra port to expose. |
-| **MCP `memory_upload_attachment`** | Single-step: upload + return a ready-to-splice markdown embed. Best when the agent immediately knows which note the file goes into. |
-| **MCP `memory_upload_resource`** | Two-step: upload first, decide note placement later. Best when the agent stages multiple files (`upload all → verify → attach selectively`) or wants to keep the resource orphaned for later GC. |
+| **HTTP upload (`/upload`)** ⭐ | **Primary for agents.** Multipart upload authenticated by your **MCP bearer token** — the bytes travel over HTTP, never through the model context as base64. The path mirrors your `/sse` endpoint (`/sse` → `/upload`); returns `{path, url, mime, kind, size}`. Pass the returned `path` to `memory_create_media_note` as `attachment`, or splice the `url` into a note. |
+| **MCP `bridge_filename`** | Co-located deploys: stage the file in `GOSIDIAN_MCP_BRIDGE_DIR` and pass its name; the server reads + consumes it. No HTTP call needed. |
+| **MCP `memory_upload_attachment`** | Single-step: upload (base64 `data` / `source_path` / `bridge_filename`) + return a ready-to-splice markdown embed. base64 is costly — prefer the HTTP POST for large files. |
+| **MCP `memory_upload_resource`** | Two-step: upload first, decide note placement later. Same sources; same base64 caveat. |
+| REST `/api/v1/upload` | Web-UI editor path (drag-and-drop). Authenticated by a **SPA** token (from login), not the MCP token. |
 
 All three converge on the same code path (`internal/attach.Store`):
 identical 10 MiB cap, identical extension allowlist, identical
@@ -31,6 +33,45 @@ Agents behind an SSH tunnel that forwards only the web port (e.g.
 forward — REST at `localhost:58080/api/upload`, MCP at
 `localhost:58080/mcp/sse`. This is the deployment shape solved by the
 [single-port mode](client-setup.md).
+
+## HTTP upload endpoint (primary)
+
+The cheapest way for an MCP agent to ingest a file: POST the bytes over
+HTTP, authenticated by the **same bearer token** used for the SSE stream.
+No base64 through the model context, no login, no shared filesystem.
+
+**The path mirrors your `/sse` endpoint** — replace `/sse` with `/upload`:
+
+| Your MCP `/sse` URL | Upload endpoint |
+|---|---|
+| `https://host/mcp/sse` (single-port web) | `https://host/mcp/upload` |
+| `http://host:8765/sse` (legacy listener) | `http://host:8765/upload` |
+
+```bash
+# $UPLOAD = your /sse URL with /sse -> /upload
+curl -X POST "$UPLOAD?project=Work" \
+  -H "Authorization: Bearer $MCP_TOKEN" \
+  -F "file=@diagram.png"
+```
+
+```json
+{
+  "path": "Work/attachments/3a7b9c4d2e1f5a6b.png",
+  "url": "/vault-files/Work/attachments/3a7b9c4d2e1f5a6b.png",
+  "mime": "image/png", "kind": "image", "size": 84213,
+  "hash": "3a7b9c4d2e1f5a6b"
+}
+```
+
+- Mounted on the single web port next to `/mcp/sse` — one SSH tunnel
+  forwards both. `$BASE` is the same origin you point the MCP client at.
+- Enforces the token's **write scope** and **project scope** (the
+  `?project=` is intersected with a scoped token's project).
+- Same `internal/attach.Store` pipeline: 10 MiB cap, extension
+  allowlist, magic-bytes MIME verification.
+- **Compose with media notes**: POST the image → take the returned
+  `path` → `memory_create_media_note({attachment: path, caption: …})`.
+  The image lives once; agents read only the caption (ADR-013).
 
 ## REST `/api/upload`
 
@@ -135,6 +176,35 @@ container without shared volume); use `source_path` only when gosidian
 and the agent share a filesystem (local install, mounted volume).
 `source_path` is validated against
 `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` (vault root always allowed).
+
+### Cheap ingestion: the bridge dir
+
+`data` (base64) routes the file's bytes **through the model context**
+(~1 token/char), which makes large images and illustrated notes
+impractical to author. When `GOSIDIAN_MCP_BRIDGE_DIR` is set to a
+directory shared with the agent's host, stage the file there and pass
+**`bridge_filename`** (its basename) to any upload tool or to
+`memory_create_media_note`:
+
+```jsonc
+{
+  "name": "memory_create_media_note",
+  "arguments": {
+    "project": "Work",
+    "bridge_filename": "screenshot.png",   // staged in the bridge dir
+    "caption": "Login screen after the redesign"
+  }
+}
+```
+
+The server reads the staged file directly (near-zero token cost), runs
+the same magic-byte/MIME validation and 10 MiB cap, and **consumes**
+(deletes) the staged copy on success. The bridge dir is automatically an
+allowed `source_path` root; a base64 upload larger than ~128 KiB returns
+a `hint` redirecting here. Pair it with image **media notes**
+(ADR-013): upload once, then reference the media note by link — agents
+read only the caption, never the bytes. *Fetch-by-URL ingestion is a
+planned follow-up (IMP-059).*
 
 ## MCP `memory_upload_resource`
 

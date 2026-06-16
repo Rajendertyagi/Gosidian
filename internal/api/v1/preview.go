@@ -4,7 +4,6 @@ import (
 	"net/http"
 
 	"github.com/gosidian/gosidian/internal/authz"
-	"github.com/gosidian/gosidian/internal/parser"
 )
 
 // previewRequest carries raw markdown from the editor split-pane.
@@ -40,7 +39,7 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	html, err := r.deps.Renderer.Render([]byte(body.Markdown), r.wikilinkResolver(principalFromContext(req)))
+	html, err := r.deps.Renderer.Render([]byte(body.Markdown), previewResolver{r: r, p: principalFromContext(req)})
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "render: "+err.Error())
 		return
@@ -48,33 +47,59 @@ func (r *Router) handlePreview(w http.ResponseWriter, req *http.Request) {
 	WriteJSON(w, http.StatusOK, previewResponse{HTML: html})
 }
 
-// wikilinkResolver returns a parser.Resolver that consults the index
-// to translate `[[Note Title]]` into a vault path. The resolver
-// returns "" for unknown targets so the renderer marks them as
-// dangling links — matching the existing HTML view convention.
-func (r *Router) wikilinkResolver(p authz.Principal) parser.Resolver {
-	return parser.ResolverFunc(func(target string) string {
-		if r.deps.Index == nil {
-			return ""
-		}
-		// Try by exact path first (allows wikilinks like [[folder/Note]]).
-		if rows, err := r.deps.Index.NotesByPrefix(target); err == nil {
-			for _, n := range rows {
-				if (n.Path == target || n.Path == target+".md" || n.Title == target) && r.canSee(p, n.Path) {
-					return n.Path
-				}
-			}
-		}
-		// Fall back to a title scan via search — bounded result set. Resolve
-		// only to notes the principal may see, so a guest's preview of a
-		// public note renders private targets as dangling, not as live links.
-		if rows, err := r.deps.Index.Search(target, 5); err == nil {
-			for _, h := range rows {
-				if h.Title == target && r.canSee(p, h.Path) {
-					return h.Path
-				}
-			}
-		}
+// previewResolver resolves both `[[wiki-links]]` (Resolve) and `![[image]]`
+// embeds (ResolveImage) for the preview renderer, consulting the live index and
+// vault. It implements parser.Resolver and parser.ImageResolver.
+type previewResolver struct {
+	r *Router
+	p authz.Principal
+}
+
+// Resolve translates `[[Note Title]]` into a vault path the principal may see,
+// or "" for unknown targets (rendered as a dangling link).
+func (pr previewResolver) Resolve(target string) string {
+	r := pr.r
+	if r.deps.Index == nil {
 		return ""
-	})
+	}
+	// Try by exact path first (allows wikilinks like [[folder/Note]]).
+	if rows, err := r.deps.Index.NotesByPrefix(target); err == nil {
+		for _, n := range rows {
+			if (n.Path == target || n.Path == target+".md" || n.Title == target) && r.canSee(pr.p, n.Path) {
+				return n.Path
+			}
+		}
+	}
+	// Fall back to a title scan via search — bounded result set. Resolve only to
+	// notes the principal may see, so a guest's preview of a public note renders
+	// private targets as dangling, not as live links.
+	if rows, err := r.deps.Index.Search(target, 5); err == nil {
+		for _, h := range rows {
+			if h.Title == target && r.canSee(pr.p, h.Path) {
+				return h.Path
+			}
+		}
+	}
+	return ""
+}
+
+// ResolveImage maps an `![[target]]` embed to an image URL: first an attachment
+// by name/path, then a media note (type:image) referenced by name → its image.
+// The actual byte access stays gated by the /vault-files handler.
+func (pr previewResolver) ResolveImage(target string) string {
+	r := pr.r
+	if r.deps.Vault == nil {
+		return ""
+	}
+	if rel, ok := r.deps.Vault.ResolveAttachmentByName(target); ok {
+		return "/vault-files/" + rel
+	}
+	if path := pr.Resolve(target); path != "" {
+		if note, err := r.deps.Vault.Load(path); err == nil {
+			if ref, ok := r.deps.Vault.MediaRefForNote(note.Path, note.Content); ok && !ref.Broken {
+				return ref.URL
+			}
+		}
+	}
+	return ""
 }

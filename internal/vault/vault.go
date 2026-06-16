@@ -15,9 +15,10 @@ import (
 )
 
 type Vault struct {
-	Root      string
-	cache     *loadCache
-	htmlNotes bool
+	Root       string
+	cache      *loadCache
+	htmlNotes  bool
+	mediaNotes bool
 }
 
 // New returns a Vault rooted at the given directory. A 128-entry LRU load
@@ -47,6 +48,17 @@ func (v *Vault) SetHTMLNotes(on bool) { v.htmlNotes = on }
 
 // HTMLNotesEnabled reports whether .html notes are active.
 func (v *Vault) HTMLNotesEnabled() bool { return v.htmlNotes }
+
+// SetMediaNotes toggles whether markdown notes whose frontmatter declares
+// `type: image` + a `media:` pointer are resolved as image media notes (the
+// pointer is checked and exposed as a structured MediaRef on read). Default
+// false. Wired from [vault] media_notes / GOSIDIAN_VAULT_MEDIA_NOTES.
+// See ADR-013. Note: media notes are plain .md files, so this flag does NOT
+// change noteExtensions — only the media overlay surfaced by MediaRefForNote.
+func (v *Vault) SetMediaNotes(on bool) { v.mediaNotes = on }
+
+// MediaNotesEnabled reports whether image media notes are resolved.
+func (v *Vault) MediaNotesEnabled() bool { return v.mediaNotes }
 
 // noteExtensions are the file extensions gosidian recognises as notes. Markdown
 // is always a note; .html is gated by the htmlNotes feature flag (IsNoteFile).

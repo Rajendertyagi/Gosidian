@@ -8,6 +8,68 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.9.0] — 2026-06-16 — "Image media notes, manual creation & cheap asset ingestion"
+
+MINOR release. Images become first-class, addressable notes; the web UI gets
+back manual note creation; and getting images into a vault no longer means
+pushing base64 through an agent's context. Everything new is off-by-default or
+additive — existing deployments need no migration.
+
+Design principle throughout: **the stored note (and what an LLM reads over MCP)
+keeps a lightweight image *reference*** — `type: image` + `media:`, or
+`![[image]]` — so agents read text, not bytes (token savings). Base64 lives
+only in the web-UI presentation layer (HTML render, downloads).
+
+### Added
+- **Image media notes (ADR-013).** A markdown note whose frontmatter declares
+  `type: image` + `media: <attachment>` is resolved as a first-class image
+  note: the body is the searchable caption/transcript, while the read paths
+  (REST `GET /notes` and MCP `memory_get`) expose a structured `kind` + `media`
+  overlay. The note stays plain `.md`, so tags, links, backlinks, graph and FTS
+  all work unchanged. Off by default — enable with `[vault] media_notes`
+  (`GOSIDIAN_VAULT_MEDIA_NOTES`). New MCP tool `memory_create_media_note`
+  (upload + note in one call), and a dedicated image render in the web UI.
+- **Manual note creation in the web UI.** A `+` on each tree folder opens a
+  unified creation form — Markdown or Image — restoring manual creation that
+  was never ported in the v2.0 SPA migration.
+- **Cheap image/asset ingestion** (so illustrated docs are authorable without
+  base64-through-context):
+  - **`POST /mcp/upload`** — a multipart HTTP upload authenticated by the same
+    MCP bearer token as the SSE stream (path mirrors your `/sse` URL with
+    `/sse`→`/upload`). Bytes travel over HTTP, never the model context; returns
+    `{path, url, mime, kind, size}`.
+  - **Bridge directory** — set `[mcp] bridge_dir` (`GOSIDIAN_MCP_BRIDGE_DIR`)
+    to a shared staging dir; agents stage a file and pass `bridge_filename`,
+    the server reads and consumes it. For co-located deployments.
+  - `memory_create_media_note` and the upload tools gain an `attachment` /
+    `bridge_filename` path so a previously-uploaded image is referenced, not
+    re-sent.
+- **Obsidian image embeds.** `![[image]]` (and `![[image|alt]]`) now render as
+  inline images in markdown notes, resolving an attachment or a media note's
+  image.
+- **Images render in HTML notes.** A single-file HTML note that references
+  vault images by URL now shows them: the images are fetched and inlined as
+  `data:` URIs at render time (cached immutably), within the existing
+  sandboxed-iframe CSP — the stored note is untouched.
+- **Self-contained download.** `GET /notes/<path>?inline` returns the note with
+  its image references embedded as `data:` URIs (markdown `![[...]]` / `![](...)`
+  and HTML `<img>`), so a downloaded `.md`/`.html` is portable. The stored note
+  keeps the reference.
+
+### Changed
+- Upload tool descriptions now lead with the cheap ingestion paths; a base64
+  upload over ~128 KiB returns a `hint` redirecting to the HTTP/bridge path.
+
+### Fixed
+- HTML notes authored with a bare markdown `--- … ---` frontmatter block
+  (instead of the HTML-comment-wrapped form) are now tolerated: their
+  title/tags are indexed and the block no longer renders as visible text.
+
+### Notes
+- `media_notes`, `bridge_dir` and the `?inline` overlays are all
+  off/lightweight by default; no migration. MCP reads and stored notes always
+  keep the lightweight image reference.
+
 ## [2.8.0] — 2026-06-16 — "Vite 8 + Vue toolchain upgrade"
 
 MINOR release. A full build-toolchain upgrade with no behaviour change for end

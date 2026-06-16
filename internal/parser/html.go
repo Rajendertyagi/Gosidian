@@ -47,9 +47,20 @@ var (
 func ExtractHTML(body []byte) (links []WikiLinkRef, tags []string, title, text string) {
 	src := string(body)
 
-	// 1. Frontmatter (title + tags) from the leading comment-wrapped block.
+	// 1. Frontmatter (title + tags). The convention is a leading HTML comment
+	//    wrapping a `--- YAML ---` block (ADR-011, invisible when rendered). We
+	//    are also tolerant of a bare markdown-style `--- YAML ---` at the very
+	//    top (some authors/agents write it that way): it is parsed the same and
+	//    the renderer strips it from the view so it never shows.
 	rest := src
 	if m := htmlFrontmatterRe.FindStringSubmatch(src); m != nil {
+		raw := m[1]
+		if tm := frontTitleRe.FindStringSubmatch(raw); tm != nil {
+			title = strings.TrimSpace(tm[1])
+		}
+		tags = extractFrontmatterTags(raw)
+		rest = src[len(m[0]):]
+	} else if m := frontmatterRe.FindStringSubmatch(src); m != nil {
 		raw := m[1]
 		if tm := frontTitleRe.FindStringSubmatch(raw); tm != nil {
 			title = strings.TrimSpace(tm[1])
@@ -95,6 +106,11 @@ func ExtractHTML(body []byte) (links []WikiLinkRef, tags []string, title, text s
 // ParseFrontmatterFields machinery.
 func ExtractHTMLFrontmatterRaw(body []byte) string {
 	if m := htmlFrontmatterRe.FindStringSubmatch(string(body)); m != nil {
+		return m[1]
+	}
+	// Tolerate a bare markdown-style `--- YAML ---` block at the top of an
+	// .html note (parsed identically; the renderer strips it from the view).
+	if m := frontmatterRe.FindStringSubmatch(string(body)); m != nil {
 		return m[1]
 	}
 	return ""

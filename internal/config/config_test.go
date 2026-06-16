@@ -69,6 +69,20 @@ func TestApplyEnv(t *testing.T) {
 	}
 }
 
+func TestApplyEnv_MediaNotes(t *testing.T) {
+	cfg := Default()
+	if cfg.Vault.MediaNotes {
+		t.Error("media_notes must default to false (ADR-013, opt-in)")
+	}
+	t.Setenv("GOSIDIAN_VAULT_MEDIA_NOTES", "true")
+	if err := cfg.ApplyEnv(); err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Vault.MediaNotes {
+		t.Error("GOSIDIAN_VAULT_MEDIA_NOTES=true should enable media notes")
+	}
+}
+
 func TestApplyEnv_EmptyDoesNotReset(t *testing.T) {
 	cfg := Default()
 	cfg.Git.Remote = "kept"

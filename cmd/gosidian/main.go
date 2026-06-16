@@ -265,6 +265,10 @@ func main() {
 	if cfg.Vault.HTMLNotes {
 		log.Printf("html notes enabled: single-file .html treated as first-class notes (ADR-011)")
 	}
+	v.SetMediaNotes(cfg.Vault.MediaNotes)
+	if cfg.Vault.MediaNotes {
+		log.Printf("media notes enabled: markdown notes with type:image + media: resolved as image notes (ADR-013)")
+	}
 	// Web-side login rate-limit + session TTL configuration moved
 	// to internal/api/v1 — the legacy server.ConfigureLogin retired
 	// at the v2.0 cutover alongside the cookie-session middleware.
@@ -378,6 +382,10 @@ func main() {
 	mcpServer.SetAuditLog(auditLog)
 	mcpServer.SetWriteLimits(cfg.MCP.WritePerMinute, cfg.MCP.MaxNoteBytes)
 	mcpServer.SetAllowedUploadRoots(cfg.MCP.AllowedUploadRoots)
+	mcpServer.SetBridgeDir(cfg.MCP.BridgeDir)
+	if cfg.MCP.BridgeDir != "" {
+		log.Printf("mcp bridge dir: %s (stage files here, reference by bridge_filename — IMP-059)", cfg.MCP.BridgeDir)
+	}
 	mcpServer.SetProjects(projectsStore)
 	// MCP write handlers publish on the SSE hub so SPA subscribers
 	// see external-tab + agent edits in real time.

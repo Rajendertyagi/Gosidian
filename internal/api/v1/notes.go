@@ -26,13 +26,15 @@ type noteSummary struct {
 // response headers — but the canonical wire location remains the
 // `ETag` HTTP header so caching middlewares behave naturally.
 type noteResponse struct {
-	Path    string `json:"path"`
-	Title   string `json:"title"`
-	Content string `json:"content"`
-	Format  string `json:"format"` // "markdown" | "html" — drives the SPA's renderer choice
-	ETag    string `json:"etag"`
-	Size    int64  `json:"size"`
-	ModTime string `json:"mod_time"`
+	Path    string          `json:"path"`
+	Title   string          `json:"title"`
+	Content string          `json:"content"`
+	Format  string          `json:"format"`          // "markdown" | "html" — drives the SPA's renderer choice
+	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
+	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
+	ETag    string          `json:"etag"`
+	Size    int64           `json:"size"`
+	ModTime string          `json:"mod_time"`
 }
 
 type createNoteRequest struct {
@@ -249,7 +251,7 @@ func (r *Router) createNote(w http.ResponseWriter, req *http.Request) {
 	r.publishNoteEvent(events.TopicTree, clean, "create", note)
 
 	w.Header().Set("ETag", quoteETag(note.ETag()))
-	WriteJSON(w, http.StatusCreated, toNoteResponse(note))
+	WriteJSON(w, http.StatusCreated, r.toNoteResponse(note))
 }
 
 // readNote handles GET /notes/{path...}. The ETag header carries the
@@ -270,6 +272,17 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "load: "+err.Error())
 		return
 	}
+	// ?inline returns the content with image references inlined as data: URIs,
+	// for a self-contained download. The stored note is untouched; this is the
+	// only place the bytes are embedded into the markup. No 304 fast-path here:
+	// the inlined body differs from the bare note the etag stamps.
+	if req.URL.Query().Has("inline") {
+		resp := r.toNoteResponse(note)
+		resp.Content = r.inlineImages(resp.Content, resp.Format, principalFromContext(req))
+		WriteJSON(w, http.StatusOK, resp)
+		return
+	}
+
 	etag := quoteETag(note.ETag())
 	w.Header().Set("ETag", etag)
 	// 304 fast path for browser-style conditional requests.
@@ -277,7 +290,7 @@ func (r *Router) readNote(w http.ResponseWriter, req *http.Request, rel string) 
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	WriteJSON(w, http.StatusOK, toNoteResponse(note))
+	WriteJSON(w, http.StatusOK, r.toNoteResponse(note))
 }
 
 // updateNote handles PUT /notes/{path...} with optimistic locking via
@@ -332,7 +345,7 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	r.publishNoteEvent(events.TopicNote, rel, "update", fresh)
 
 	w.Header().Set("ETag", quoteETag(fresh.ETag()))
-	WriteJSON(w, http.StatusOK, toNoteResponse(fresh))
+	WriteJSON(w, http.StatusOK, r.toNoteResponse(fresh))
 }
 
 // deleteNote routes through trash when configured (soft delete) and
@@ -436,9 +449,12 @@ func (r *Router) publishNoteEvent(topic events.Topic, path, action string, fresh
 }
 
 // toNoteResponse converts a vault.Note to the wire shape. Sharing it
-// across create/read/update keeps the JSON tag list in one place.
-func toNoteResponse(n *vault.Note) noteResponse {
-	return noteResponse{
+// across create/read/update keeps the JSON tag list in one place. It is a
+// Router method (not a free function) so it can resolve the image overlay for
+// media notes via the vault — populated only when the media_notes feature is on
+// and the note declares type:image (ADR-013), otherwise Kind/Media stay empty.
+func (r *Router) toNoteResponse(n *vault.Note) noteResponse {
+	resp := noteResponse{
 		Path:    n.Path,
 		Title:   n.Title,
 		Content: string(n.Content),
@@ -447,6 +463,11 @@ func toNoteResponse(n *vault.Note) noteResponse {
 		Size:    n.Size,
 		ModTime: n.ModTime.UTC().Format(rfc3339Z),
 	}
+	if ref, ok := r.deps.Vault.MediaRefForNote(n.Path, n.Content); ok {
+		resp.Kind = "image"
+		resp.Media = ref
+	}
+	return resp
 }
 
 // noteFormat classifies a note by extension so the SPA knows whether to render

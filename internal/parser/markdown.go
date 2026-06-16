@@ -24,6 +24,19 @@ type ResolverFunc func(string) string
 
 func (f ResolverFunc) Resolve(t string) string { return f(t) }
 
+// ImageResolver maps an Obsidian image-embed target (`![[target]]`) to a URL
+// — an attachment path or a media note's image. Returns "" when it cannot be
+// resolved. A Resolver that also implements ImageResolver enables `![[...]]`
+// embeds in Render; resolvers that don't leave them untouched (backward-compat).
+type ImageResolver interface {
+	ResolveImage(target string) string
+}
+
+// imageEmbedRe matches the Obsidian transclusion/embed syntax `![[target]]`
+// (optionally `![[target|alias]]`). The leading `!` distinguishes it from a
+// plain wiki-link so it is handled before wikiLinkRe.
+var imageEmbedRe = regexp.MustCompile(`!\[\[([^\]]+)\]\]`)
+
 // Renderer renders markdown to HTML, converting [[wiki-links]] via the given
 // resolver. Tags `#tag` are rendered as links to /tags/{tag}. Standard Markdown
 // (GFM) is rendered via goldmark.
@@ -63,8 +76,24 @@ func (r *Renderer) Render(body []byte, resolver Resolver) (string, error) {
 	// plain markdown when those rewrites run.
 	src = preprocessCallouts(src)
 
+	// Image embeds (`![[image]]`) are resolved first, BEFORE the wiki-link pass,
+	// so the leading `!` + inner `[[...]]` aren't mistaken for a plain wiki-link.
+	// Only active when the resolver also resolves images; an unresolved embed is
+	// left as-is (falls through to the wiki-link handling below).
+	imgResolver, hasImg := resolver.(ImageResolver)
+
 	// Replace wiki-links and tags outside code regions.
 	src = processOutsideCode(src, func(segment string) string {
+		if hasImg {
+			segment = imageEmbedRe.ReplaceAllStringFunc(segment, func(match string) string {
+				sub := imageEmbedRe.FindStringSubmatch(match)
+				target, alias := parseWikiLinkInner(sub[1])
+				if u := imgResolver.ResolveImage(target); u != "" {
+					return "![" + alias + "](" + u + ")"
+				}
+				return match
+			})
+		}
 		segment = wikiLinkRe.ReplaceAllStringFunc(segment, func(match string) string {
 			sub := wikiLinkRe.FindStringSubmatch(match)
 			target, alias := parseWikiLinkInner(sub[1])

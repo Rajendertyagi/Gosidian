@@ -81,6 +81,10 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_list_attachments(project?)`
 - `memory_delete_attachment(path)`
 - `memory_attachment_info(path)`
+- `memory_create_media_note(project, data|source_path, filename, caption?, title?, path?)` —
+  image media note (ADR-013): uploads the image **and** creates the `.md`
+  with `type: image` + `media:` + the caption, atomically. Requires
+  `media_notes` enabled; images only
 
 The single-step / pre-uploader split, the equivalent REST endpoint
 `POST /api/upload`, and the full error catalogue live in

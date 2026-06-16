@@ -43,7 +43,7 @@ func TestFrontmatterRawForPath(t *testing.T) {
 		{"unknown ext falls back to markdown", "proj/note.txt", mdBody, "title: Hi"},
 		{"no extension falls back to markdown", "proj/note", mdBody, "title: Hi"},
 		{"markdown dispatch ignores comment-wrapped block", "proj/note.md", htmlBody, ""},
-		{"html dispatch ignores bare markdown block", "proj/note.html", mdBody, ""},
+		{"html dispatch tolerates bare markdown block", "proj/note.html", mdBody, "title: Hi"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

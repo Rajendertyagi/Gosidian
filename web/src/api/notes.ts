@@ -5,6 +5,17 @@ export interface NoteSummary {
   title: string
 }
 
+// MediaRef is the resolved image payload of a media note (ADR-013), populated
+// by the backend when the media_notes feature is on and the note declares
+// `type: image`. `broken` is true when the `media:` pointer doesn't resolve.
+export interface MediaRef {
+  path: string
+  url: string
+  mime?: string
+  size?: number
+  broken?: boolean
+}
+
 export interface Note {
   path: string
   title: string
@@ -12,6 +23,8 @@ export interface Note {
   etag: string
   size: number
   mod_time: string
+  kind?: 'image'
+  media?: MediaRef
 }
 
 export interface ListResponse {
@@ -28,8 +41,12 @@ export async function listNotes(
   return data
 }
 
-export async function getNote(path: string): Promise<Note> {
-  const { data } = await client.get<Note>(`/notes/${encodeURIComponent(path)}`)
+export async function getNote(path: string, opts?: { inline?: boolean }): Promise<Note> {
+  // inline=1 returns the content with image references embedded as data: URIs
+  // (self-contained download); the stored note keeps the lightweight reference.
+  const { data } = await client.get<Note>(`/notes/${encodeURIComponent(path)}`, {
+    params: opts?.inline ? { inline: 1 } : undefined,
+  })
   return data
 }
 

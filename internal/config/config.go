@@ -113,8 +113,9 @@ type WebauthConfig struct {
 
 // VaultConfig tunes the vault read cache.
 type VaultConfig struct {
-	CacheSize int  `toml:"cache_size"` // LRU entries; 0 disables; default 128
-	HTMLNotes bool `toml:"html_notes"` // treat single-file .html as first-class notes; default false (ADR-011)
+	CacheSize  int  `toml:"cache_size"`  // LRU entries; 0 disables; default 128
+	HTMLNotes  bool `toml:"html_notes"`  // treat single-file .html as first-class notes; default false (ADR-011)
+	MediaNotes bool `toml:"media_notes"` // resolve image media notes (type: image + media: pointer); default false (ADR-013)
 }
 
 // I18nConfig chooses the default UI language and the list of enabled ones.
@@ -163,6 +164,7 @@ type MCPConfig struct {
 	WritePerMinute     int      `toml:"write_per_minute"`     // default 60
 	MaxNoteBytes       int64    `toml:"max_note_bytes"`       // default 1 MiB
 	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
+	BridgeDir          string   `toml:"bridge_dir"`           // staging dir for bridge_filename uploads (auto-allowed root; IMP-059)
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -279,6 +281,9 @@ func (c *Config) ApplyEnv() error {
 		}
 		c.MCP.AllowedUploadRoots = roots
 	}
+	if v := os.Getenv("GOSIDIAN_MCP_BRIDGE_DIR"); v != "" {
+		c.MCP.BridgeDir = strings.TrimSpace(v)
+	}
 	if v := os.Getenv("GOSIDIAN_TRASH_ENABLED"); v != "" {
 		c.Trash.Enabled = envBool(v)
 	}
@@ -337,6 +342,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_VAULT_HTML_NOTES"); v != "" {
 		c.Vault.HTMLNotes = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_VAULT_MEDIA_NOTES"); v != "" {
+		c.Vault.MediaNotes = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v

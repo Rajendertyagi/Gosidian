@@ -15,11 +15,13 @@
  */
 import { computed, defineAsyncComponent, inject, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
+import { Printer, Download, Copy, Check, GitBranch } from 'lucide-vue-next'
 import { getNote, updateNote, deleteNote, type Note } from '@/api/notes'
 import { renderPreview } from '@/api/preview'
 import { onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
+import MediaPreview from '@/components/domain/MediaPreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey } from '@/composables/usePlanciaSync'
 import { useAuthStore } from '@/stores/auth'
@@ -64,6 +66,10 @@ const path = computed(() => props.path)
 // HTML notes (.html) render through the sandboxed iframe (HTMLPreview) instead
 // of the markdown → /api/preview → MarkdownPreview pipeline.
 const isHtml = computed(() => path.value.toLowerCase().endsWith('.html'))
+// Image media notes (ADR-013) are plain .md; the backend tags them with
+// kind='image' + a resolved media ref when the media_notes feature is on. We
+// render the image + caption instead of the bare markdown.
+const isMedia = computed(() => note.value?.kind === 'image')
 const project = computed(() => {
   const parts = path.value.split('/')
   return parts.length > 1 ? parts[0] : undefined
@@ -241,11 +247,20 @@ function printNote() {
 // Download the note's original source file (the raw .md / .html as stored in
 // the vault) as-is. Purely client-side: the saved content is already in
 // memory, so we wrap it in a Blob and synthesise an <a download>.
-function downloadOriginal() {
+async function downloadOriginal() {
   if (!note.value) return
   const filename = note.value.path.split('/').pop() || note.value.title || 'note'
   const mime = filename.toLowerCase().endsWith('.html') ? 'text/html' : 'text/markdown'
-  const blob = new Blob([note.value.content], { type: `${mime};charset=utf-8` })
+  // Download a SELF-CONTAINED copy: image references inlined as data: URIs
+  // (server ?inline). The stored note keeps the lightweight reference for MCP
+  // reads/editing. Falls back to the in-memory content if the fetch fails.
+  let content = note.value.content
+  try {
+    content = (await getNote(note.value.path, { inline: true })).content
+  } catch {
+    /* keep the raw content already loaded */
+  }
+  const blob = new Blob([content], { type: `${mime};charset=utf-8` })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
   a.href = url
@@ -342,34 +357,55 @@ watch(path, load)
       </template>
 
       <button
-        v-if="note && mode === 'view' && !isHtml"
+        v-if="note && mode === 'view' && !isHtml && !isMedia"
         type="button"
-        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
         title="Print / Save as PDF"
+        aria-label="Print / Save as PDF"
         @click="printNote"
-      >Print</button>
+      >
+        <Printer class="h-3.5 w-3.5" />
+      </button>
 
       <button
         type="button"
-        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
         :disabled="!note"
         title="Download original file"
+        aria-label="Download original file"
         @click="downloadOriginal"
-      >Download</button>
+      >
+        <Download class="h-3.5 w-3.5" />
+      </button>
 
       <button
         type="button"
-        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text disabled:opacity-50"
+        :class="{ 'text-success': copied }"
         :disabled="!note"
-        title="Copy note source"
+        :title="copied ? 'Copied!' : 'Copy note source'"
+        :aria-label="copied ? 'Copied!' : 'Copy note source'"
         @click="copySource"
-      >{{ copied ? 'Copied!' : 'Copy' }}</button>
+      >
+        <Check
+          v-if="copied"
+          class="h-3.5 w-3.5"
+        />
+        <Copy
+          v-else
+          class="h-3.5 w-3.5"
+        />
+      </button>
 
       <button
         type="button"
-        class="text-xs px-2 py-1 rounded text-text-muted hover:text-text hover:bg-surface-hover"
+        class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
+        title="History"
+        aria-label="History"
         @click="openHistory"
-      >History</button>
+      >
+        <GitBranch class="h-3.5 w-3.5" />
+      </button>
     </header>
 
     <div
@@ -402,6 +438,13 @@ watch(path, load)
         </p>
         <HTMLPreview :html="note.content" />
       </template>
+      <!-- Image media note (ADR-013): image + rendered caption -->
+      <MediaPreview
+        v-else-if="isMedia && note && note.media"
+        :media="note.media"
+        :caption-html="previewHTML"
+        :note-path="note.path"
+      />
       <!-- Markdown note: prose-rendered preview -->
       <article v-else ref="articleEl" class="p-6 max-w-3xl mx-auto">
         <p v-if="note" class="text-xs text-text-muted font-mono mb-6">

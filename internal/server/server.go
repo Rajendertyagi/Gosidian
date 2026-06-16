@@ -7,6 +7,7 @@ package server
 
 import (
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,6 +123,21 @@ func (s *Server) handleVaultFile(w http.ResponseWriter, r *http.Request) {
 	abs, err := s.vault.Abs(clean)
 	if err != nil {
 		http.NotFound(w, r)
+		return
+	}
+	// ?inline returns the file as an RFC 2397 data: URI (text/plain) so the
+	// sandboxed HTML-note iframe (CSP img-src data:) can render it. The bytes
+	// are content-addressed and immutable, so the data: URI is permanently
+	// cacheable — the browser keeps it and never regenerates the base64.
+	if r.URL.Query().Has("inline") {
+		data, rerr := os.ReadFile(abs)
+		if rerr != nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		_, _ = w.Write([]byte(attach.DataURI(data, filepath.Ext(clean))))
 		return
 	}
 	ext := strings.ToLower(filepath.Ext(clean))

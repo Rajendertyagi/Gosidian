@@ -28,6 +28,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_WRITE_PER_MINUTE` | `mcp.write_per_minute` | `60` |
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
+| `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
 | `GOSIDIAN_THEME_PRESET` | `theme.preset` | `midnight-luxury` |
@@ -50,6 +51,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_LDAP_USER_FILTER` | `ldap.user_filter` | `(uid=%s)` (AD: `(sAMAccountName=%s)`) |
 | `GOSIDIAN_VAULT_CACHE_SIZE` | `vault.cache_size` | `128` (`0` disables) |
 | `GOSIDIAN_VAULT_HTML_NOTES` | `vault.html_notes` | `false` (treat single-file `.html` as first-class notes; ADR-011, sandboxed iframe) |
+| `GOSIDIAN_VAULT_MEDIA_NOTES` | `vault.media_notes` | `false` (resolve image media notes: `.md` with `type: image` + `media:`; ADR-013) |
 | `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` |
 | `GOSIDIAN_SELF_IMPROVE_ENABLED` | `self_improve.enabled` | `false` |
 | `GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT` | `self_improve.target_project` | `insights` |
