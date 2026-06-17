@@ -22,6 +22,12 @@ const (
 	ctxKeyTraceID
 )
 
+// anonymousUserID is the synthetic ID of the open-mode guest principal
+// injected by requireAuth when GOSIDIAN_OPEN_MODE=readonly and no token is
+// present. It is not a valid derived account ID, so it never collides with a
+// real user. See BUG-018.
+const anonymousUserID = "anonymous"
+
 // RequestUser is the minimal projection of a webauth.User attached to
 // the request context after auth middleware succeeds. Handlers consume
 // this through UserFromContext. Locale is resolved from the SPA's
@@ -31,6 +37,12 @@ type RequestUser struct {
 	ID       string
 	Username string
 	Role     webauth.Role
+}
+
+// isAnonymous reports whether this is the synthetic open-mode guest (no real
+// account). Per-account routes (e.g. TOTP enrolment) must reject it.
+func (u *RequestUser) isAnonymous() bool {
+	return u != nil && u.ID == anonymousUserID
 }
 
 // UserFromContext returns the authenticated user, or nil if the
@@ -56,6 +68,10 @@ type AuthDeps struct {
 	MCPTokens *auth.Store               // long-lived MCP credentials, surfaced via /admin/tokens
 	LDAP      webauth.LDAPAuthenticator // optional; nil = LDAP disabled
 	Logger    *slog.Logger
+	// OpenMode, when true, lets token-less requests through as an anonymous
+	// guest (read-only, public projects only) instead of a 401. Off by default;
+	// set from GOSIDIAN_OPEN_MODE=readonly. See BUG-018.
+	OpenMode bool
 }
 
 // requireAuth enforces a valid Bearer token. On failure it writes a
@@ -65,6 +81,15 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractBearer(r)
 		if token == "" {
+			if d.OpenMode {
+				// Open-mode (read-only): a token-less request runs as an anonymous
+				// guest. The existing RBAC does the rest — guests see only public
+				// projects (CanAccessProject) and denyGuestWrite/requireOwner
+				// reject every mutation and admin route. See BUG-018.
+				ru := &RequestUser{ID: anonymousUserID, Username: anonymousUserID, Role: webauth.RoleGuest}
+				next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKeyUser, ru)))
+				return
+			}
 			WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "missing or malformed Authorization header")
 			return
 		}

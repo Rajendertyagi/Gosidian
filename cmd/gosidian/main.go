@@ -220,6 +220,9 @@ func main() {
 	}
 	webauthStore.SetTOTPMode(totpMode)
 	log.Printf("web auth: TOTP mode = %s", webauthStore.TOTPMode())
+	if cfg.Webauth.OpenMode == "readonly" {
+		log.Printf("web auth: OPEN MODE (read-only) — token-less requests run as anonymous guest, public projects only. Anyone who can reach this server can read public projects.")
+	}
 
 	// v2.2: optional LDAP auth. When enabled, unknown users that authenticate
 	// against the directory are auto-provisioned as guests (webauth.Authenticate).
@@ -400,6 +403,7 @@ func main() {
 	apiv1.Version = version
 	apiv1.DefaultLang = cfg.I18n.DefaultLang
 	apiv1.EnabledLangs = cfg.I18n.EnabledLangs
+	apiv1.OpenMode = cfg.Webauth.OpenMode == "readonly"
 	apiv1.SelfImproveEnabled = cfg.SelfImprove.Enabled
 	apiv1.SelfImproveProject = cfg.SelfImprove.TargetProject
 
@@ -428,6 +432,7 @@ func main() {
 			MCPTokens: tokenStore,
 			LDAP:      ldapAuth,
 			Logger:    slog.Default(),
+			OpenMode:  cfg.Webauth.OpenMode == "readonly",
 		},
 		Audit:      auditLog,
 		Vault:      v,

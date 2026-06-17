@@ -116,7 +116,11 @@ func userDisable(args []string) {
 	if err := store.Disable(); err != nil {
 		log.Fatalf("disable: %v", err)
 	}
-	fmt.Println("Auth disabled. Web UI is now open.")
+	fmt.Println("Auth disabled (no users provisioned).")
+	fmt.Println("With the default config the web UI is now unusable — every data route")
+	fmt.Println("requires a token. Run `gosidian user setup` to provision an owner, or set")
+	fmt.Println("GOSIDIAN_OPEN_MODE=readonly to serve an anonymous read-only view of public")
+	fmt.Println("projects.")
 }
 
 func userStatus(args []string) {

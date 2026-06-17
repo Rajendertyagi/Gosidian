@@ -28,6 +28,10 @@ interface AuthState {
   /** Set when login reports the effective policy mandates TOTP but no secret
    *  is enrolled yet — the AppShell forces the enrolment interstitial. */
   enrollmentRequired: boolean
+  /** True when the server runs read-only anonymous access (open mode) and we
+   *  have no token: the shell renders read-only as a guest. Derived from
+   *  /version at boot; deliberately NOT persisted. See BUG-018. */
+  openMode: boolean
 }
 
 interface LoginResponse {
@@ -70,10 +74,13 @@ export const useAuthStore = defineStore('auth', {
     hardExpiry: '',
     user: null,
     enrollmentRequired: false,
+    openMode: false,
   }),
 
   getters: {
     isAuthenticated: (s) => Boolean(s.token && s.user),
+    /** Token-less read-only guest session admitted by the server's open mode. */
+    isAnonymous: (s) => s.openMode && !s.token && Boolean(s.user),
     isOwner: (s) => s.user?.role === 'owner',
     isGuest: (s) => s.user?.role === 'guest',
     /** owner or member — may create/edit/delete. Guests are read-only. */
@@ -91,6 +98,7 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = data.hard_expiry
       this.user = data.user
       this.enrollmentRequired = Boolean(data.totp_enrollment_required)
+      this.openMode = false // a real session supersedes any anonymous open-mode state
     },
 
     clearEnrollment() {
@@ -124,6 +132,20 @@ export const useAuthStore = defineStore('auth', {
       this.hardExpiry = ''
       this.user = null
       this.enrollmentRequired = false
+      this.openMode = false
+    },
+
+    /** Establish a token-less, read-only guest session for servers running
+     *  GOSIDIAN_OPEN_MODE=readonly. Called at boot from /version. The guest
+     *  role makes canWrite false and the RBAC limits reads to public projects;
+     *  the server independently injects the same guest principal (BUG-018). */
+    setAnonymous() {
+      this.token = ''
+      this.expiresAt = ''
+      this.hardExpiry = ''
+      this.user = { id: 'anonymous', username: 'guest', role: 'guest' }
+      this.enrollmentRequired = false
+      this.openMode = true
     },
   },
 

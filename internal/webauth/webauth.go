@@ -296,7 +296,11 @@ func deriveUserID(username string, ts time.Time) string {
 }
 
 // Enabled reports whether any user has been provisioned. When false, the
-// web UI middleware treats all routes as open.
+// REST API still requires a Bearer token on every data route — the v2 SPA
+// has no implicit "open when no users" mode (that was the HTMX-era v1
+// behaviour). With no users the web UI is unusable until `gosidian user
+// setup` provisions an owner, unless GOSIDIAN_OPEN_MODE=readonly is set to
+// admit anonymous read-only access to public projects. See BUG-018.
 //
 // Performs a lazy mtime check so an external `gosidian user setup` is
 // visible without a restart. See reloadIfStale.

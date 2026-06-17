@@ -72,7 +72,7 @@ router.beforeEach((to, _from) => {
   const auth = useAuthStore()
   const requires = to.matched.some((r) => r.meta.requiresAuth !== false)
 
-  if (requires && !auth.isAuthenticated) {
+  if (requires && !auth.isAuthenticated && !auth.isAnonymous) {
     return {
       name: 'login',
       query: to.fullPath !== '/' ? { next: to.fullPath } : {},

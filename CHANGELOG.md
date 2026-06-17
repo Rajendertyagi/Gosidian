@@ -8,6 +8,30 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.11.0] — 2026-06-17 — "Read-only anonymous access (open mode)"
+
+MINOR release. An opt-in read-only mode lets you serve a gosidian instance to
+anonymous visitors — a public showcase or read-only wiki — without giving up
+authentication for editing. Off by default; existing deployments are unchanged.
+
+### Added
+- **`GOSIDIAN_OPEN_MODE=readonly`.** When set, token-less web requests are
+  served as an anonymous guest instead of being rejected: read-only, and limited
+  to projects you have marked **public** (private projects stay hidden). The
+  existing role model does the enforcing — guests cannot write, admin routes stay
+  owner-only, and the MCP API is unaffected (still token-only). The web UI
+  detects the mode and renders the read-only guest view with a **Login** button
+  (so an owner can still sign in and edit) instead of forcing the login page.
+  Live updates (SSE) stay token-only, so anonymous sessions never receive events.
+  Anyone who can reach the server can read public projects, so enable it
+  deliberately.
+
+### Fixed
+- The CLI (`gosidian user disable`) and the internal docs no longer claim a web
+  UI "open mode" that the v2 SPA did not actually implement. With no users and
+  the default config the UI requires `gosidian user setup` to provision an owner
+  (or the new `GOSIDIAN_OPEN_MODE=readonly`).
+
 ## [2.10.0] — 2026-06-17 — "Try it in Codespaces + interactive HTML notes"
 
 MINOR release. A one-click GitHub Codespaces demo so anyone can try gosidian in

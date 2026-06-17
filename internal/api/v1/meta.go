@@ -21,6 +21,10 @@ type versionResponse struct {
 	Commit       string   `json:"commit,omitempty"`
 	DefaultLang  string   `json:"default_lang,omitempty"`
 	EnabledLangs []string `json:"enabled_langs,omitempty"`
+	// OpenMode is true when the server runs read-only anonymous access
+	// (GOSIDIAN_OPEN_MODE=readonly). The SPA reads it at boot to allow a
+	// token-less guest session instead of forcing /login. See BUG-018.
+	OpenMode bool `json:"open_mode,omitempty"`
 }
 
 // Version is set by cmd/gosidian/main.go before constructing the
@@ -37,6 +41,9 @@ var Version = "dev"
 var (
 	DefaultLang  = "en"
 	EnabledLangs = []string{"en"}
+	// OpenMode mirrors AuthDeps.OpenMode for the public /version endpoint, set
+	// by cmd/gosidian/main.go. Public so the SPA can read it before /login.
+	OpenMode = false
 )
 
 func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
@@ -49,6 +56,7 @@ func (r *Router) handleVersion(w http.ResponseWriter, req *http.Request) {
 		API:          "v1",
 		DefaultLang:  DefaultLang,
 		EnabledLangs: EnabledLangs,
+		OpenMode:     OpenMode,
 	})
 }
 

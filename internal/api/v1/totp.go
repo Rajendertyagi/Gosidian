@@ -43,6 +43,10 @@ func (r *Router) handleTOTPEnroll(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
 		return
 	}
+	if user.isAnonymous() {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "anonymous session has no account to manage")
+		return
+	}
 	secret, uri, err := r.deps.Auth.WebAuth.GenerateTOTPSecret(user.Username, "gosidian")
 	if err != nil {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "totp: "+err.Error())
@@ -66,6 +70,10 @@ func (r *Router) handleTOTPConfirm(w http.ResponseWriter, req *http.Request) {
 	user := UserFromContext(req.Context())
 	if user == nil || r.deps.Auth == nil || r.deps.Auth.WebAuth == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if user.isAnonymous() {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "anonymous session has no account to manage")
 		return
 	}
 	var body totpConfirmRequest
@@ -101,6 +109,10 @@ func (r *Router) handleTOTPDisenroll(w http.ResponseWriter, req *http.Request) {
 	user := UserFromContext(req.Context())
 	if user == nil || r.deps.Auth == nil || r.deps.Auth.WebAuth == nil {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "no user in context")
+		return
+	}
+	if user.isAnonymous() {
+		WriteError(w, http.StatusForbidden, CodeAuthForbidden, "anonymous session has no account to manage")
 		return
 	}
 	// Re-load the full account: RequestUser carries only id/username/role, but

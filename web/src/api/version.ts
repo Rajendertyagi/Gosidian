@@ -7,6 +7,10 @@ export interface VersionInfo {
   commit?: string
   default_lang?: string
   enabled_langs?: string[]
+  /** True when the server runs read-only anonymous access
+   *  (GOSIDIAN_OPEN_MODE=readonly): the SPA may show a token-less guest
+   *  session instead of forcing /login. See BUG-018. */
+  open_mode?: boolean
 }
 
 /**

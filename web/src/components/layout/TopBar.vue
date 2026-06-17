@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useWindowsStore } from '@/stores/windows'
 import { planciaKey } from '@/composables/usePlanciaSync'
-import { Search, LogOut } from 'lucide-vue-next'
+import { Search, LogOut, LogIn } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 
 const { t } = useI18n()
@@ -52,6 +52,16 @@ async function handleLogout() {
         title="Read-only guest — public projects only"
       >guest</span>
       <button
+        v-if="auth.isAnonymous"
+        type="button"
+        class="px-2 py-1 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"
+        @click="router.push('/login')"
+      >
+        <LogIn class="w-3 h-3" />
+        {{ t('common.login') }}
+      </button>
+      <button
+        v-else
         type="button"
         class="px-2 py-1 rounded text-xs hover:bg-surface-hover inline-flex items-center gap-1"
         @click="handleLogout"

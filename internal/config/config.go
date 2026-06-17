@@ -109,6 +109,13 @@ type WebauthConfig struct {
 	// who have a secret), or "required" (every non-exempt user must enrol).
 	// Per-user overrides live on the webauth account (TOTPPolicy).
 	TOTPMode string `toml:"totp_mode"`
+	// OpenMode controls anonymous (token-less) web access. "off" (default)
+	// requires a Bearer token for every data route. "readonly" maps token-less
+	// requests onto the guest role: read-only, public projects only (the
+	// existing RBAC governs the rest). Opt-in and read-only by design — anyone
+	// who can reach the server can read public projects, so enable it knowingly
+	// (e.g. a public showcase). Does not affect MCP (token-only).
+	OpenMode string `toml:"open_mode"`
 }
 
 // VaultConfig tunes the vault read cache.
@@ -332,6 +339,14 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_TOTP_MODE"); v != "" {
 		c.Webauth.TOTPMode = v
+	}
+	if v := os.Getenv("GOSIDIAN_OPEN_MODE"); v != "" {
+		switch v {
+		case "off", "readonly":
+			c.Webauth.OpenMode = v
+		default:
+			return fmt.Errorf("GOSIDIAN_OPEN_MODE: %q not supported (use \"off\" or \"readonly\")", v)
+		}
 	}
 	if v := os.Getenv("GOSIDIAN_VAULT_CACHE_SIZE"); v != "" {
 		n, err := strconv.Atoi(v)
