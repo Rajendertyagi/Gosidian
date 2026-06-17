@@ -8,6 +8,40 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.10.0] — 2026-06-17 — "Try it in Codespaces + interactive HTML notes"
+
+MINOR release. A one-click GitHub Codespaces demo so anyone can try gosidian in
+the browser with zero setup, plus a fix that finally lets HTML notes run their
+own inline JavaScript. Additive — existing deployments need no migration.
+
+### Added
+- **One-click demo in GitHub Codespaces.** An "Open in GitHub Codespaces" badge
+  in the README launches a private, throwaway instance that builds gosidian from
+  source, seeds a small English demo vault (backlinks, graph view, full-text
+  search, an `.html` note and a media note), and opens the web UI on port 8080.
+  A `demo` / `gosidian-demo` account is provisioned automatically so the UI is
+  usable immediately. Lives under `.devcontainer/` and is excluded from the
+  Docker image build context.
+
+### Fixed
+- **HTML-note inline scripts now run under the strict CSP.** HTML notes render
+  in a sandboxed `srcdoc` iframe, which inherits the SPA shell's
+  `script-src 'self'` — that intersected away the iframe's own `'unsafe-inline'`,
+  so a note's inline `<script>` was silently blocked and the "JavaScript runs"
+  promise of HTML notes did not hold. The shell now emits a per-request CSP
+  nonce (`script-src 'self' 'nonce-…'`) and exposes it via a
+  `<meta name="csp-nonce">` tag; the SPA stamps that nonce onto the note's
+  `<script>` tags so they execute. Notes still run in an opaque origin
+  (`sandbox="allow-scripts"`, no `allow-same-origin`) with the iframe's own
+  `default-src 'none'` blocking the network, so the shell's execution surface is
+  unchanged — interactivity is restored without weakening isolation.
+
+### Security
+- The SPA shell CSP is now per-request: a fresh 128-bit base64url nonce on every
+  `index.html` response (already `Cache-Control: no-store`), generated from the
+  system CSPRNG and fail-closed on error. The nonce is consumed only by the
+  sandboxed HTML-note iframe; the shell itself ships no inline scripts.
+
 ## [2.9.1] — 2026-06-16 — "i18n fix for the v2.9.0 UI"
 
 PATCH release. The UI components added in v2.9.0 shipped with hardcoded strings

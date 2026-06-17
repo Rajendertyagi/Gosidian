@@ -9,6 +9,16 @@ reads natively.
 
 ![gosidian in action](docs/demo.gif)
 
+## Try it in your browser
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/daniele-chiappa/gosidian)
+
+Launch a free, throwaway gosidian in
+[GitHub Codespaces](https://github.com/features/codespaces) — no install,
+running on your own Codespaces quota. It builds from source, seeds a small
+demo vault, and opens the web UI. Log in with **`demo`** /
+**`gosidian-demo`**.
+
 ## Quick start
 
 ```bash

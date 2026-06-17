@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strings"
 	"testing"
@@ -56,6 +57,44 @@ func TestCSPHeader_StrictScriptSrc(t *testing.T) {
 	if strings.Contains(CSPHeader, "script-src 'unsafe-inline'") ||
 		strings.Contains(CSPHeader, "script-src 'unsafe-eval'") {
 		t.Errorf("CSPHeader script-src must not allow unsafe-*: %q", CSPHeader)
+	}
+}
+
+func TestCSPHeaderWithNonce(t *testing.T) {
+	// BUG-019: the SPA shell folds a per-request nonce into script-src so the
+	// sandboxed HTML-note iframe (which inherits this policy) can run the
+	// note's inline scripts once the SPA stamps the matching nonce.
+	h := cspHeader("AbC-123_x")
+	if !strings.Contains(h, "script-src 'self' 'nonce-AbC-123_x'") {
+		t.Errorf("nonce not folded into script-src: %q", h)
+	}
+	for _, want := range []string{"default-src 'self'", "frame-src 'self'", "object-src 'none'"} {
+		if !strings.Contains(h, want) {
+			t.Errorf("directive %q dropped from nonce'd CSP: %q", want, h)
+		}
+	}
+	// Empty nonce is identical to the canonical constant — no stray 'nonce-'.
+	if cspHeader("") != CSPHeader {
+		t.Errorf("empty nonce should equal CSPHeader")
+	}
+	if strings.Contains(CSPHeader, "nonce-") {
+		t.Errorf("canonical CSPHeader must not contain a nonce: %q", CSPHeader)
+	}
+}
+
+func TestNewCSPNonce(t *testing.T) {
+	a, err := NewCSPNonce()
+	if err != nil {
+		t.Fatalf("NewCSPNonce: %v", err)
+	}
+	if a == "" {
+		t.Fatal("empty nonce")
+	}
+	if _, derr := base64.RawURLEncoding.DecodeString(a); derr != nil {
+		t.Errorf("nonce not valid base64: %q (%v)", a, derr)
+	}
+	if b, _ := NewCSPNonce(); a == b {
+		t.Errorf("nonces must differ across calls: %q == %q", a, b)
 	}
 }
 

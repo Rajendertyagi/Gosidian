@@ -1,0 +1,75 @@
+<!--
+---
+title: Interactive HTML note
+tags: [type:doc, topic:webui]
+---
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 0; padding: 24px; background: #0f1117; color: #e6e8ef; }
+  .card { max-width: 660px; margin: 0 auto; background: #171a23; border: 1px solid #2a2f3a; border-radius: 12px; padding: 24px; }
+  h1 { margin-top: 0; color: #6ea8fe; font-size: 22px; }
+  p { line-height: 1.55; }
+  code { background: #0f1117; padding: 1px 5px; border-radius: 4px; }
+  button { background: #6ea8fe; color: #0f1117; border: 0; border-radius: 8px; padding: 8px 14px; font-weight: 600; cursor: pointer; }
+  button.alt { background: #2a2f3a; color: #e6e8ef; }
+  .stage { display: flex; gap: 10px; margin: 18px 0; }
+  .box { flex: 1; text-align: center; padding: 12px 8px; border-radius: 8px; border: 1px solid #2a2f3a; opacity: .35; transition: opacity .25s, border-color .25s; }
+  .box.on { opacity: 1; border-color: #a6e3a1; }
+  .muted { color: #9aa0ac; font-size: 13px; }
+  .clock { font-variant-numeric: tabular-nums; color: #9fe0a0; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>HTML notes are first-class</h1>
+    <p>
+      This is a <code>.html</code> note, rendered live in a sandboxed
+      iframe. Its frontmatter, tags, and <code>[[wikilinks]]</code> are
+      indexed exactly like a Markdown note — it links back to
+      [[demo/README]], so it shows up in that note's backlinks and in the
+      graph. JavaScript runs, but a strict CSP blocks any network access.
+    </p>
+
+    <p>Click through a note's life cycle:</p>
+    <div class="stage">
+      <div class="box" id="b0"><strong>Write</strong><div class="muted">.md / .html</div></div>
+      <div class="box" id="b1"><strong>Index</strong><div class="muted">SQLite FTS5</div></div>
+      <div class="box" id="b2"><strong>Surface</strong><div class="muted">Web UI + MCP</div></div>
+    </div>
+    <p>
+      <button id="next">Advance</button>
+      <button id="reset" class="alt">Reset</button>
+      &middot; step <span id="step">0</span> / 3
+    </p>
+    <p class="muted">Local time in this sandbox: <span class="clock" id="clock">--:--:--</span></p>
+  </div>
+
+  <script>
+    const boxes = ['b0', 'b1', 'b2'].map((id) => document.getElementById(id));
+    let step = 0;
+    const render = () => {
+      boxes.forEach((el, i) => el.classList.toggle('on', i < step));
+      document.getElementById('step').textContent = String(step);
+    };
+    document.getElementById('next').addEventListener('click', () => {
+      step = Math.min(step + 1, boxes.length); render();
+    });
+    document.getElementById('reset').addEventListener('click', () => {
+      step = 0; render();
+    });
+    render();
+
+    const pad = (n) => String(n).padStart(2, '0');
+    const tick = () => {
+      const d = new Date();
+      document.getElementById('clock').textContent =
+        pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    };
+    tick(); setInterval(tick, 1000);
+  </script>
+</body>
+</html>

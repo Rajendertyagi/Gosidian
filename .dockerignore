@@ -24,6 +24,10 @@
 # Claude / plan artifacts
 .claude
 
+# Codespaces demo (devcontainer config + demo vault) — not part of the
+# image build context.
+.devcontainer
+
 # Deployment extras (not needed inside the build context when the
 # Dockerfile is built from repo root)
 deploy

@@ -96,8 +96,23 @@ function stripFrontmatter(html: string): string {
     .replace(/^\s*---\r?\n[\s\S]*?\r?\n---\r?\n?/, '')
 }
 
+// The shell is served with a per-request CSP nonce (script-src 'self'
+// 'nonce-X'). An about:srcdoc iframe INHERITS that policy, which intersects
+// away the injected 'unsafe-inline' above — so a note's inline <script> only
+// runs if it carries the nonce. Read it from the shell <meta> and stamp it
+// onto every <script> tag (BUG-019). Absent (e.g. `npm run dev`), leave the
+// markup untouched and the dev shell's looser CSP applies.
+function cspNonce(): string {
+  return document.querySelector('meta[name="csp-nonce"]')?.getAttribute('content') ?? ''
+}
+
+function stampScriptNonce(html: string, nonce: string): string {
+  if (!nonce) return html
+  return html.replace(/<script(?=[\s>])/gi, `<script nonce="${nonce}"`)
+}
+
 function buildSrcdoc(rawHtml: string): string {
-  const html = stripFrontmatter(rawHtml)
+  const html = stampScriptNonce(stripFrontmatter(rawHtml), cspNonce())
   // Inject the CSP meta as early as possible so it governs everything that
   // follows. Place it inside an existing <head>, else after <html>, else wrap
   // the fragment in a minimal document.

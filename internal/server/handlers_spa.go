@@ -2,6 +2,7 @@ package server
 
 import (
 	"io/fs"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -39,10 +40,27 @@ func (s *Server) handleSPA(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "SPA build missing — run `npm run build` in web/", http.StatusInternalServerError)
 		return
 	}
-	apiv1.SetSPAShellHeaders(w)
+	// Per-request CSP nonce. The shell CSP carries it in script-src and the
+	// SPA reads it from the injected <meta> to stamp HTML-note <script> tags,
+	// so they pass the policy the sandboxed srcdoc iframe inherits (BUG-019).
+	nonce, err := apiv1.NewCSPNonce()
+	if err != nil {
+		http.Error(w, "csp nonce: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	apiv1.SetSPAShellHeaders(w, nonce)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store") // shell rotates per release
-	_, _ = w.Write(data)
+	body := string(data)
+	meta := `<meta name="csp-nonce" content="` + nonce + `">`
+	if strings.Contains(body, "</head>") {
+		body = strings.Replace(body, "</head>", meta+"</head>", 1)
+	} else {
+		// Fail loud rather than silently shipping a shell whose CSP carries a
+		// nonce the SPA can't read — HTML-note scripts would break invisibly.
+		slog.Warn("SPA shell: </head> not found; CSP nonce <meta> not injected, HTML-note scripts will be blocked")
+	}
+	_, _ = w.Write([]byte(body))
 }
 
 // handleSpaStatic serves /static/dist/* directly from the embedded

@@ -1,37 +1,72 @@
 package v1
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"net/http"
 	"strings"
 )
 
-// CSPHeader is the Content-Security-Policy header applied to the SPA
-// shell (index.html). Strict script-src 'self' (no inline, no eval),
-// with 'unsafe-inline' on style-src because Tailwind utility runtime
-// and Reka UI primitives inject scoped <style> blocks. img/data and
-// blob support image previews and DOMPurify-sanitized blob URLs.
-// connect-src 'self' constrains XHR/fetch + EventSource to
-// same-origin, closing the cross-origin exfil route an XSS would
-// normally use even before our defense-in-depth DOMPurify
-// sanitisation.
-var CSPHeader = strings.Join([]string{
-	"default-src 'self'",
-	"script-src 'self'",
-	"style-src 'self' 'unsafe-inline'",
-	"img-src 'self' data: blob:",
-	"font-src 'self'",
-	"connect-src 'self'",
-	"worker-src 'self' blob:",
-	// frame-src 'self' admits the sandboxed srcdoc iframe that renders HTML
-	// notes (ADR-011). The iframe runs with sandbox="allow-scripts" WITHOUT
-	// allow-same-origin (opaque origin) plus its own injected restrictive CSP,
-	// so this does not widen the SPA's own execution surface.
-	"frame-src 'self'",
-	"frame-ancestors 'none'",
-	"form-action 'self'",
-	"base-uri 'self'",
-	"object-src 'none'",
-}, "; ")
+// cspHeader builds the Content-Security-Policy applied to the SPA shell
+// (index.html). Strict script-src 'self' (no inline, no eval), with
+// 'unsafe-inline' on style-src because the Tailwind utility runtime and
+// Reka UI primitives inject scoped <style> blocks. img/data and blob
+// support image previews and DOMPurify-sanitized blob URLs. connect-src
+// 'self' constrains XHR/fetch + EventSource to same-origin, closing the
+// cross-origin exfil route an XSS would normally use even before our
+// defense-in-depth DOMPurify sanitisation.
+//
+// When nonce is non-empty it is folded into script-src as 'nonce-<nonce>'.
+// This exists for the sandboxed srcdoc iframe that renders HTML notes
+// (ADR-011): an about:srcdoc document INHERITS the embedder's CSP and the
+// policies combine by intersection, so the iframe's own injected
+// 'unsafe-inline' script-src is cancelled by this 'self'. The SPA stamps
+// the per-request nonce onto the note's <script> tags so they satisfy the
+// inherited policy (BUG-019). The note still executes in an opaque origin
+// (sandbox="allow-scripts" WITHOUT allow-same-origin) with the iframe's
+// own default-src 'none' blocking the network, so the nonce does not widen
+// the shell's own execution surface — it only un-breaks note interactivity.
+func cspHeader(nonce string) string {
+	scriptSrc := "script-src 'self'"
+	if nonce != "" {
+		scriptSrc += " 'nonce-" + nonce + "'"
+	}
+	return strings.Join([]string{
+		"default-src 'self'",
+		scriptSrc,
+		"style-src 'self' 'unsafe-inline'",
+		"img-src 'self' data: blob:",
+		"font-src 'self'",
+		"connect-src 'self'",
+		"worker-src 'self' blob:",
+		// frame-src 'self' admits the sandboxed srcdoc iframe that renders HTML
+		// notes (ADR-011). The iframe runs with sandbox="allow-scripts" WITHOUT
+		// allow-same-origin (opaque origin) plus its own injected restrictive CSP,
+		// so this does not widen the SPA's own execution surface.
+		"frame-src 'self'",
+		"frame-ancestors 'none'",
+		"form-action 'self'",
+		"base-uri 'self'",
+		"object-src 'none'",
+	}, "; ")
+}
+
+// CSPHeader is the nonce-less SPA shell policy. Kept as the canonical
+// constant for tests and any caller that does not mint a per-request nonce.
+var CSPHeader = cspHeader("")
+
+// NewCSPNonce mints a fresh, unguessable nonce (128 bits, base64url) for a
+// single SPA shell response. Returns an error only if the system CSPRNG
+// fails, which the caller should treat as fatal for that request. Uses
+// RawURLEncoding (no '+', '/', '=') to match the other token helpers in the
+// codebase and stay trivially safe in both the CSP token and the HTML attr.
+func NewCSPNonce() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(b), nil
+}
 
 // SecurityHeaders is the set of defense-in-depth headers attached to
 // every response served by this package. Apart from CSP, they are
@@ -64,22 +99,18 @@ func applySecurityHeaders(w http.ResponseWriter) {
 	}
 }
 
-// applyCSP attaches the CSP header. Used only by the SPA shell
-// handler — applying CSP to JSON API responses adds no value and
-// confuses tooling that flags Content-Type: application/json with a
-// CSP as misconfigured.
-func applyCSP(w http.ResponseWriter) {
-	w.Header().Set("Content-Security-Policy", CSPHeader)
-}
-
-// SetSPAShellHeaders is the public entry point used by
-// internal/server/handlers_spa.go to attach both the security
-// headers and CSP to the index.html response. Lives here so the
-// header set has a single source of truth — bumps to CSP/HSTS land
-// in this package and propagate to every consumer.
-func SetSPAShellHeaders(w http.ResponseWriter) {
+// SetSPAShellHeaders attaches the defense-in-depth headers plus the
+// nonce-bearing CSP to the index.html response. The nonce MUST match the
+// one stamped into the served HTML (<meta name="csp-nonce">) so the
+// sandboxed HTML-note iframe can execute the note's inline scripts. Lives
+// here so the shell header set has a single source of truth — bumps to
+// CSP/HSTS land in this package and propagate to every consumer. Applying
+// CSP to JSON API responses adds no value and confuses tooling that flags
+// Content-Type: application/json with a CSP as misconfigured, so it stays
+// shell-only.
+func SetSPAShellHeaders(w http.ResponseWriter, nonce string) {
 	applySecurityHeaders(w)
-	applyCSP(w)
+	w.Header().Set("Content-Security-Policy", cspHeader(nonce))
 }
 
 // securityHeadersMW wraps an http.Handler so every response passes
