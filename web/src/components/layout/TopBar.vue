@@ -2,8 +2,8 @@
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { useWindowsStore } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 import { Search, LogOut, LogIn } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 

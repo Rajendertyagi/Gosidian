@@ -42,18 +42,50 @@ type Entry struct {
 	Flags
 }
 
+// Permission levels for a project membership. Stored verbatim in
+// projects.json; the authz layer maps them to access/write decisions.
+const (
+	LevelRead  = "read"
+	LevelWrite = "write"
+)
+
+// ProjectMember grants a specific user access to a (private) project at a
+// permission level. The role is still the ceiling: a guest with a "write"
+// membership stays read-only. Persisted in a separate map from Flags so Flags
+// stays a comparable struct (Set relies on `f == Flags{}`).
+type ProjectMember struct {
+	UserID string `json:"user_id"`
+	Level  string `json:"level"` // read | write
+}
+
+// Member-scope modes (global). MemberScopeAll is the legacy default: owner and
+// member see every project. MemberScopeMembers gates private projects behind
+// explicit per-project membership — members and guests then see only the
+// projects they belong to, plus public ones.
+const (
+	MemberScopeAll     = "all"
+	MemberScopeMembers = "members"
+)
+
+// ValidLevel reports whether s is an accepted membership level.
+func ValidLevel(s string) bool { return s == LevelRead || s == LevelWrite }
+
 // Store is a concurrent-safe per-project flags store backed by a JSON file.
 // Like auth.Store, it re-reads the file when its mtime changes so out-of-band
 // edits become effective without a restart.
 type Store struct {
-	path  string
-	mu    sync.RWMutex
-	data  map[string]Flags
-	mtime time.Time
+	path        string
+	mu          sync.RWMutex
+	data        map[string]Flags
+	members     map[string][]ProjectMember // project -> members (per-project ACL)
+	memberScope string                     // "" / all (legacy) | members
+	mtime       time.Time
 }
 
 type storeFile struct {
-	Projects map[string]Flags `json:"projects"`
+	Projects    map[string]Flags           `json:"projects"`
+	Members     map[string][]ProjectMember `json:"members,omitempty"`
+	MemberScope string                     `json:"member_scope,omitempty"`
 }
 
 // Open loads the store from the given file path. A missing file is not an
@@ -77,6 +109,8 @@ func (s *Store) load() error {
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			s.data = map[string]Flags{}
+			s.members = map[string][]ProjectMember{}
+			s.memberScope = ""
 			s.mtime = time.Time{}
 			return nil
 		}
@@ -91,7 +125,12 @@ func (s *Store) load() error {
 	if sf.Projects == nil {
 		sf.Projects = map[string]Flags{}
 	}
+	if sf.Members == nil {
+		sf.Members = map[string][]ProjectMember{}
+	}
 	s.data = sf.Projects
+	s.members = sf.Members
+	s.memberScope = sf.MemberScope
 	if st, err := os.Stat(s.path); err == nil {
 		s.mtime = st.ModTime()
 	}
@@ -104,8 +143,10 @@ func (s *Store) reloadIfStale() {
 	st, err := os.Stat(s.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			if !s.mtime.IsZero() || len(s.data) > 0 {
+			if !s.mtime.IsZero() || len(s.data) > 0 || len(s.members) > 0 || s.memberScope != "" {
 				s.data = map[string]Flags{}
+				s.members = map[string][]ProjectMember{}
+				s.memberScope = ""
 				s.mtime = time.Time{}
 			}
 		}
@@ -123,7 +164,7 @@ func (s *Store) save() error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(storeFile{Projects: s.data}, "", "  ")
+	data, err := json.MarshalIndent(storeFile{Projects: s.data, Members: s.members, MemberScope: s.memberScope}, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -171,10 +212,13 @@ func (s *Store) Delete(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
-	if _, ok := s.data[name]; !ok {
+	_, hadFlags := s.data[name]
+	_, hadMembers := s.members[name]
+	if !hadFlags && !hadMembers {
 		return nil
 	}
 	delete(s.data, name)
+	delete(s.members, name)
 	return s.save()
 }
 
@@ -187,12 +231,22 @@ func (s *Store) Rename(oldName, newName string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.reloadIfStale()
-	f, ok := s.data[oldName]
-	if !ok {
+	f, hadFlags := s.data[oldName]
+	m, hadMembers := s.members[oldName]
+	if !hadFlags && !hadMembers {
 		return nil
 	}
-	delete(s.data, oldName)
-	s.data[newName] = f
+	if hadFlags {
+		delete(s.data, oldName)
+		s.data[newName] = f
+	}
+	if hadMembers {
+		delete(s.members, oldName)
+		if s.members == nil {
+			s.members = map[string][]ProjectMember{}
+		}
+		s.members[newName] = m
+	}
 	return s.save()
 }
 
@@ -252,4 +306,141 @@ func (s *Store) PublicNames() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// MemberLevel returns the membership level a user holds on a project, and
+// whether such a membership exists. Used by the authz layer.
+func (s *Store) MemberLevel(project, userID string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	for _, m := range s.members[project] {
+		if m.UserID == userID {
+			return m.Level, true
+		}
+	}
+	return "", false
+}
+
+// MembersOf returns a copy of the members of a project, sorted by user id.
+func (s *Store) MembersOf(project string) []ProjectMember {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	src := s.members[project]
+	out := make([]ProjectMember, len(src))
+	copy(out, src)
+	sort.Slice(out, func(i, j int) bool { return out[i].UserID < out[j].UserID })
+	return out
+}
+
+// SetMember adds or updates a user's membership of a project. level must be
+// read or write.
+func (s *Store) SetMember(project, userID, level string) error {
+	if project == "" || strings.ContainsAny(project, "/\\") {
+		return fmt.Errorf("invalid project name")
+	}
+	if userID == "" {
+		return fmt.Errorf("user id required")
+	}
+	if !ValidLevel(level) {
+		return fmt.Errorf("invalid level %q", level)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	if s.members == nil {
+		s.members = map[string][]ProjectMember{}
+	}
+	list := s.members[project]
+	for i := range list {
+		if list[i].UserID == userID {
+			list[i].Level = level
+			s.members[project] = list
+			return s.save()
+		}
+	}
+	s.members[project] = append(list, ProjectMember{UserID: userID, Level: level})
+	return s.save()
+}
+
+// RemoveMember drops a user's membership of a project. No-op if absent.
+func (s *Store) RemoveMember(project, userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	list := s.members[project]
+	out := list[:0:0]
+	for _, m := range list {
+		if m.UserID != userID {
+			out = append(out, m)
+		}
+	}
+	if len(out) == len(list) {
+		return nil // nothing removed
+	}
+	if len(out) == 0 {
+		delete(s.members, project)
+	} else {
+		s.members[project] = out
+	}
+	return s.save()
+}
+
+// RemoveUserEverywhere strips a user from every project ACL. Called when a user
+// is disabled/removed so stale memberships don't linger.
+func (s *Store) RemoveUserEverywhere(userID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	changed := false
+	for proj, list := range s.members {
+		out := list[:0:0]
+		for _, m := range list {
+			if m.UserID != userID {
+				out = append(out, m)
+			} else {
+				changed = true
+			}
+		}
+		if len(out) == 0 {
+			delete(s.members, proj)
+		} else {
+			s.members[proj] = out
+		}
+	}
+	if !changed {
+		return nil
+	}
+	return s.save()
+}
+
+// MemberScope returns the global member-scope mode, defaulting to "all"
+// (legacy: owner/member see every project).
+func (s *Store) MemberScope() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	if s.memberScope == MemberScopeMembers {
+		return MemberScopeMembers
+	}
+	return MemberScopeAll
+}
+
+// SetMemberScope sets the global member-scope mode. Unknown values normalize to
+// "all".
+func (s *Store) SetMemberScope(mode string) error {
+	if mode != MemberScopeMembers {
+		mode = MemberScopeAll
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reloadIfStale()
+	// Store "" for the default to keep projects.json minimal.
+	if mode == MemberScopeAll {
+		s.memberScope = ""
+	} else {
+		s.memberScope = mode
+	}
+	return s.save()
 }

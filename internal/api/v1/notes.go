@@ -167,7 +167,7 @@ func (r *Router) listNotes(w http.ResponseWriter, req *http.Request) {
 
 	// Per-role visibility: drop notes the principal can't see (guests →
 	// public-only) before paginating, so total/offset reflect the visible set.
-	if p := principalFromContext(req); !p.CanSeeAllProjects() {
+	if p := principalFromContext(req); !r.seesAllProjects(p) {
 		visible := rows[:0]
 		for _, n := range rows {
 			if r.canSee(p, n.Path) {
@@ -231,6 +231,9 @@ func (r *Router) createNote(w http.ResponseWriter, req *http.Request) {
 	}
 	if !r.deps.Vault.IsNoteFile(clean) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "path must be a note file (.md, or .html when html notes are enabled)")
+		return
+	}
+	if r.denyWriteProject(w, user.principal(), projectOf(clean)) {
 		return
 	}
 	if _, err := r.deps.Vault.Load(clean); err == nil {
@@ -306,6 +309,9 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	if denyGuestWrite(w, user) {
 		return
 	}
+	if r.denyWriteProject(w, user.principal(), projectOf(rel)) {
+		return
+	}
 	existing, err := r.deps.Vault.Load(rel)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -358,6 +364,9 @@ func (r *Router) deleteNote(w http.ResponseWriter, req *http.Request, rel string
 		return
 	}
 	if denyGuestWrite(w, user) {
+		return
+	}
+	if r.denyWriteProject(w, user.principal(), projectOf(rel)) {
 		return
 	}
 	if _, err := r.deps.Vault.Load(rel); err != nil {

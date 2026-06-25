@@ -13,8 +13,8 @@
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { fetchCommandPalette, type CommandPaletteData } from '@/api/commandPalette'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 interface PaletteItem {
   kind: 'note' | 'project' | 'tag' | 'action'

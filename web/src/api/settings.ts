@@ -28,6 +28,7 @@ export interface Settings {
   i18n: I18nSettings
   mcp: MCPSettings
   totp_mode: string // off | optional | required (global two-factor policy)
+  member_scope: string // all (legacy) | members (per-project membership gating)
 }
 
 export interface UpdateSettings {
@@ -54,6 +55,7 @@ export interface UpdateSettings {
     max_note_bytes: number
   }>
   totp_mode?: string
+  member_scope?: string
 }
 
 export async function getSettings(): Promise<Settings> {

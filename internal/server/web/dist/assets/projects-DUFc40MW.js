@@ -1,2 +1,0 @@
-import{i as e}from"./index-DUdwGCo_.js";async function t(){let{data:t}=await e.get(`/projects`);return t.items}async function n(t){let{data:n}=await e.post(`/projects`,{name:t});return n}async function r(t,n){let{data:r}=await e.put(`/projects/${encodeURIComponent(t)}`,n);return r}async function i(t){await e.delete(`/projects/${encodeURIComponent(t)}`)}export{r as i,i as n,t as r,n as t};
-//# sourceMappingURL=projects-DUFc40MW.js.map

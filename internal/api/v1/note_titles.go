@@ -55,7 +55,7 @@ func (r *Router) handleNoteTitles(w http.ResponseWriter, req *http.Request) {
 	// limit-many, mtime desc".
 	p := principalFromContext(req)
 	fetch := limit
-	if !p.CanSeeAllProjects() {
+	if !r.seesAllProjects(p) {
 		fetch = limit * 4 // overfetch; the visibility filter drops some
 	}
 

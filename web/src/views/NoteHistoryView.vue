@@ -3,8 +3,8 @@
  *  from window props; the back link opens the note read window. */
 import { onMounted, ref, watch, computed, inject } from 'vue'
 import { getHistory, type HistoryEntry } from '@/api/history'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ path: string }>()
 

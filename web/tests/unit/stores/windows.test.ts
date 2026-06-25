@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
-import { useWindowsStore } from '@/stores/windows'
+import { useWindowsStore } from 'plancia'
 
 describe('windows store', () => {
   beforeEach(() => {

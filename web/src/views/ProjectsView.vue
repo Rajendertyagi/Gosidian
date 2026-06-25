@@ -9,7 +9,7 @@ import {
 } from '@/api/projects'
 import { useTreeStore } from '@/stores/tree'
 import { useAuthStore } from '@/stores/auth'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { useWindowsStore, type OpenSpec } from 'plancia'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -26,6 +26,16 @@ function openProjectGraph(name: string) {
     type: 'graph',
     key: 'graph:project:' + name,
     title: `Graph · ${name}`,
+    props: { project: name },
+  })
+}
+
+/** Manage who can access a project (owner-only; effective under member_scope=members). */
+function openProjectMembers(name: string) {
+  openWindow({
+    type: 'project-members',
+    key: 'project-members:' + name,
+    title: `Members · ${name}`,
     props: { project: name },
   })
 }
@@ -161,6 +171,13 @@ onMounted(load)
             @click="toggleHidden(p)"
           >hidden</button>
 
+          <button
+            v-if="auth.isOwner"
+            type="button"
+            class="text-xs px-2 py-1 rounded border border-border hover:bg-surface-hover"
+            title="Manage who can access this project"
+            @click="openProjectMembers(p.name)"
+          >Members</button>
           <button
             type="button"
             class="text-xs px-2 py-1 rounded hover:bg-surface-hover"

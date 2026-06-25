@@ -131,3 +131,49 @@ func TestAdminTOTPPolicyOverride(t *testing.T) {
 		t.Errorf("bogus policy status %d want 400 (%s)", rec.code, rec.body)
 	}
 }
+
+// TestTOTPEnrollmentGate is the server-side counterpart of the SPA enrolment
+// interstitial: a user whose effective policy mandates TOTP but who has not
+// enrolled a secret holds a valid token, yet every route outside the enrolment
+// flow is refused with auth.enrollment_required until a secret is confirmed.
+// Guards BUG-020 — the gate used to be SPA-only and bypassable via the API.
+func TestTOTPEnrollmentGate(t *testing.T) {
+	f := newNotesFixture(t)
+	// Global "required" makes the (not-yet-enrolled) owner owe an enrolment.
+	f.webauth.SetTOTPMode(webauth.TOTPRequired)
+
+	// A normal data route is gated by the middleware, before the handler runs.
+	rec := f.doAuthRecorder(http.MethodGet, "/api/v1/tree", "", nil)
+	if rec.code != http.StatusForbidden {
+		t.Fatalf("gated route status %d want 403: %s", rec.code, rec.body)
+	}
+	if !strings.Contains(rec.body, `"auth.enrollment_required"`) {
+		t.Errorf("expected auth.enrollment_required code, got %s", rec.body)
+	}
+
+	// The enrolment flow itself stays reachable (exempt path), and now carries
+	// an inline QR for scanning.
+	er := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/enroll", "", nil)
+	if er.code != http.StatusOK {
+		t.Fatalf("enroll status %d (must be exempt): %s", er.code, er.body)
+	}
+	var enr struct {
+		Secret string `json:"secret"`
+		QRSVG  string `json:"qr_svg"`
+	}
+	if err := json.Unmarshal([]byte(er.body), &enr); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(enr.QRSVG, "<svg ") {
+		t.Errorf("enroll response missing inline QR svg: %.40q", enr.QRSVG)
+	}
+
+	// Confirm a valid code → secret persisted → the gate lifts.
+	code, _ := totp.GenerateCode(enr.Secret, time.Now())
+	if cr := f.doAuthRecorder(http.MethodPost, "/api/v1/totp/confirm", `{"secret":"`+enr.Secret+`","code":"`+code+`"}`, nil); cr.code != http.StatusNoContent {
+		t.Fatalf("confirm status %d: %s", cr.code, cr.body)
+	}
+	if rec := f.doAuthRecorder(http.MethodGet, "/api/v1/tree", "", nil); rec.code != http.StatusOK {
+		t.Fatalf("after enrolment the data route must pass, got %d: %s", rec.code, rec.body)
+	}
+}

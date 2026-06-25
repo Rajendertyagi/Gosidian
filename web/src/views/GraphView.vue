@@ -16,8 +16,8 @@ import { listProjects, type Project } from '@/api/projects'
 import { listTags, type TagCount } from '@/api/tags'
 import { suggestNoteTitles, type NoteTitleHit } from '@/api/noteTitles'
 import SearchSelect from '@/components/primitives/SearchSelect.vue'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const GraphCanvas = defineAsyncComponent(() => import('@/components/graph/GraphCanvas.vue'))
 

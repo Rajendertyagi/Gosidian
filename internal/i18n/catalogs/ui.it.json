@@ -1,9 +1,23 @@
 {
+  "totp": {
+    "setup_button": "Configura la verifica in due passaggi (TOTP)",
+    "scan_instructions": "Inquadra questo codice QR con la tua app di autenticazione, poi inserisci un codice generato per attivare la verifica in due passaggi.",
+    "qr_label": "Codice QR per la registrazione della verifica in due passaggi",
+    "manual_entry": "Non riesci a inquadrare? Inserisci i dati di configurazione manualmente",
+    "secret_label": "Segreto",
+    "code_placeholder": "123 456",
+    "confirm_button": "Conferma e attiva",
+    "invalid_code": "Codice non valido",
+    "start_failed": "Avvio della registrazione non riuscito",
+    "interstitial_title": "Verifica in due passaggi obbligatoria",
+    "interstitial_desc": "Il tuo account richiede la verifica in due passaggi. Configurala per continuare."
+  },
   "plancia": {
     "unsavedClose": "Ci sono modifiche non salvate. Chiudere comunque?",
     "dirty": "Modifiche non salvate",
     "links": "Legami diretti (grafo)",
     "resize": "Larghezza — clic per cambiare",
+    "resizeWidth": "Ridimensiona larghezza",
     "minimize": "Riduci a head (footer)",
     "close": "Chiudi",
     "openTag": "Apri",

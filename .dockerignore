@@ -9,6 +9,14 @@
 /bin
 /dist
 
+# Node deps are installed fresh by `npm ci` in the web-builder stage.
+# Never ship a host node_modules into the build context: a stale local
+# tree would otherwise overlay the freshly-resolved deps via `COPY web/`.
+# Use `**/node_modules` — a bare `node_modules` only matches the
+# build-context root, not the nested `web/node_modules` that the web
+# build actually populates.
+**/node_modules
+
 # testdata runtime state
 /testdata/vault/.gosidian
 /testdata/vault/Lavoro

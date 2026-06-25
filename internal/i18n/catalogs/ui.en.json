@@ -1,9 +1,23 @@
 {
+  "totp": {
+    "setup_button": "Set up two-factor (TOTP)",
+    "scan_instructions": "Scan this QR code with your authenticator app, then enter a generated code to enable two-factor authentication.",
+    "qr_label": "Two-factor enrolment QR code",
+    "manual_entry": "Can't scan? Enter the setup details manually",
+    "secret_label": "Secret",
+    "code_placeholder": "123 456",
+    "confirm_button": "Confirm & enable",
+    "invalid_code": "Invalid code",
+    "start_failed": "Failed to start enrolment",
+    "interstitial_title": "Two-factor required",
+    "interstitial_desc": "Your account requires two-factor authentication. Set it up to continue."
+  },
   "plancia": {
     "unsavedClose": "There are unsaved changes. Close anyway?",
     "dirty": "Unsaved changes",
     "links": "Direct links (graph)",
     "resize": "Width — click to cycle",
+    "resizeWidth": "Resize width",
     "minimize": "Minimize to footer",
     "close": "Close",
     "openTag": "Open",

@@ -50,3 +50,34 @@ export async function updateProject(slug: string, body: UpdateProjectRequest): P
 export async function deleteProject(slug: string): Promise<void> {
   await client.delete(`/projects/${encodeURIComponent(slug)}`)
 }
+
+// --- Per-project membership ACL (owner-only) ---
+
+export interface ProjectMember {
+  user_id: string
+  username: string
+  level: string // read | write
+}
+
+export async function listProjectMembers(slug: string): Promise<ProjectMember[]> {
+  const { data } = await client.get<{ items: ProjectMember[]; total: number }>(
+    `/projects/${encodeURIComponent(slug)}/members`,
+  )
+  return data.items
+}
+
+export async function setProjectMember(
+  slug: string,
+  userId: string,
+  level: 'read' | 'write',
+): Promise<ProjectMember> {
+  const { data } = await client.put<ProjectMember>(`/projects/${encodeURIComponent(slug)}/members`, {
+    user_id: userId,
+    level,
+  })
+  return data
+}
+
+export async function removeProjectMember(slug: string, userId: string): Promise<void> {
+  await client.delete(`/projects/${encodeURIComponent(slug)}/members/${encodeURIComponent(userId)}`)
+}

@@ -58,16 +58,92 @@ func (r *Router) handleAdminUsers(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusServiceUnavailable, CodeServerUnavailable, "web auth not configured")
 		return
 	}
-	if req.Method != http.MethodGet {
+	switch req.Method {
+	case http.MethodGet:
+		users := r.deps.Auth.WebAuth.ListUsers()
+		out := make([]adminUserView, 0, len(users))
+		for _, u := range users {
+			out = append(out, toAdminUserView(u))
+		}
+		WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
+	case http.MethodPost:
+		r.createUser(w, req)
+	default:
 		WriteError(w, http.StatusMethodNotAllowed, CodeMethodNotAllowed, "method not allowed")
+	}
+}
+
+type createUserRequest struct {
+	Username   string `json:"username"`
+	Password   string `json:"password"`
+	Role       string `json:"role,omitempty"`        // member (default) | guest
+	TOTPPolicy string `json:"totp_policy,omitempty"` // "" inherit | enabled | disabled
+}
+
+// createUser provisions a new account directly (owner-only, POST /admin/users)
+// — the admin-driven counterpart to the invite + /signup self-service flow. The
+// owner is a singleton, so only member/guest can be created here; webauth.AddUser
+// carries the validation (>= 8 char password, unique username) and a duplicate
+// maps to 409 exactly as /signup does. An optional totp_policy sets the per-user
+// override at creation instead of a follow-up PATCH.
+func (r *Router) createUser(w http.ResponseWriter, req *http.Request) {
+	actor := UserFromContext(req.Context())
+	var body createUserRequest
+	if err := DecodeJSON(req, &body); err != nil {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
-	users := r.deps.Auth.WebAuth.ListUsers()
-	out := make([]adminUserView, 0, len(users))
-	for _, u := range users {
-		out = append(out, toAdminUserView(u))
+	if body.Username == "" || body.Password == "" {
+		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "username and password are required")
+		return
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"items": out, "total": len(out)})
+	role := webauth.RoleMember
+	if rs := strings.TrimSpace(body.Role); rs != "" {
+		role = webauth.Role(rs)
+	}
+	if role != webauth.RoleMember && role != webauth.RoleGuest {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "role must be 'member' or 'guest'")
+		return
+	}
+	// Validate the optional override up front so we never create an account and
+	// then have to roll it back on a bad policy value.
+	policy := strings.TrimSpace(body.TOTPPolicy)
+	switch policy {
+	case webauth.TOTPInherit, webauth.TOTPEnabled, webauth.TOTPDisabled:
+	default:
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "totp_policy must be '', 'enabled' or 'disabled'")
+		return
+	}
+	user, err := r.deps.Auth.WebAuth.AddUser(body.Username, body.Password, role)
+	if err != nil {
+		// AddUser carries the precise reason; duplicate username → 409 (like /signup).
+		if isDuplicateUsername(err.Error()) {
+			WriteError(w, http.StatusConflict, CodeConflict, err.Error())
+			return
+		}
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+		return
+	}
+	if policy != webauth.TOTPInherit {
+		if err := r.deps.Auth.WebAuth.SetTOTPPolicy(user.ID, policy); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
+			return
+		}
+	}
+	if actor != nil && r.deps.Audit != nil {
+		_ = r.deps.Audit.Write(audit.Entry{
+			Source: audit.SourceHTTP,
+			Actor:  actor.Username,
+			UserID: actor.ID,
+			Action: "user_create",
+			Path:   user.ID,
+		})
+	}
+	if u, ok := r.deps.Auth.WebAuth.UserByID(user.ID); ok {
+		WriteJSON(w, http.StatusCreated, toAdminUserView(*u))
+		return
+	}
+	WriteJSON(w, http.StatusCreated, toAdminUserView(*user))
 }
 
 // handleAdminUserItem covers DELETE → DisableUser. The webauth API
@@ -114,6 +190,10 @@ func (r *Router) handleAdminUserItem(w http.ResponseWriter, req *http.Request) {
 	}
 	if r.deps.Auth.SpaAuth != nil {
 		_ = r.deps.Auth.SpaAuth.RevokeByUser(id)
+	}
+	// Strip the user from every project ACL so no stale membership lingers.
+	if r.deps.Projects != nil {
+		_ = r.deps.Projects.RemoveUserEverywhere(id)
 	}
 	if user := UserFromContext(req.Context()); user != nil && r.deps.Audit != nil {
 		_ = r.deps.Audit.Write(audit.Entry{

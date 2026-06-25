@@ -1,9 +1,11 @@
 package v1
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/gosidian/gosidian/internal/audit"
+	"github.com/gosidian/gosidian/internal/qrsvg"
 	"github.com/gosidian/gosidian/internal/webauth"
 )
 
@@ -29,6 +31,11 @@ func (r *Router) handleAuthConfig(w http.ResponseWriter, req *http.Request) {
 type totpEnrollResponse struct {
 	Secret     string `json:"secret"`
 	OTPAuthURI string `json:"otpauth_uri"`
+	// QRCodeSVG is a self-contained SVG of the otpauth URI the SPA renders
+	// inline for scanning. Empty if rendering failed — the secret + URI above
+	// are always present as a manual-entry fallback, so a QR failure never
+	// blocks enrolment.
+	QRCodeSVG string `json:"qr_svg"`
 }
 
 // handleTOTPEnroll generates a fresh secret + provisioning URI. The secret is
@@ -52,7 +59,13 @@ func (r *Router) handleTOTPEnroll(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, "totp: "+err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, totpEnrollResponse{Secret: secret, OTPAuthURI: uri})
+	// Best-effort QR: the secret + URI are the authoritative payload, so a
+	// rendering failure degrades to manual entry rather than failing enrolment.
+	svg, qerr := qrsvg.SVG(uri)
+	if qerr != nil {
+		slog.Default().Warn("api/v1: totp qr render failed", "err", qerr)
+	}
+	WriteJSON(w, http.StatusOK, totpEnrollResponse{Secret: secret, OTPAuthURI: uri, QRCodeSVG: svg})
 }
 
 type totpConfirmRequest struct {

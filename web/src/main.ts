@@ -8,6 +8,8 @@ import { useAuthStore } from './stores/auth'
 import { getVersion } from './api/version'
 import './styles/tokens.css'
 import './styles/tailwind.css'
+import 'plancia/style.css'
+import './styles/plancia-bridge.css'
 
 const app = createApp(App)
 const pinia = createPinia()

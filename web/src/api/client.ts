@@ -79,6 +79,14 @@ client.interceptors.response.use(
       return Promise.reject(err)
     }
 
+    if (status === 403 && code === 'auth.enrollment_required') {
+      // The server gates every non-enrolment route until the user enrols a TOTP
+      // secret (BUG-020). Raise the interstitial so the SPA mirrors the server
+      // state even mid-session (e.g. the owner just made TOTP required).
+      const auth = useAuthStore()
+      auth.requireEnrollment()
+    }
+
     if (status === 412 && code === 'concurrency.etag_mismatch') {
       const details = err.response.data?.error?.details ?? {}
       const detail: ConcurrencyConflictDetail = {

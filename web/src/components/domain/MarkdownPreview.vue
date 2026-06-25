@@ -17,8 +17,8 @@
  */
 import { computed, inject, ref } from 'vue'
 import DOMPurify from 'dompurify'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ html: string }>()
 

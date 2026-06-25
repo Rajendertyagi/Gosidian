@@ -128,6 +128,21 @@ export async function listUsers(): Promise<AdminUser[]> {
   return data.items
 }
 
+export interface CreateUserRequest {
+  username: string
+  password: string
+  role: 'member' | 'guest'
+  totp_policy?: string // "" inherit | enabled | disabled
+}
+
+/** Create a new account directly (owner-only). The owner is a singleton, so only
+ *  member/guest may be created here; a duplicate username rejects with 409. The
+ *  optional totp_policy sets the per-user override at creation time. */
+export async function createUser(body: CreateUserRequest): Promise<AdminUser> {
+  const { data } = await client.post<AdminUser>('/admin/users', body)
+  return data
+}
+
 export async function disableUser(id: string): Promise<void> {
   await client.delete(`/admin/users/${encodeURIComponent(id)}`)
 }

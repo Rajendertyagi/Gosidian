@@ -24,6 +24,9 @@ type settingsView struct {
 	I18n     i18nSettings  `json:"i18n"`
 	MCP      mcpSettings   `json:"mcp"`
 	TOTPMode string        `json:"totp_mode"` // off | optional | required (global two-factor policy)
+	// MemberScope gates project access: "all" (legacy: owner/member see every
+	// project) or "members" (private projects require per-project membership).
+	MemberScope string `json:"member_scope"`
 }
 
 type gitSettings struct {
@@ -78,7 +81,8 @@ type updateSettingsRequest struct {
 		WritePerMinute *int   `json:"write_per_minute,omitempty"`
 		MaxNoteBytes   *int64 `json:"max_note_bytes,omitempty"`
 	} `json:"mcp,omitempty"`
-	TOTPMode *string `json:"totp_mode,omitempty"`
+	TOTPMode    *string `json:"totp_mode,omitempty"`
+	MemberScope *string `json:"member_scope,omitempty"`
 }
 
 func (r *Router) handleSettings(w http.ResponseWriter, req *http.Request) {
@@ -106,7 +110,18 @@ func (r *Router) getSettings(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
-	WriteJSON(w, http.StatusOK, toSettingsView(cfg))
+	view := toSettingsView(cfg)
+	view.MemberScope = r.memberScopeSetting()
+	WriteJSON(w, http.StatusOK, view)
+}
+
+// memberScopeSetting returns the live member-scope mode ("all" | "members"),
+// stored in the projects store rather than config.toml.
+func (r *Router) memberScopeSetting() string {
+	if r.deps.Projects == nil {
+		return "all"
+	}
+	return r.deps.Projects.MemberScope()
 }
 
 // putSettings is owner-only. It loads the current config, applies
@@ -132,6 +147,12 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
+	if body.MemberScope != nil {
+		if m := strings.TrimSpace(*body.MemberScope); m != "all" && m != "members" {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, "member_scope must be all or members")
+			return
+		}
+	}
 
 	cfg, err := r.loadConfig()
 	if err != nil {
@@ -151,6 +172,13 @@ func (r *Router) putSettings(w http.ResponseWriter, req *http.Request) {
 	// a restart.
 	if r.deps.Auth != nil && r.deps.Auth.WebAuth != nil {
 		r.deps.Auth.WebAuth.SetTOTPMode(cfg.Webauth.TOTPMode)
+	}
+	// member_scope lives in the projects store (not config.toml); apply it live.
+	if body.MemberScope != nil && r.deps.Projects != nil {
+		if err := r.deps.Projects.SetMemberScope(strings.TrimSpace(*body.MemberScope)); err != nil {
+			WriteError(w, http.StatusInternalServerError, CodeServerInternal, "member_scope: "+err.Error())
+			return
+		}
 	}
 
 	if r.deps.Audit != nil {

@@ -23,6 +23,7 @@ export const windowRegistry: Record<string, Component> = {
   graph: lazy(() => import('@/views/GraphView.vue')),
   search: lazy(() => import('@/views/SearchView.vue')),
   projects: lazy(() => import('@/views/ProjectsView.vue')),
+  'project-members': lazy(() => import('@/views/ProjectMembersView.vue')),
   tags: lazy(() => import('@/views/TagsView.vue')),
   settings: lazy(() => import('@/views/SettingsView.vue')),
   trash: lazy(() => import('@/views/TrashView.vue')),

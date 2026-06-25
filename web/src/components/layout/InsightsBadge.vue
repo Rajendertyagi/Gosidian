@@ -11,8 +11,8 @@ import { ref, onMounted } from 'vue'
 import { Lightbulb } from 'lucide-vue-next'
 import { fetchPendingInsights } from '@/api/insights'
 import { useSSE } from '@/composables/useSSE'
-import { useWindowsStore } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const windows = useWindowsStore()
 const count = ref(0)

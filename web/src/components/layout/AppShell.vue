@@ -1,18 +1,71 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { Network } from 'lucide-vue-next'
+import {
+  Plancia,
+  PlanciaSidebar,
+  usePlanciaSync,
+  useOpenWindow,
+  type PlanciaLabels,
+  type WindowInstance,
+} from 'plancia'
 import TopBar from './TopBar.vue'
 import Sidebar from './Sidebar.vue'
 import CommandPalette from './CommandPalette.vue'
 import TotpEnroll from '@/components/domain/TotpEnroll.vue'
-import WindowManager from '@/components/plancia/WindowManager.vue'
 import { windowRegistry } from '@/components/plancia/windowRegistry'
-import { usePlanciaSync } from '@/composables/usePlanciaSync'
+import { windowTone } from '@/components/plancia/windowModules'
+import { codec } from '@/composables/planciaKey'
 import { useSidebarResize } from '@/composables/useSidebarResize'
 import { useAuthStore } from '@/stores/auth'
 
+const { t } = useI18n()
 const { width, startDrag, reset } = useSidebarResize()
 const auth = useAuthStore()
-const plancia = usePlanciaSync()
+// URL (`?w=&f=`) ⇆ window-store sync, with localStorage fallback. The gosidian
+// token scheme lives in the codec (`@/composables/planciaKey`).
+const plancia = usePlanciaSync(codec, { useLocalStorage: true, storageKey: 'gosidian.plancia' })
+
+// Map gosidian's plancia.* i18n keys onto plancia's PlanciaLabels. A computed
+// (not a plain object) so the labels track locale changes reactively. Note the
+// key delta: plancia's `openHint` ⇆ gosidian's `plancia.openFromSidebar`.
+const planciaLabels = computed<PlanciaLabels>(() => ({
+  empty: t('plancia.empty'),
+  openHint: t('plancia.openFromSidebar'),
+  minimizedHint: (n: number) => t('plancia.minimizedHint', { n }),
+  minimizedLabel: t('plancia.minimizedLabel'),
+  unknownType: (type: string) => t('plancia.unknownType', { type }),
+  resize: t('plancia.resize'),
+  resizeWidth: t('plancia.resizeWidth'),
+  minimize: t('plancia.minimize'),
+  close: t('plancia.close'),
+  restore: t('plancia.restore'),
+  dirty: t('plancia.dirty'),
+  unsavedClose: t('plancia.unsavedClose'),
+  openTag: t('plancia.openTag'),
+}))
+
+// Cross-window open for the ego-graph action below (plancia provides it through
+// the enclosing <Plancia>).
+const openWindow = useOpenWindow()
+
+/** Note path carried by note-shaped windows; gates the "direct links" button. */
+function notePath(win: WindowInstance): string | null {
+  return typeof win.props?.path === 'string' ? (win.props.path as string) : null
+}
+
+/** Open the ego-graph (direct links, depth 1) of a window's note. */
+function openLinks(win: WindowInstance): void {
+  const path = notePath(win)
+  if (!path) return
+  openWindow({
+    type: 'graph',
+    key: `graph:${path}`,
+    title: `↳ ${win.title || path}`,
+    props: { focus: path, depth: 1 },
+  })
+}
 
 onMounted(() => plancia.hydrate())
 
@@ -26,12 +79,21 @@ function onEnrolled() {
   <div class="h-screen flex flex-col bg-bg text-text">
     <TopBar />
     <div class="flex-1 flex overflow-hidden min-h-0">
-      <div
-        class="border-r border-border flex-shrink-0"
-        :style="{ width: width + 'px' }"
+      <!-- Left sidebar chrome via the library's <PlanciaSidebar> (inline shell).
+           gosidian has no collapse/rail/peek, so it stays permanently expanded
+           with the toggle suppressed; the host keeps driving the width through
+           useSidebarResize (bound to :size) for exact behaviour parity. -->
+      <PlanciaSidebar
+        position="left"
+        mode="inline"
+        :size="width"
+        :resizable="false"
+        :aria-label="t('common.vault')"
+        landmark="complementary"
       >
+        <template #toggle><span /></template>
         <Sidebar />
-      </div>
+      </PlanciaSidebar>
 
       <div
         class="w-1 cursor-col-resize bg-border hover:bg-accent/40 select-none flex-shrink-0"
@@ -43,7 +105,22 @@ function onEnrolled() {
       />
 
       <main class="flex-1 min-w-0 overflow-hidden">
-        <WindowManager :registry="windowRegistry" />
+        <Plancia :registry="windowRegistry" :labels="planciaLabels" :resolve-tone="windowTone">
+          <!-- Domain action: open the ego-graph ("direct links") of a note
+               window. Gated on a note path; lucide icon stays in gosidian. -->
+          <template #window-actions="{ win }">
+            <button
+              v-if="notePath(win)"
+              type="button"
+              class="rounded p-1 text-text-muted hover:bg-surface-hover hover:text-text"
+              :title="t('plancia.links')"
+              :aria-label="t('plancia.links')"
+              @click="openLinks(win)"
+            >
+              <Network class="h-3.5 w-3.5" />
+            </button>
+          </template>
+        </Plancia>
       </main>
     </div>
 
@@ -54,10 +131,8 @@ function onEnrolled() {
       class="fixed inset-0 z-50 flex items-center justify-center bg-bg/95 p-4"
     >
       <div class="w-full max-w-md rounded-lg bg-surface p-6 ring-1 ring-border shadow">
-        <h2 class="text-lg font-semibold mb-1">Two-factor required</h2>
-        <p class="text-sm text-text-muted mb-4">
-          Your account requires two-factor authentication. Set it up to continue.
-        </p>
+        <h2 class="text-lg font-semibold mb-1">{{ t('totp.interstitial_title') }}</h2>
+        <p class="text-sm text-text-muted mb-4">{{ t('totp.interstitial_desc') }}</p>
         <TotpEnroll @done="onEnrolled" />
       </div>
     </div>

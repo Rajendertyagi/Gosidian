@@ -1,7 +1,6 @@
 package authz
 
 import (
-	"reflect"
 	"testing"
 
 	"github.com/gosidian/gosidian/internal/webauth"
@@ -16,9 +15,13 @@ func pub(names ...string) func(string) bool {
 	return func(p string) bool { return m[p] }
 }
 
+// lcfg builds a legacy-mode AccessConfig (membership not enforced) from an
+// isPublic predicate — the pre-feature behavior most of these tests assert.
+func lcfg(isPub func(string) bool) AccessConfig { return AccessConfig{IsPublic: isPub} }
+
 func TestCapabilities(t *testing.T) {
 	cases := []struct {
-		role                       webauth.Role
+		role                webauth.Role
 		write, admin, guest bool
 	}{
 		{webauth.RoleOwner, true, true, false},
@@ -39,28 +42,22 @@ func TestCapabilities(t *testing.T) {
 	}
 }
 
+// Legacy mode (member_scope unset): guest sees only public; owner/member see all.
 func TestProjectVisibility(t *testing.T) {
-	all := []string{"alpha", "docs", "secret"}
 	isPub := pub("docs")
 
 	guest := Principal{Role: webauth.RoleGuest}
-	if got := guest.VisibleProjects(all, isPub); !reflect.DeepEqual(got, []string{"docs"}) {
-		t.Errorf("guest VisibleProjects=%v want [docs]", got)
-	}
-	if guest.CanAccessProject("secret", isPub) {
+	if guest.CanAccessProject("secret", lcfg(isPub)) {
 		t.Error("guest must NOT access a private project")
 	}
-	if !guest.CanAccessProject("docs", isPub) {
+	if !guest.CanAccessProject("docs", lcfg(isPub)) {
 		t.Error("guest must access a public project")
 	}
 
 	for _, role := range []webauth.Role{webauth.RoleOwner, webauth.RoleMember} {
 		p := Principal{Role: role}
-		if got := p.VisibleProjects(all, isPub); !reflect.DeepEqual(got, all) {
-			t.Errorf("%s VisibleProjects=%v want all", role, got)
-		}
-		if !p.CanAccessProject("secret", isPub) {
-			t.Errorf("%s must access every project", role)
+		if !p.CanAccessProject("secret", lcfg(isPub)) {
+			t.Errorf("%s must access every project in legacy mode", role)
 		}
 	}
 }
@@ -72,21 +69,18 @@ func TestUnknownRoleFailsClosed(t *testing.T) {
 	if p.CanWrite() || p.CanAdmin() {
 		t.Error("unknown role must not write or admin")
 	}
-	if p.CanAccessProject("secret", pub("docs")) {
+	if p.CanAccessProject("secret", lcfg(pub("docs"))) {
 		t.Error("unknown role must not access a private project")
 	}
-	if got := p.VisibleProjects([]string{"docs", "secret"}, pub("docs")); !reflect.DeepEqual(got, []string{"docs"}) {
-		t.Errorf("unknown role VisibleProjects=%v want [docs]", got)
+	if !p.CanAccessProject("docs", lcfg(pub("docs"))) {
+		t.Error("unknown role may still read a public project")
 	}
 }
 
 // A nil isPublic predicate must fail closed: guests see nothing.
 func TestGuestFailsClosedOnNilPredicate(t *testing.T) {
 	guest := Principal{Role: webauth.RoleGuest}
-	if guest.CanAccessProject("docs", nil) {
-		t.Error("guest with nil isPublic must be denied")
-	}
-	if got := guest.VisibleProjects([]string{"a", "b"}, nil); len(got) != 0 {
-		t.Errorf("guest with nil isPublic VisibleProjects=%v want empty", got)
+	if guest.CanAccessProject("docs", AccessConfig{}) {
+		t.Error("guest with nil IsPublic must be denied")
 	}
 }

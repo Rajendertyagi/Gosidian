@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { enrollTOTP, confirmTOTP } from '@/api/totp'
 
+const { t } = useI18n()
 const emit = defineEmits<{ done: [] }>()
 
 const secret = ref('')
 const uri = ref('')
+const qrSvg = ref('')
 const code = ref('')
 const error = ref<string | null>(null)
 const busy = ref(false)
@@ -17,8 +20,9 @@ async function start() {
     const d = await enrollTOTP()
     secret.value = d.secret
     uri.value = d.otpauth_uri
+    qrSvg.value = d.qr_svg ?? ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Failed to start enrolment'
+    error.value = e instanceof Error ? e.message : t('totp.start_failed')
   } finally {
     busy.value = false
   }
@@ -32,7 +36,7 @@ async function confirm() {
     await confirmTOTP(secret.value, code.value.trim())
     emit('done')
   } catch (e) {
-    error.value = e instanceof Error ? e.message : 'Invalid code'
+    error.value = e instanceof Error ? e.message : t('totp.invalid_code')
   } finally {
     busy.value = false
   }
@@ -48,24 +52,37 @@ async function confirm() {
       class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
       @click="start"
     >
-      Set up two-factor (TOTP)
+      {{ t('totp.setup_button') }}
     </button>
 
     <div v-else class="space-y-3">
-      <p class="text-sm text-text-muted">
-        Scan the link below in your authenticator app, or enter the secret manually, then
-        confirm a generated code to enable two-factor authentication.
-      </p>
-      <a :href="uri" class="block break-all text-xs text-accent font-mono">{{ uri }}</a>
-      <p class="text-xs text-text-muted">
-        Secret: <code class="font-mono text-text">{{ secret }}</code>
-      </p>
+      <p class="text-sm text-text-muted">{{ t('totp.scan_instructions') }}</p>
+
+      <!-- Server-rendered QR: inline SVG (no data: URI, so no img-src CSP
+           relaxation). Falls back to the secret/URI below if rendering failed. -->
+      <div
+        v-if="qrSvg"
+        class="qr mx-auto h-44 w-44 rounded bg-white p-2"
+        role="img"
+        :aria-label="t('totp.qr_label')"
+        v-html="qrSvg"
+      />
+
+      <details class="text-xs text-text-muted">
+        <summary class="cursor-pointer select-none">{{ t('totp.manual_entry') }}</summary>
+        <p class="mt-2">
+          {{ t('totp.secret_label') }}: <code class="font-mono text-text break-all">{{ secret }}</code>
+        </p>
+        <a :href="uri" class="mt-1 block break-all text-accent font-mono">{{ uri }}</a>
+      </details>
+
       <input
         v-model.trim="code"
         inputmode="numeric"
         autocomplete="one-time-code"
-        placeholder="123 456"
+        :placeholder="t('totp.code_placeholder')"
         class="w-full rounded bg-bg-elevated border border-border px-3 py-2 focus:outline-none focus:ring-2 focus:ring-accent"
+        @keyup.enter="confirm"
       />
       <button
         type="button"
@@ -73,10 +90,18 @@ async function confirm() {
         class="rounded bg-accent text-accent-fg px-3 py-2 text-sm hover:bg-accent-hover disabled:opacity-60"
         @click="confirm"
       >
-        Confirm &amp; enable
+        {{ t('totp.confirm_button') }}
       </button>
     </div>
 
     <p v-if="error" class="text-sm text-danger">{{ error }}</p>
   </div>
 </template>
+
+<style scoped>
+.qr :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+</style>

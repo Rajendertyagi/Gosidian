@@ -32,31 +32,54 @@ func (p Principal) CanSeeAllProjects() bool {
 	return p.Role == webauth.RoleOwner || p.Role == webauth.RoleMember
 }
 
-// CanAccessProject reports whether the principal may read the named project.
-// Owner and member see every project; a guest sees only projects for which
-// isPublic returns true. isPublic must report a project's Public flag (e.g.
-// projects.Store.IsPublic); passing nil treats every project as private.
-func (p Principal) CanAccessProject(project string, isPublic func(string) bool) bool {
-	if p.CanSeeAllProjects() {
-		return true
-	}
-	// Guest — or any unrecognized/zero-value role — sees only public projects.
-	// Failing closed here means a malformed Principal never widens access.
-	return isPublic != nil && isPublic(project)
+// AccessConfig carries the per-request inputs the project-access predicate needs
+// beyond the principal's role: the public-flag lookup, the membership lookups,
+// and whether per-project membership is enforced (member_scope = members). The
+// membership funcs are resolved by the caller (which owns the projects store) so
+// this package stays free of storage concerns and the level→bool mapping.
+type AccessConfig struct {
+	// Enforced is true under member_scope = members: private projects are gated
+	// behind explicit membership. When false (legacy default) owner/member see
+	// every project, preserving pre-feature behavior.
+	Enforced bool
+	// IsPublic reports a project's Public flag. nil treats everything as private.
+	IsPublic func(project string) bool
+	// IsMember reports whether userID holds any membership of project.
+	IsMember func(userID, project string) bool
+	// MemberCanWrite reports whether userID's membership of project grants write.
+	MemberCanWrite func(userID, project string) bool
 }
 
-// VisibleProjects returns the subset of all that the principal may read,
-// preserving input order. For owner/member this is all; for a guest it is the
-// public subset.
-func (p Principal) VisibleProjects(all []string, isPublic func(string) bool) []string {
-	if p.CanSeeAllProjects() {
-		return all
+// CanAccessProject reports whether the principal may read the named project.
+// Owner always; public projects are visible to everyone (guests included); in
+// legacy mode member sees every project; under enforcement access requires an
+// explicit membership. Fails closed for an unrecognized/zero-value role.
+func (p Principal) CanAccessProject(project string, cfg AccessConfig) bool {
+	if p.Role == webauth.RoleOwner {
+		return true
 	}
-	out := make([]string, 0, len(all))
-	for _, name := range all {
-		if isPublic != nil && isPublic(name) {
-			out = append(out, name)
-		}
+	if cfg.IsPublic != nil && cfg.IsPublic(project) {
+		return true
 	}
-	return out
+	if !cfg.Enforced {
+		return p.Role == webauth.RoleMember
+	}
+	return cfg.IsMember != nil && cfg.IsMember(p.UserID, project)
+}
+
+// CanWriteProject reports whether the principal may mutate notes/attachments in
+// the project. Owner always; guests never (read-only regardless of membership);
+// in legacy mode member writes anywhere; under enforcement a member needs a
+// write-level membership. Fails closed.
+func (p Principal) CanWriteProject(project string, cfg AccessConfig) bool {
+	if p.Role == webauth.RoleOwner {
+		return true
+	}
+	if !p.Role.CanWrite() {
+		return false
+	}
+	if !cfg.Enforced {
+		return true
+	}
+	return cfg.MemberCanWrite != nil && cfg.MemberCanWrite(p.UserID, project)
 }

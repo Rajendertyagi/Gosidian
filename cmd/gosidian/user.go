@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/qrsvg"
 	"github.com/gosidian/gosidian/internal/webauth"
 	"golang.org/x/term"
 )
@@ -92,8 +93,14 @@ func userSetup(args []string) {
 
 	if *enableTOTP {
 		fmt.Println()
-		fmt.Println("TOTP secret generated. Scan this URI with your authenticator")
+		fmt.Println("TOTP secret generated. Scan the QR below with your authenticator")
 		fmt.Println("(1Password, Bitwarden, Aegis, Google Authenticator, …):")
+		fmt.Println()
+		if qrStr, qerr := qrsvg.Terminal(uri); qerr == nil {
+			fmt.Print(qrStr)
+			fmt.Println()
+		}
+		fmt.Println("Or enter this URI manually:")
 		fmt.Println()
 		fmt.Println("  " + uri)
 		fmt.Println()

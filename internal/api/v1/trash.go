@@ -37,8 +37,13 @@ func (r *Router) handleTrash(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusInternalServerError, CodeServerInternal, err.Error())
 		return
 	}
+	princ := principalFromContext(req)
+	enforced := r.memberScopeEnforced()
 	out := make([]trashView, 0, len(entries))
 	for _, e := range entries {
+		if enforced && !r.canSee(princ, e.OriginPath) {
+			continue // hide trashed notes from projects the user can't access
+		}
 		out = append(out, trashView{
 			ID:          e.ID,
 			OriginPath:  e.OriginPath,
@@ -98,6 +103,21 @@ func (r *Router) handleTrashItem(w http.ResponseWriter, req *http.Request) {
 }
 
 func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id string, user *RequestUser) {
+	// Under member_scope=members, restoring re-creates a note in its origin
+	// project — gate it on write access there. Look the origin up before the
+	// restore mutates anything. See BUG-020 / per-project membership.
+	if r.memberScopeEnforced() {
+		if entries, lerr := r.deps.Trash.List(); lerr == nil {
+			for _, e := range entries {
+				if e.ID == id {
+					if r.denyWriteProject(w, user.principal(), projectOf(e.OriginPath)) {
+						return
+					}
+					break
+				}
+			}
+		}
+	}
 	restored, err := r.deps.Trash.Restore(id)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
@@ -126,6 +146,20 @@ func (r *Router) restoreTrash(w http.ResponseWriter, req *http.Request, id strin
 }
 
 func (r *Router) purgeTrash(w http.ResponseWriter, req *http.Request, id string, user *RequestUser) {
+	// Permanently deleting a trashed note from a project the user can't write to
+	// would be a cross-project mutation — gate it under enforcement.
+	if r.memberScopeEnforced() {
+		if entries, lerr := r.deps.Trash.List(); lerr == nil {
+			for _, e := range entries {
+				if e.ID == id {
+					if r.denyWriteProject(w, user.principal(), projectOf(e.OriginPath)) {
+						return
+					}
+					break
+				}
+			}
+		}
+	}
 	if err := r.deps.Trash.Purge(id); err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return

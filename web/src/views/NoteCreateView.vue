@@ -15,8 +15,8 @@ import { useI18n } from 'vue-i18n'
 import { createNote } from '@/api/notes'
 import { attachFile } from '@/api/attach'
 import { useTreeStore } from '@/stores/tree'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ path?: string }>()
 const emit = defineEmits<{ close: [] }>()

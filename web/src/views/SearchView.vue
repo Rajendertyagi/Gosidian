@@ -4,8 +4,8 @@
 import { ref, watch, onMounted, inject } from 'vue'
 import { useDebounceFn } from '@vueuse/core'
 import { search, type SearchHit } from '@/api/search'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ q?: string; project?: string }>()
 

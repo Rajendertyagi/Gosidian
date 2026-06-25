@@ -43,6 +43,9 @@ func (r *Router) handleAttach(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
+	if r.denyWriteProject(w, principalFromContext(req), project) {
+		return
+	}
 	data, header, errCode, errMsg := r.readAttachUpload(req)
 	if errCode != 0 {
 		WriteError(w, errCode, CodeValidationFormat, errMsg)
@@ -80,6 +83,9 @@ func (r *Router) handleUpload(w http.ResponseWriter, req *http.Request) {
 	project := strings.TrimSpace(req.URL.Query().Get("project"))
 	if project == "" {
 		WriteError(w, http.StatusBadRequest, CodeValidationRequired, "project query param is required")
+		return
+	}
+	if r.denyWriteProject(w, principalFromContext(req), project) {
 		return
 	}
 	data, header, errCode, errMsg := r.readAttachUpload(req)

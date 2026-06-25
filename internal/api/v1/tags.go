@@ -30,7 +30,7 @@ func (r *Router) handleTags(w http.ResponseWriter, req *http.Request) {
 	var err error
 	switch {
 	case project != "":
-		if !p.CanAccessProject(project, r.isPublic) {
+		if !r.canAccessProject(p, project) {
 			WriteJSON(w, http.StatusOK, map[string]any{"items": []tagView{}, "total": 0})
 			return
 		}
@@ -104,7 +104,7 @@ type indexTagCount struct {
 // the full vault tag set; a guest (or unknown role) gets tags aggregated over
 // public projects only, so private tags never leak through the tag list.
 func (r *Router) visibleTags(p authz.Principal) ([]indexTagCount, error) {
-	if p.CanSeeAllProjects() {
+	if r.seesAllProjects(p) {
 		raw, err := r.deps.Index.Tags()
 		if err != nil {
 			return nil, err

@@ -105,6 +105,13 @@ export const useAuthStore = defineStore('auth', {
       this.enrollmentRequired = false
     },
 
+    /** Raise the enrolment interstitial. Called by the API client when any
+     *  route returns 403 auth.enrollment_required — e.g. an owner flipped the
+     *  global TOTP policy to "required" while this session was live. */
+    requireEnrollment() {
+      this.enrollmentRequired = true
+    },
+
     setEnrolled(v: boolean) {
       if (this.user) this.user.totp_enrolled = v
     },

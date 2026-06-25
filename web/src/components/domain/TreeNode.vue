@@ -14,9 +14,9 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Plus } from 'lucide-vue-next'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
-import { useWindowsStore } from '@/stores/windows'
+import { useWindowsStore } from 'plancia'
 import { useAuthStore } from '@/stores/auth'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ node: TN }>()
 const { t } = useI18n()

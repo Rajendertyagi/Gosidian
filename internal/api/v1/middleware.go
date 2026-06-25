@@ -110,6 +110,18 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 			WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "user no longer exists or is disabled")
 			return
 		}
+		// Server-side enforcement of the TOTP enrolment interstitial: a user
+		// whose effective policy mandates TOTP but who has not enrolled a secret
+		// yet holds a valid token (so they can reach the enrol/confirm flow), but
+		// every other route is refused. Without this the SPA-only interstitial is
+		// bypassable by hitting the API directly with the issued token. The 403
+		// also lets the SPA show the interstitial mid-session if an owner flips
+		// the global mode to "required". See BUG-020.
+		if d.WebAuth.TOTPEnrollmentRequired(user) && !enrollmentExemptPath(r.URL.Path) {
+			WriteError(w, http.StatusForbidden, CodeAuthEnrollmentRequired,
+				"two-factor enrolment required before accessing this resource")
+			return
+		}
 		ru := &RequestUser{
 			ID:       user.ID,
 			Username: user.Username,
@@ -119,6 +131,19 @@ func (d *AuthDeps) requireAuth(next http.Handler) http.Handler {
 		ctx = context.WithValue(ctx, ctxKeyToken, token)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// enrollmentExemptPath reports whether path stays reachable for an
+// authenticated user who still owes a TOTP enrolment: the enrolment flow
+// itself, plus the session-lifecycle endpoints so the interstitial session can
+// refresh its token, read its own identity, and log out. Everything else is
+// gated until a secret is enrolled. See requireAuth / BUG-020.
+func enrollmentExemptPath(p string) bool {
+	switch p {
+	case "/api/v1/totp/enroll", "/api/v1/totp/confirm", "/api/v1/refresh", "/api/v1/logout", "/api/v1/me":
+		return true
+	}
+	return false
 }
 
 // requireOwner runs after requireAuth and rejects non-owner sessions.

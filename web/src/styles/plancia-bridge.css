@@ -1,0 +1,55 @@
+/*
+ * plancia ⇄ gosidian theme bridge.
+ *
+ * plancia ships a small semantic-core of CSS variables (--plancia-surface,
+ * --plancia-text, …) and derives everything else (header-bg, tag-bg, shadows,
+ * accent-soft, sidebar/dialog chrome) from them via color-mix()/var(). Mapping
+ * just the core to gosidian's design tokens re-themes the whole component and
+ * follows every preset / light-dark switch for free — gosidian's tokens.css
+ * redefines --color-* per [data-preset], and this bridge resolves them live.
+ *
+ * gosidian stores tokens as `R G B` triplets (see styles/tokens.css) so they
+ * can compose Tailwind alpha modifiers; here we wrap them in rgb().
+ *
+ * Imported once at app root AFTER tokens.css / tailwind.css / plancia's own
+ * style.css so the mapping wins. See src/main.ts.
+ */
+:root {
+  --plancia-surface: rgb(var(--color-surface));
+  --plancia-bg: rgb(var(--color-bg));
+  --plancia-text: rgb(var(--color-text));
+  --plancia-text-muted: rgb(var(--color-text-muted));
+  --plancia-border: rgb(var(--color-border));
+  --plancia-accent: rgb(var(--color-accent));
+  --plancia-on-accent: rgb(var(--color-accent-fg));
+  --plancia-danger: rgb(var(--color-danger));
+  --plancia-warning: rgb(var(--color-warning));
+
+  /*
+   * Sidebar chrome (Slice 4). gosidian's left sidebar uses the page background
+   * (--color-bg), not the surface tone the library defaults to, and its edge
+   * border is the same --color-border as before. The expanded-size fallback is
+   * the historical 260px default so a first paint (before useSidebarResize
+   * loads) matches the old shell; the actual width is driven host-side via
+   * :size (useSidebarResize → --plancia-sidebar-size).
+   */
+  --plancia-sidebar-bg: rgb(var(--color-bg));
+  --plancia-sidebar-border: rgb(var(--color-border));
+  --plancia-sidebar-expanded-size: 260px;
+}
+
+/*
+ * gosidian uses <PlanciaSidebar> as a pure slotted shell: it owns the width,
+ * the edge border and the landmark, while gosidian's own <aside> (bg, menu,
+ * tree, recents, full-width section borders) renders edge-to-edge inside the
+ * body — exactly as it did before the migration. The library's built-in
+ * header (a toggle bar) and body padding would otherwise add a blank strip and
+ * inset the content, so neutralise them here. Scoped to the inline left edge to
+ * leave any other PlanciaSidebar usage untouched.
+ */
+.plancia-sidebar--inline[data-position='left'] > .plancia-sidebar__panel > .plancia-sidebar__header {
+  display: none;
+}
+.plancia-sidebar--inline[data-position='left'] > .plancia-sidebar__panel > .plancia-sidebar__body {
+  padding: 0;
+}

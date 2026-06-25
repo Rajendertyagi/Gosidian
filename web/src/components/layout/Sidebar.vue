@@ -4,9 +4,9 @@ import { useI18n } from 'vue-i18n'
 import { useTreeStore } from '@/stores/tree'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { useSSE } from '@/composables/useSSE'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { useWindowsStore, type OpenSpec } from 'plancia'
 import { useAuthStore } from '@/stores/auth'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { planciaKey } from '@/composables/planciaKey'
 import TreeNode from '@/components/domain/TreeNode.vue'
 import {
   RefreshCw,

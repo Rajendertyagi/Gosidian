@@ -97,7 +97,7 @@ func (r *Router) handleGraph(w http.ResponseWriter, req *http.Request) {
 	keep := graphNodeSet(rawNodes)
 	// Per-role visibility: guests keep only nodes in public projects. Edges
 	// touching dropped nodes fall away in the materialise step below.
-	if princ := principalFromContext(req); !princ.CanSeeAllProjects() {
+	if princ := principalFromContext(req); !r.seesAllProjects(princ) {
 		for path := range keep {
 			if !r.canSee(princ, path) {
 				delete(keep, path)

@@ -48,7 +48,7 @@ func (r *Router) handleSearch(w http.ResponseWriter, req *http.Request) {
 	// Fetch extra hits when filtering (project scope or guest visibility) so
 	// the response still has up to `limit` entries after rejection.
 	fetchLimit := limit
-	if project != "" || !p.CanSeeAllProjects() {
+	if project != "" || !r.seesAllProjects(p) {
 		fetchLimit = limit * 4
 		if fetchLimit > 800 {
 			fetchLimit = 800

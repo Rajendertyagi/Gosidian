@@ -8,6 +8,53 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.12.0] — 2026-06-25 — "Auth/admin hardening + plancia window-manager library"
+
+MINOR release. Three authentication and administration features — TOTP QR
+enrolment with server-side enforcement, direct user creation from the web UI,
+and per-project sharing — land alongside an internal refactor: the tiling
+window-manager is now the standalone open-source
+[`plancia`](https://github.com/daniele-chiappa/plancia) library, consumed from
+npm. Additive and non-breaking — the new sharing model is opt-in (default
+unchanged) and the global TOTP policy is untouched, so existing deployments
+need no migration.
+
+### Added
+- **TOTP enrolment QR code + server-side enforcement.** The enrolment screen now
+  renders a real scannable QR (inline pure-Go SVG; the CLI prints an ASCII QR)
+  instead of a bare secret/URI. When the global TOTP policy is `required`,
+  enrolment is now enforced server-side: requests from a non-enrolled account are
+  gated (`403 auth.enrollment_required`) and the web UI shows a forced enrolment
+  interstitial — even mid-session.
+- **Admin: create a user directly from the web UI.** Owners can create a member
+  or guest from Admin → Users (`POST /admin/users`) with a client-side password
+  generator (Web Crypto); duplicate usernames return `409`. The initial TOTP
+  policy for the new user is selectable.
+- **Per-project membership ACL (opt-in sharing).** A new per-user, per-project
+  membership list (`read` / `write`) lets owners share individual private
+  projects without making them public. The role stays the ceiling — a guest never
+  writes, even with a `write` membership; membership only narrows scope. Gated by
+  a global `member_scope` toggle (`all` | `members`) that **defaults to `all`**,
+  so behaviour is unchanged until you opt in. Member management is owner-only.
+
+### Changed
+- **The tiling window-manager is now the external `plancia` library.** The
+  in-tree window-manager has been extracted into a standalone, zero-runtime-deps
+  npm package (`plancia`) and is consumed as a normal dependency — same UI,
+  cleaner boundary. `plancia@0.2.0` adds window drag-resize (draggable right edge,
+  double-click resets) and percentage width presets.
+
+### Security
+- **dompurify 3.4.11** (was 3.4.10) — fixes GHSA-cmwh-pvxp-8882 (permanent
+  `ALLOWED_ATTR` pollution via `setConfig()`), on the HTML-note sanitisation
+  path.
+- Dependency maintenance: `mark3labs/mcp-go` 0.55.0, `modernc.org/sqlite` 1.53.0.
+
+### Notes
+- Non-breaking by default: `member_scope` defaults to `all` (no per-project
+  gating until you enable it) and the global TOTP mode is unchanged. No data
+  migration is required.
+
 ## [2.11.0] — 2026-06-17 — "Read-only anonymous access (open mode)"
 
 MINOR release. An opt-in read-only mode lets you serve a gosidian instance to

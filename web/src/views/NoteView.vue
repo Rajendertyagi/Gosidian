@@ -24,10 +24,10 @@ import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { planciaKey } from '@/composables/planciaKey'
 import { useAuthStore } from '@/stores/auth'
 import { useTreeStore } from '@/stores/tree'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
+import { useWindowsStore, type OpenSpec } from 'plancia'
 
 const CodeMirrorEditor = defineAsyncComponent(
   () => import('@/components/editor/CodeMirrorEditor.vue'),

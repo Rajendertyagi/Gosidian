@@ -4,8 +4,8 @@
  *  browses within this window, picking a note opens it as a sibling window. */
 import { onMounted, ref, watch, inject } from 'vue'
 import { listTags, notesByTag, type TagCount, type NoteSummary } from '@/api/tags'
-import { useWindowsStore, type OpenSpec } from '@/stores/windows'
-import { planciaKey } from '@/composables/usePlanciaSync'
+import { useWindowsStore, type OpenSpec } from 'plancia'
+import { planciaKey } from '@/composables/planciaKey'
 
 const props = defineProps<{ tag?: string }>()
 

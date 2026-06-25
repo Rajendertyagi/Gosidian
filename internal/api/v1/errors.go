@@ -46,6 +46,11 @@ const (
 	CodeAuthTokenExpired       = "auth.token_expired"
 	CodeAuthForbidden          = "auth.forbidden"
 	CodeAuthOwnerOnly          = "auth.owner_only"
+	// CodeAuthEnrollmentRequired gates an authenticated user whose effective
+	// policy mandates TOTP but who has not enrolled a secret yet: the token is
+	// valid, but every route outside the enrolment flow is refused with this
+	// code so the SPA can surface the enrolment interstitial. See BUG-020.
+	CodeAuthEnrollmentRequired = "auth.enrollment_required"
 	CodeValidationRequired     = "validation.required_field"
 	CodeValidationFormat       = "validation.invalid_format"
 	CodeNotFound               = "resource.not_found"

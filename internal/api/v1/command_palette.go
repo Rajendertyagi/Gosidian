@@ -65,7 +65,7 @@ func (r *Router) handleCommandPalette(w http.ResponseWriter, req *http.Request) 
 		if ps, err := r.deps.Vault.Projects(); err == nil {
 			projects = make([]paletteProject, 0, len(ps))
 			for _, prj := range ps {
-				if !princ.CanAccessProject(prj.Name, r.isPublic) {
+				if !r.canAccessProject(princ, prj.Name) {
 					continue
 				}
 				projects = append(projects, paletteProject{Name: prj.Name, NoteCount: prj.NoteCount})

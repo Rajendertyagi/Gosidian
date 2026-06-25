@@ -59,13 +59,18 @@ func (r *Router) handleProjects(w http.ResponseWriter, req *http.Request) {
 // are intentionally NOT supported in this slice — they arrive in
 // Phase 1.3 with the admin views. Today the slug is single-segment.
 func (r *Router) handleProjectByName(w http.ResponseWriter, req *http.Request) {
-	rest := strings.TrimPrefix(req.URL.Path, "/api/v1/projects/")
-	if rest == "" || rest == "/" {
+	rest := strings.TrimSuffix(strings.TrimPrefix(req.URL.Path, "/api/v1/projects/"), "/")
+	if rest == "" {
 		r.handleProjects(w, req)
 		return
 	}
-	// Reject sub-paths until they get explicit handlers.
-	if strings.Contains(rest, "/") {
+	// Sub-resource routing: /{name}/members[/{userID}].
+	if name, sub, ok := strings.Cut(rest, "/"); ok {
+		seg, tail, _ := strings.Cut(sub, "/")
+		if seg == "members" {
+			r.handleProjectMembers(w, req, name, tail)
+			return
+		}
 		WriteError(w, http.StatusNotFound, CodeNotFound, "sub-resource not implemented")
 		return
 	}
@@ -93,8 +98,8 @@ func (r *Router) listProjects(w http.ResponseWriter, req *http.Request) {
 	princ := principalFromContext(req)
 	out := make([]projectView, 0, len(projs))
 	for _, p := range projs {
-		if !princ.CanAccessProject(p.Name, r.isPublic) {
-			continue // guests: only public projects
+		if !r.canAccessProject(princ, p.Name) {
+			continue // gated by visibility / membership
 		}
 		flags := r.projectFlag(p.Name)
 		out = append(out, projectView{
@@ -117,8 +122,8 @@ func formatModTime(t time.Time) string {
 }
 
 func (r *Router) getProject(w http.ResponseWriter, req *http.Request, name string) {
-	if !principalFromContext(req).CanAccessProject(name, r.isPublic) {
-		// Guests can't see private projects — 404 hides existence.
+	if !r.canAccessProject(principalFromContext(req), name) {
+		// No visibility/membership — 404 hides existence.
 		WriteError(w, http.StatusNotFound, CodeNotFound, "project not found")
 		return
 	}
@@ -171,6 +176,11 @@ func (r *Router) createProject(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
 	}
+	// Under member_scope=members the creator must keep access to what they just
+	// made; owners see everything, so only non-owner creators need a membership.
+	if r.deps.Projects != nil && !user.principal().CanAdmin() {
+		_ = r.deps.Projects.SetMember(clean, user.ID, projects.LevelWrite)
+	}
 	r.auditNote(req, audit.ActionCreateProject, user, clean, "", 0)
 	r.publishSidebarEvent("create", clean)
 	WriteJSON(w, http.StatusCreated, projectView{Name: clean})
@@ -183,6 +193,9 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		return
 	}
 	if denyGuestWrite(w, user) {
+		return
+	}
+	if r.denyWriteProject(w, user.principal(), name) {
 		return
 	}
 	var body updateProjectRequest
@@ -269,6 +282,9 @@ func (r *Router) deleteProject(w http.ResponseWriter, req *http.Request, name st
 		return
 	}
 	if denyGuestWrite(w, user) {
+		return
+	}
+	if r.denyWriteProject(w, user.principal(), name) {
 		return
 	}
 	if !r.projectExists(name) {

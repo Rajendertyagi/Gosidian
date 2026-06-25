@@ -15,6 +15,9 @@ export async function getAuthConfig(): Promise<AuthConfig> {
 export interface TotpEnrollData {
   secret: string
   otpauth_uri: string
+  /** Self-contained inline SVG of the otpauth URI, rendered server-side. May be
+   *  empty if QR rendering failed — fall back to the secret / URI. */
+  qr_svg: string
 }
 
 /** Start enrolment: returns a fresh secret + otpauth URI (not yet active). */

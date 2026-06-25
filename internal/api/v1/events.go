@@ -64,6 +64,13 @@ func (r *Router) handleEvents(w http.ResponseWriter, req *http.Request) {
 		WriteError(w, http.StatusUnauthorized, CodeAuthTokenInvalid, "user no longer exists or is disabled")
 		return
 	}
+	// Mirror requireAuth's enrolment gate: the SSE stream is not part of the
+	// enrolment flow, so a user who still owes a TOTP secret cannot subscribe.
+	// See BUG-020.
+	if r.deps.Auth.WebAuth.TOTPEnrollmentRequired(user) {
+		WriteError(w, http.StatusForbidden, CodeAuthEnrollmentRequired, "two-factor enrolment required before accessing this resource")
+		return
+	}
 
 	topics := parseTopicList(req.URL.Query().Get("topics"))
 
