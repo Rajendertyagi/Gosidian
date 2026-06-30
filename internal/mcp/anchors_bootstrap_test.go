@@ -1,0 +1,122 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/gosidian/gosidian/internal/projects"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
+)
+
+func mkAgent(t *testing.T, s *Server, ctx context.Context, path, title, proj string) {
+	t.Helper()
+	_, _ = s.handleCreate(ctx, call(map[string]any{
+		"path":    path,
+		"content": "---\ntitle: " + title + "\ndescription: routing hint\ntags: [" + proj + ", type:agent]\n---\n\n# " + title + "\n",
+	}))
+}
+
+type anchorsBlock struct {
+	Profile   string `json:"profile"`
+	TargetDir string `json:"target_dir"`
+	Items     []struct {
+		Path        string `json:"path"`
+		Content     string `json:"content"`
+		MetaVersion string `json:"meta_version"`
+		Canonical   string `json:"canonical"`
+	} `json:"items"`
+	Reconcile string `json:"reconcile"`
+}
+
+func TestBootstrap_AgentAnchors_Gating(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetProjects(pstore)
+	ctx := context.Background()
+
+	mkAgent(t, s, ctx, "proj/agents/frontend-engineer.md", "Frontend Engineer", "proj")
+
+	parse := func(res *mcplib.CallToolResult) (anchorsBlock, bool) {
+		t.Helper()
+		var p struct {
+			Anchors *anchorsBlock `json:"anchors"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if p.Anchors == nil {
+			return anchorsBlock{}, false
+		}
+		return *p.Anchors, true
+	}
+
+	// 1. master OFF (default) + flag on → no anchors (backward-compat).
+	if err := pstore.Set("proj", projects.Flags{UseAnchors: true}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude"}))
+	if _, ok := parse(res); ok {
+		t.Error("master off: expected no anchors")
+	}
+
+	s.SetAgentAnchors(true)
+
+	// 2. master on + flag on + claude → anchors present and correct.
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude"}))
+	ab, ok := parse(res)
+	if !ok {
+		t.Fatal("expected anchors payload")
+	}
+	if ab.Profile != "claude" || ab.TargetDir != ".claude/agents" {
+		t.Errorf("profile/target_dir = %q/%q", ab.Profile, ab.TargetDir)
+	}
+	if len(ab.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(ab.Items))
+	}
+	it := ab.Items[0]
+	if it.Path != ".claude/agents/frontend-engineer.md" {
+		t.Errorf("item path = %q", it.Path)
+	}
+	if it.Canonical != "proj/agents/frontend-engineer.md" {
+		t.Errorf("canonical = %q", it.Canonical)
+	}
+	if it.MetaVersion == "" {
+		t.Error("empty meta version")
+	}
+	if !strings.Contains(it.Content, `memory_get({ path: "proj/agents/frontend-engineer.md" })`) {
+		t.Errorf("content missing canonical pull:\n%s", it.Content)
+	}
+	if ab.Reconcile == "" {
+		t.Error("empty reconcile directive")
+	}
+
+	// 3. master on + flag OFF → no anchors.
+	if err := pstore.Set("proj", projects.Flags{}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude"}))
+	if _, ok := parse(res); ok {
+		t.Error("flag off: expected no anchors")
+	}
+
+	// 4. master on + flag on + generic profile (no subagent support) → no anchors.
+	if err := pstore.Set("proj", projects.Flags{UseAnchors: true}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "generic"}))
+	if _, ok := parse(res); ok {
+		t.Error("generic profile: expected no anchors")
+	}
+
+	// 5. default profile (no param) resolves to claude → anchors present.
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj"}))
+	if _, ok := parse(res); !ok {
+		t.Error("default profile claude: expected anchors")
+	}
+}

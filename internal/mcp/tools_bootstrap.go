@@ -23,6 +23,7 @@ func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
 		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename. In the stub model the instruction file lives in the agent's working dir (outside the vault); when it is not a vault note, `agent_md.expected_external` is true and it is NOT reported in `missing` (which lists only absent vault scaffold such as hot.md / README.md)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
+		mcp.WithString("profile", mcp.Description("Optional CLI/agent profile for local agent-anchor materialisation (\"claude\", \"generic\", …). Default \"claude\". When the master switch and the project's use_anchors flag are on and the profile supports native subagents, the response includes an `anchors` block: the set of thin agent-anchor files (each pulls its canonical role from the vault at spawn) to write/reconcile in the agent's cwd, plus a `reconcile` directive. Flags off, or a profile without subagent support, yield no anchors.")),
 	), s.handleBootstrap)
 }
 
@@ -72,6 +73,19 @@ var conventionFiles = []struct {
 // (ADR-010); CLAUDE.md / .cursor/rules.mdc / CONVENTIONS.md are detected for
 // agent-specific harnesses. gosidian no longer assumes a single name.
 var agentFileCandidates = []string{"AGENTS.md", "CLAUDE.md", ".cursor/rules.mdc", "CONVENTIONS.md"}
+
+// anchorReconcileDirective tells the agent how to apply the desired anchor set
+// against its cwd. The server is cwd-blind: it only computes the desired files
+// + their meta_version; the agent (which has filesystem access) does the diff.
+const anchorReconcileDirective = "Riconcilia gli agenti referenziati in `target_dir` (file gitignored). Per ogni item: se il file non esiste → scrivilo con `content`; se esiste con un marker `<!-- gosidian:anchor ... meta=X -->` e X≠`meta_version` → riscrivilo; se X=`meta_version` → lascialo. Rimuovi i file con marker `gosidian:anchor` il cui `canonical` non è più fra gli items (orphan). NON toccare file SENZA il marker `gosidian:anchor` (foreign, scritti a mano): segnalali e proponi l'adozione con `memory_promote_agent`."
+
+// anchorsEnabledFor reports whether the bootstrap should surface agent anchors
+// for (project, profile): master switch on, the project opted into use_anchors,
+// and the profile supports native subagents. Default-off on every axis keeps
+// existing bootstrap behaviour unchanged.
+func (s *Server) anchorsEnabledFor(project string, profile initprompt.Profile) bool {
+	return s.anchorsEnabled && s.projects != nil && s.projects.UsesAnchors(project) && initprompt.SupportsAnchors(profile)
+}
 
 func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tok, errRes := s.authorizeRead(ctx)
@@ -143,6 +157,24 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultErrorFromErr("agents lookup failed", err), nil
 	}
 	payload["available_agents"] = s.mergeGlobals(agents, "type:agent", project, tok)
+
+	// anchors: local agent-anchor materialisation set (plan 20260630). Gated by
+	// the master switch + the project's use_anchors flag + profile capability.
+	// Cwd-blind: the server returns the desired set + a reconcile directive; the
+	// agent diffs against its cwd using each file's marker. Default-off → the key
+	// is absent and bootstrap behaves exactly as before.
+	if profile := initprompt.Profile(strings.TrimSpace(req.GetString("profile", "claude"))); s.anchorsEnabledFor(project, profile) {
+		items, aerr := s.buildAgentAnchors(project, profile, tok)
+		if aerr != nil {
+			return mcp.NewToolResultErrorFromErr("anchors lookup failed", aerr), nil
+		}
+		payload["anchors"] = map[string]any{
+			"profile":    string(profile),
+			"target_dir": initprompt.AnchorDir(profile),
+			"items":      items,
+			"reconcile":  anchorReconcileDirective,
+		}
+	}
 
 	recent, err := s.index.RecentNotes(project, 0, 5)
 	if err != nil {

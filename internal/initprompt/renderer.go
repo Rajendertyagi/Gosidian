@@ -1,7 +1,9 @@
 package initprompt
 
 import (
+	"crypto/sha256"
 	"embed"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"strconv"
@@ -169,4 +171,97 @@ func defaultSuggestedQuestions() []string {
 		"Quali sono i 2-3 file o cartelle più hot (che cambiano spesso)?",
 		"Ci sono convenzioni di build / test / code style già stabilite da rispettare?",
 	}
+}
+
+// AnchorInput carries the canonical metadata needed to render a local agent
+// anchor for a vault `type:agent` note. The note body is NOT included: the
+// anchor never duplicates the role, it pulls it from the vault at runtime.
+type AnchorInput struct {
+	CanonicalPath string   // vault path of the type:agent note, e.g. "plancia/agents/frontend-engineer.md"
+	Slug          string   // anchor file basename (without .md); also the default Name
+	Name          string   // optional override (harness.name); defaults to Slug
+	Description   string   // routing hint (harness.description or the note description)
+	Tools         []string // optional override (harness.tools); defaults to DefaultAnchorTools
+	Model         string   // optional (harness.model)
+}
+
+// AnchorResult is a rendered agent anchor: a thin local file plus the
+// meta_version fingerprint of its anchor-relevant metadata (used by the
+// bootstrap reconciler to detect when only the shell — not the canonical role,
+// which lives in the vault — must be refreshed).
+type AnchorResult struct {
+	Path          string `json:"path"`
+	Content       string `json:"content"`
+	MetaVersion   string `json:"meta_version"`
+	AnchorVersion int    `json:"anchor_version"`
+}
+
+// RenderAgentAnchor renders the local anchor file for one vault agent note,
+// for a profile that supports anchors. It applies the locked defaults
+// (name=slug, tools=DefaultAnchorTools, model optional) and computes the
+// meta_version over the resolved metadata only — the body template is stable,
+// so the version changes iff something that affects the anchor shell changes.
+func RenderAgentAnchor(profile Profile, in AnchorInput) (AnchorResult, error) {
+	prof, ok := profilesMap[profile]
+	if !ok {
+		return AnchorResult{}, fmt.Errorf("%w: %q", ErrUnknownProfile, profile)
+	}
+	if prof.AnchorTemplate == "" {
+		return AnchorResult{}, fmt.Errorf("profile %q does not support agent anchors", profile)
+	}
+	if strings.TrimSpace(in.CanonicalPath) == "" || strings.TrimSpace(in.Slug) == "" {
+		return AnchorResult{}, errors.New("anchor requires canonical path and slug")
+	}
+	name := coalesce(in.Name, in.Slug)
+	tools := in.Tools
+	if len(tools) == 0 {
+		tools = DefaultAnchorTools
+	}
+	desc := strings.TrimSpace(in.Description)
+	model := strings.TrimSpace(in.Model)
+	metaVersion := anchorMetaVersion(in.CanonicalPath, name, desc, tools, model)
+
+	body, err := assetsFS.ReadFile(prof.AnchorTemplate)
+	if err != nil {
+		return AnchorResult{}, fmt.Errorf("read anchor template: %w", err)
+	}
+	modelLine := ""
+	if model != "" {
+		modelLine = "model: " + model + "\n"
+	}
+	vars := map[string]string{
+		"NAME":           name,
+		"DESCRIPTION":    yamlInline(desc),
+		"TOOLS":          strings.Join(tools, ", "),
+		"MODEL_LINE":     modelLine,
+		"CANONICAL":      in.CanonicalPath,
+		"META_VERSION":   metaVersion,
+		"ANCHOR_VERSION": strconv.Itoa(AnchorVersion),
+		"PROFILE":        string(profile),
+	}
+	path := strings.TrimRight(prof.AnchorDir, "/") + "/" + in.Slug + ".md"
+	return AnchorResult{
+		Path:          path,
+		Content:       applyVars(string(body), vars),
+		MetaVersion:   metaVersion,
+		AnchorVersion: AnchorVersion,
+	}, nil
+}
+
+// anchorMetaVersion is a short sha256 over the anchor-relevant metadata, in a
+// fixed order with NUL separators so distinct field layouts cannot collide.
+func anchorMetaVersion(canonical, name, desc string, tools []string, model string) string {
+	h := sha256.New()
+	fmt.Fprintf(h, "canonical\x00%s\x00name\x00%s\x00description\x00%s\x00tools\x00%s\x00model\x00%s",
+		canonical, name, desc, strings.Join(tools, ","), model)
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// yamlInline renders s as a safe single-line double-quoted YAML scalar:
+// newlines collapse to spaces and inner double-quotes become single-quotes.
+func yamlInline(s string) string {
+	s = strings.ReplaceAll(s, "\r", " ")
+	s = strings.ReplaceAll(s, "\n", " ")
+	s = strings.ReplaceAll(s, `"`, `'`)
+	return `"` + strings.TrimSpace(s) + `"`
 }

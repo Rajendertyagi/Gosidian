@@ -115,6 +115,18 @@ func FrontmatterRawForPath(path string, body []byte) string {
 	return ExtractFrontmatterRaw(body)
 }
 
+// BodyAfterFrontmatter returns the markdown body that follows the top
+// frontmatter block (--- ... ---), or the whole input when there is no
+// frontmatter. Used when promoting a foreign agent file: the frontmatter is
+// rebuilt while the body is preserved verbatim.
+func BodyAfterFrontmatter(body []byte) string {
+	loc := frontmatterRe.FindIndex(body)
+	if loc == nil {
+		return string(body)
+	}
+	return string(body[loc[1]:])
+}
+
 // ParseFrontmatterFields extracts the common scalar fields and `tags` from a
 // raw frontmatter block (the string returned by ExtractFrontmatterRaw).
 //
@@ -162,6 +174,86 @@ func ParseFrontmatterFields(raw string) map[string]any {
 		// Strip optional surrounding quotes.
 		val = strings.Trim(val, `"'`)
 		out[key] = val
+	}
+	return out
+}
+
+// ExtractFrontmatterBlock parses an optional indented nested block under
+// `key:` in a raw frontmatter string and returns its immediate sub-keys. A
+// scalar sub-value is returned as string; a sub-value in list form (inline
+// "[a, b]", CSV, or block "- x" lines) is returned as []string. Returns nil
+// when the key is absent or carries an inline (non-block) value. Same custom,
+// dependency-free style as ParseFrontmatterFields.
+//
+// Example:
+//
+//	harness:
+//	  name: frontend-engineer
+//	  tools: [Read, Edit]
+//	  model: sonnet
+//
+// → {"name":"frontend-engineer", "tools":["Read","Edit"], "model":"sonnet"}
+func ExtractFrontmatterBlock(raw, key string) map[string]any {
+	lines := strings.Split(raw, "\n")
+	prefix := key + ":"
+	out := map[string]any{}
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+		// The block key must be a top-level (column 0) frontmatter key.
+		if strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t") {
+			continue
+		}
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		if strings.TrimSpace(strings.TrimPrefix(line, prefix)) != "" {
+			return nil // inline value → not a block
+		}
+		// Collect indented children until indentation returns to column 0.
+		for j := i + 1; j < len(lines); j++ {
+			child := lines[j]
+			if strings.TrimSpace(child) == "" {
+				continue
+			}
+			if !(strings.HasPrefix(child, " ") || strings.HasPrefix(child, "\t")) {
+				break
+			}
+			sm := frontScalarRe.FindStringSubmatch(strings.TrimSpace(child))
+			if sm == nil {
+				continue // e.g. a "- item" line consumed by the list branch below
+			}
+			sk, sv := sm[1], strings.TrimSpace(sm[2])
+			switch {
+			case sv == "":
+				// Block list: gather subsequent "- x" lines.
+				var list []string
+				for k := j + 1; k < len(lines); k++ {
+					t := strings.TrimSpace(lines[k])
+					if !strings.HasPrefix(t, "-") {
+						break
+					}
+					if v := normalizeTag(strings.TrimPrefix(t, "-")); v != "" {
+						list = append(list, v)
+					}
+				}
+				out[sk] = list
+			case strings.HasPrefix(sv, "["):
+				inner := strings.TrimSuffix(strings.TrimPrefix(sv, "["), "]")
+				var list []string
+				for _, tok := range strings.Split(inner, ",") {
+					if v := normalizeTag(tok); v != "" {
+						list = append(list, v)
+					}
+				}
+				out[sk] = list
+			default:
+				out[sk] = strings.Trim(sv, `"'`)
+			}
+		}
+		break
+	}
+	if len(out) == 0 {
+		return nil
 	}
 	return out
 }

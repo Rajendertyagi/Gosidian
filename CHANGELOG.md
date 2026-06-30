@@ -8,6 +8,41 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.13.0] — 2026-06-30 — "Agent anchors: referenced agents from the vault"
+
+MINOR release. A new opt-in subsystem lets your vault `type:agent` notes become
+spawnable CLI subagents without copying them: at session bootstrap gosidian
+returns a set of thin local "anchors" (e.g. `.claude/agents/<slug>.md`) whose
+body simply pulls the canonical role from the vault at spawn time via
+`memory_get`. One source of truth, no duplication. Fully additive and
+**off by default** — with the master switch unset, bootstrap behaves exactly as
+before, so existing deployments need no migration.
+
+### Added
+- **Agent anchors (referenced agents).** `memory_bootstrap` accepts an optional
+  `profile` (default `claude`) and, when enabled, returns an `anchors` block: the
+  desired set of local anchor files (each with its content, a `meta_version`
+  fingerprint, and the canonical vault path it pulls from) plus a `reconcile`
+  directive. The server never writes outside the vault — it computes the desired
+  set; the agent materialises and reconciles the files in its own working
+  directory using each file's `gosidian:anchor` marker. `memory_init_agent` gains
+  the same `anchors` output.
+- **`memory_promote_agent` tool.** Adopts a foreign, hand-written local agent
+  file (one without a `gosidian:anchor` marker) into a canonical vault
+  `type:agent` note — preserving its body and capturing its name/tools into a
+  `harness:` frontmatter block — and returns the anchor to replace it with. A
+  one-shot migration path for pre-existing subagent files.
+- **Per-project `use_anchors` flag** (off by default) and the
+  **`GOSIDIAN_ANCHORS_ENABLED`** master switch (off by default): two-axis opt-in
+  gating that mirrors the shared global-projects feature.
+
+### Notes
+- Off by default on every axis (master switch AND per-project `use_anchors` AND
+  profile support). With the master switch unset the bootstrap payload is
+  unchanged — no migration, no behaviour change.
+- Anchors are a local projection of the vault (the single source of truth); treat
+  them as generated files (e.g. gitignore `.claude/agents/`).
+
 ## [2.12.0] — 2026-06-25 — "Auth/admin hardening + plancia window-manager library"
 
 MINOR release. Three authentication and administration features — TOTP QR

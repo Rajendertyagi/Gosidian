@@ -33,6 +33,13 @@ type profileMeta struct {
 	DisplayName       string
 	PromptAugment     string
 	PromptFromScratch string
+	// AnchorTemplate is the embed.FS path of the agent-anchor template for
+	// this profile, or "" if the profile has no native spawnable-subagent
+	// concept (then agents stay vault-note-only, no local anchor).
+	AnchorTemplate string
+	// AnchorDir is the working-dir-relative directory where anchors are
+	// materialised for this profile (e.g. ".claude/agents").
+	AnchorDir string
 }
 
 // sharedStubTemplate is the thin instruction-file stub emitted by
@@ -72,11 +79,39 @@ const StubVersion = 2
 // chicken-and-egg so existing projects heal without a manual rollout.
 const DirectivesVersion = 2
 
+// AnchorVersion is the version of the agent-anchor template/format. It is
+// substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the
+// bootstrap reconciler knows when an anchor's shell (not its canonical role,
+// which lives in the vault) must be re-rendered. Bump when the anchor template
+// or marker contract changes.
+const AnchorVersion = 1
+
+// DefaultAnchorTools is the least-privilege tool preset granted to a spawned
+// anchor subagent when the canonical note does not override it via a
+// `harness.tools` block. memory_get is mandatory: it is how the anchor pulls
+// its real role from the vault at step zero.
+var DefaultAnchorTools = []string{"Read", "Edit", "Bash", "Grep", "Glob", "mcp__gosidian__memory_get"}
+
+// SupportsAnchors reports whether the profile materialises agent anchors
+// (i.e. the CLI has a native spawnable-subagent concept).
+func SupportsAnchors(p Profile) bool {
+	m, ok := profilesMap[p]
+	return ok && m.AnchorTemplate != ""
+}
+
+// AnchorDir returns the working-dir-relative directory where the profile's
+// agent anchors are materialised, or "" when the profile has no anchor support.
+func AnchorDir(p Profile) string {
+	return profilesMap[p].AnchorDir
+}
+
 var profilesMap = map[Profile]profileMeta{
 	ProfileClaude: {
 		DisplayName:       "Claude Code",
 		PromptAugment:     "assets/claude/prompt_augment.md",
 		PromptFromScratch: "assets/claude/prompt_fromscratch.md",
+		AnchorTemplate:    "assets/claude/agent_anchor.tmpl.md",
+		AnchorDir:         ".claude/agents",
 	},
 	ProfileCursor: {
 		DisplayName:       "Cursor",

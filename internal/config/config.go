@@ -28,8 +28,9 @@ type Config struct {
 	I18n        I18nConfig        `toml:"i18n"`
 	Lint        LintConfig        `toml:"lint"`
 	LDAP        LDAPConfig        `toml:"ldap"`
-	SelfImprove SelfImproveConfig `toml:"self_improve"`
-	Global      GlobalConfig      `toml:"global"`
+	SelfImprove  SelfImproveConfig  `toml:"self_improve"`
+	Global       GlobalConfig       `toml:"global"`
+	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
 }
 
 // SelfImproveConfig enables the agent-sourced self-improvement loop: opted-in
@@ -62,6 +63,16 @@ type GlobalConfig struct {
 	Enabled        bool   `toml:"enabled"`         // master switch; default false
 	PublicProject  string `toml:"public_project"`  // default "global"
 	PrivateProject string `toml:"private_project"` // default "global-private"
+}
+
+// AgentAnchorsConfig is the master switch for local agent-anchor
+// materialisation: when enabled, projects that opted in
+// (projects.Flags.UseAnchors) get their vault agents surfaced at bootstrap as
+// anchor files to write in the agent's cwd, for CLI profiles with native
+// subagents. Disabled by default — with enabled=false gosidian behaves exactly
+// as before. See plan 20260630-agent-anchors.
+type AgentAnchorsConfig struct {
+	Enabled bool `toml:"enabled"` // master switch; default false
 }
 
 // LDAPConfig enables web-login against an external directory via a
@@ -452,6 +463,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_GLOBAL_PRIVATE_PROJECT"); v != "" {
 		c.Global.PrivateProject = v
+	}
+	if v := os.Getenv("GOSIDIAN_ANCHORS_ENABLED"); v != "" {
+		c.AgentAnchors.Enabled = envBool(v)
 	}
 	return nil
 }

@@ -397,6 +397,7 @@ func main() {
 	mcpServer.SetSelfImprove(cfg.SelfImprove.Enabled, cfg.SelfImprove.TargetProject)
 	mcpServer.SetSelfImproveNudge(cfg.SelfImprove.EveryNCalls, cfg.SelfImprove.MaxNudgesPerSession, time.Duration(cfg.SelfImprove.CooldownMinutes)*time.Minute)
 	mcpServer.SetGlobal(cfg.Global.Enabled, cfg.Global.PublicProject, cfg.Global.PrivateProject)
+	mcpServer.SetAgentAnchors(cfg.AgentAnchors.Enabled)
 
 	// v2.0: REST API router under /api/v1/. Mounted always (purely
 	// additive). The SPA shell on `/` is gated by env var below.

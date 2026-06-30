@@ -26,6 +26,7 @@ import (
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/initprompt"
+	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/mark3labs/mcp-go/mcp"
 )
 
@@ -48,6 +49,20 @@ type initAgentResponse struct {
 	GosidianBlock      string   `json:"gosidian_block"`
 	StubVersion        int      `json:"stub_version"`
 	SuggestedQuestions []string `json:"suggested_questions"`
+	// Anchors lists the local agent-anchor files to materialise for the active
+	// profile (empty for profiles without spawnable-subagent support). Read-only
+	// contract: the server returns them; the agent writes them to its cwd.
+	Anchors []anchorRef `json:"anchors,omitempty"`
+}
+
+// anchorRef is one rendered agent anchor: the local target path, the file
+// content to write, the meta_version fingerprint (for refresh detection) and
+// the canonical vault note it pulls from.
+type anchorRef struct {
+	Path        string `json:"path"`
+	Content     string `json:"content"`
+	MetaVersion string `json:"meta_version"`
+	Canonical   string `json:"canonical"`
 }
 
 func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -114,6 +129,11 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultErrorFromErr("render failed", err), nil
 	}
 
+	anchors, err := s.buildAgentAnchors(project, profile, tok)
+	if err != nil {
+		return mcp.NewToolResultErrorFromErr("anchor render failed", err), nil
+	}
+
 	return mcp.NewToolResultJSON(initAgentResponse{
 		Mode:               string(res.Mode),
 		NeedsScaffold:      res.NeedsScaffold,
@@ -121,5 +141,77 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 		GosidianBlock:      res.GosidianBlock,
 		StubVersion:        res.StubVersion,
 		SuggestedQuestions: res.SuggestedQuestions,
+		Anchors:            anchors,
 	})
+}
+
+// buildAgentAnchors renders the local anchor files for every type:agent note
+// in the project, for profiles that support anchors. Returns nil for profiles
+// without anchor support. Read-only: the rendered files are returned for the
+// agent to materialise — the server never writes outside the vault. Reused by
+// the bootstrap reconciler (M2).
+func (s *Server) buildAgentAnchors(project string, profile initprompt.Profile, tok tokenScoped) ([]anchorRef, error) {
+	if !initprompt.SupportsAnchors(profile) {
+		return nil, nil
+	}
+	agents, err := s.filterByTagAndProject("type:agent", project, tok)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]anchorRef, 0, len(agents))
+	for _, a := range agents {
+		note, err := s.vault.Load(a.Path)
+		if err != nil {
+			continue
+		}
+		ar, err := initprompt.RenderAgentAnchor(profile, anchorInputFromNote(a.Path, note.Content))
+		if err != nil {
+			continue
+		}
+		out = append(out, anchorRef{
+			Path:        ar.Path,
+			Content:     ar.Content,
+			MetaVersion: ar.MetaVersion,
+			Canonical:   a.Path,
+		})
+	}
+	return out, nil
+}
+
+// anchorInputFromNote builds the anchor metadata from a type:agent note,
+// applying defaults (name/description) and the optional `harness:` frontmatter
+// overrides (name, description, model, tools).
+func anchorInputFromNote(path string, content []byte) initprompt.AnchorInput {
+	raw := parser.FrontmatterRawForPath(path, content)
+	fields := parser.ParseFrontmatterFields(raw)
+	slug := anchorSlug(path)
+	in := initprompt.AnchorInput{CanonicalPath: path, Slug: slug, Name: slug}
+	if d, ok := fields["description"].(string); ok {
+		in.Description = d
+	}
+	if h := parser.ExtractFrontmatterBlock(raw, "harness"); h != nil {
+		if v, ok := h["name"].(string); ok && strings.TrimSpace(v) != "" {
+			in.Name = v
+		}
+		if v, ok := h["description"].(string); ok && strings.TrimSpace(v) != "" {
+			in.Description = v
+		}
+		if v, ok := h["model"].(string); ok && strings.TrimSpace(v) != "" {
+			in.Model = v
+		}
+		if v, ok := h["tools"].([]string); ok && len(v) > 0 {
+			in.Tools = v
+		}
+	}
+	return in
+}
+
+// anchorSlug derives the anchor file basename (without extension) from the
+// vault note path: "plancia/agents/frontend-engineer.md" → "frontend-engineer".
+func anchorSlug(path string) string {
+	base := path
+	if i := strings.LastIndex(base, "/"); i >= 0 {
+		base = base[i+1:]
+	}
+	return strings.TrimSuffix(base, ".md")
 }

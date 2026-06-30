@@ -94,6 +94,11 @@ type Server struct {
 	globalEnabled bool
 	globalPublic  string
 	globalPrivate string
+	// anchorsEnabled is the master switch for local agent-anchor materialisation
+	// (plan 20260630-agent-anchors). With anchorsEnabled=false (default) the
+	// bootstrap never surfaces an anchors payload — behaviour unchanged.
+	// Per-project opt-in is projects.Flags.UseAnchors.
+	anchorsEnabled bool
 }
 
 // SetEvents wires the SSE hub used to broadcast note/tree changes
@@ -140,6 +145,13 @@ func (s *Server) SetGlobal(enabled bool, public, private string) {
 	s.globalEnabled = enabled
 	s.globalPublic = public
 	s.globalPrivate = private
+}
+
+// SetAgentAnchors configures the master switch for local agent-anchor
+// materialisation. With enabled=false (default) the bootstrap never returns an
+// anchors payload. Per-project opt-in is projects.Flags.UseAnchors.
+func (s *Server) SetAgentAnchors(enabled bool) {
+	s.anchorsEnabled = enabled
 }
 
 // publishNoteChange broadcasts a note-level write (create/update/

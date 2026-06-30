@@ -34,6 +34,11 @@ type Flags struct {
 	// the project's session bootstrap merges in the global skills/agents
 	// (local entries override global ones with the same title). Default false.
 	UseGlobals bool `json:"use_globals,omitempty"`
+	// UseAnchors opts the project into local agent-anchor materialisation: when
+	// set (and the master switch is on), the session bootstrap returns the set
+	// of agent anchors to write/reconcile in the agent's cwd for the active CLI
+	// profile. Default false. See plan 20260630-agent-anchors.
+	UseAnchors bool `json:"use_anchors,omitempty"`
 }
 
 // Entry is a (name, flags) pair returned by All().
@@ -290,6 +295,12 @@ func (s *Store) IsPublic(name string) bool {
 // agents. Unknown projects default to false.
 func (s *Store) UsesGlobals(name string) bool {
 	return s.Get(name).UseGlobals
+}
+
+// UsesAnchors reports whether the project opted into local agent-anchor
+// materialisation. Unknown projects default to false.
+func (s *Store) UsesAnchors(name string) bool {
+	return s.Get(name).UseAnchors
 }
 
 // PublicNames returns the set of project names flagged Public=true, sorted.
