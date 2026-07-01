@@ -2,15 +2,17 @@
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useUIStore } from '@/stores/ui'
 import { useWindowsStore } from 'plancia'
 import { planciaKey } from '@/composables/planciaKey'
-import { Search, LogOut, LogIn } from 'lucide-vue-next'
+import { Search, LogOut, LogIn, Columns2, SquareStack } from 'lucide-vue-next'
 import InsightsBadge from '@/components/layout/InsightsBadge.vue'
 
 const { t } = useI18n()
 
 const router = useRouter()
 const auth = useAuthStore()
+const ui = useUIStore()
 const windows = useWindowsStore()
 
 function openSearch() {
@@ -38,6 +40,40 @@ async function handleLogout() {
         <span>{{ t('nav.search', 'Search') }}</span>
         <kbd class="opacity-60">⌘K</kbd>
       </button>
+
+      <!-- plancia layout toggle: niri strip ↔ tabs (persisted in the UI store) -->
+      <div class="inline-flex items-center rounded border border-border ml-1 overflow-hidden">
+        <button
+          type="button"
+          :class="[
+            'px-1.5 py-1 inline-flex items-center',
+            ui.planciaViewMode === 'strip'
+              ? 'bg-accent/20 text-accent'
+              : 'text-text-muted hover:text-text hover:bg-surface-hover',
+          ]"
+          :title="t('plancia.viewStrip')"
+          :aria-label="t('plancia.viewStrip')"
+          :aria-pressed="ui.planciaViewMode === 'strip'"
+          @click="ui.setPlanciaViewMode('strip')"
+        >
+          <Columns2 class="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          :class="[
+            'px-1.5 py-1 inline-flex items-center border-l border-border',
+            ui.planciaViewMode === 'tabs'
+              ? 'bg-accent/20 text-accent'
+              : 'text-text-muted hover:text-text hover:bg-surface-hover',
+          ]"
+          :title="t('plancia.viewTabs')"
+          :aria-label="t('plancia.viewTabs')"
+          :aria-pressed="ui.planciaViewMode === 'tabs'"
+          @click="ui.setPlanciaViewMode('tabs')"
+        >
+          <SquareStack class="w-3.5 h-3.5" />
+        </button>
+      </div>
     </div>
     <div class="flex items-center gap-3 text-sm">
       <InsightsBadge v-if="auth.isOwner" />

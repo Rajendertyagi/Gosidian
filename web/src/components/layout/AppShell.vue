@@ -19,10 +19,18 @@ import { windowTone } from '@/components/plancia/windowModules'
 import { codec } from '@/composables/planciaKey'
 import { useSidebarResize } from '@/composables/useSidebarResize'
 import { useAuthStore } from '@/stores/auth'
+import { useUIStore } from '@/stores/ui'
 
 const { t } = useI18n()
 const { width, startDrag, reset } = useSidebarResize()
 const auth = useAuthStore()
+const ui = useUIStore()
+// plancia layout mode (strip ↔ tabs), persisted in the UI store; the toggle
+// lives in the TopBar. Two-way via v-model, routed through the store action.
+const viewMode = computed({
+  get: () => ui.planciaViewMode,
+  set: (m) => ui.setPlanciaViewMode(m),
+})
 // URL (`?w=&f=`) ⇆ window-store sync, with localStorage fallback. The gosidian
 // token scheme lives in the codec (`@/composables/planciaKey`).
 const plancia = usePlanciaSync(codec, { useLocalStorage: true, storageKey: 'gosidian.plancia' })
@@ -44,6 +52,9 @@ const planciaLabels = computed<PlanciaLabels>(() => ({
   dirty: t('plancia.dirty'),
   unsavedClose: t('plancia.unsavedClose'),
   openTag: t('plancia.openTag'),
+  viewStrip: t('plancia.viewStrip'),
+  viewTabs: t('plancia.viewTabs'),
+  viewToggle: t('plancia.viewToggle'),
 }))
 
 // Cross-window open for the ego-graph action below (plancia provides it through
@@ -105,7 +116,12 @@ function onEnrolled() {
       />
 
       <main class="flex-1 min-w-0 overflow-hidden">
-        <Plancia :registry="windowRegistry" :labels="planciaLabels" :resolve-tone="windowTone">
+        <Plancia
+          v-model:view-mode="viewMode"
+          :registry="windowRegistry"
+          :labels="planciaLabels"
+          :resolve-tone="windowTone"
+        >
           <!-- Domain action: open the ego-graph ("direct links") of a note
                window. Gated on a note path; lucide icon stays in gosidian. -->
           <template #window-actions="{ win }">

@@ -28,9 +28,13 @@ export type ThemePreset =
 
 export type LocaleCode = 'it' | 'en' | 'es' | 'fr' | 'de'
 
+/** plancia layout: the niri-style strip or a tab bar. Persisted like the rest. */
+export type PlanciaViewMode = 'strip' | 'tabs'
+
 interface UIState {
   preset: ThemePreset
   locale: LocaleCode | ''
+  planciaViewMode: PlanciaViewMode
 }
 
 const VALID_PRESETS: ThemePreset[] = [
@@ -50,12 +54,17 @@ export const useUIStore = defineStore('ui', {
   state: (): UIState => ({
     preset: 'catppuccin-mocha',
     locale: '',
+    planciaViewMode: 'strip',
   }),
   actions: {
     setPreset(preset: ThemePreset) {
       if (!VALID_PRESETS.includes(preset)) return
       this.preset = preset
       this.applyPreset()
+    },
+    setPlanciaViewMode(mode: PlanciaViewMode) {
+      if (mode !== 'strip' && mode !== 'tabs') return
+      this.planciaViewMode = mode
     },
     setLocale(locale: LocaleCode) {
       if (!VALID_LOCALES.includes(locale)) return

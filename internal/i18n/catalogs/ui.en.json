@@ -26,7 +26,10 @@
     "minimizedHint": "{n} minimized in the footer ↓",
     "openFromSidebar": "Open a note from the sidebar.",
     "minimizedLabel": "Minimized:",
-    "restore": "Restore"
+    "restore": "Restore",
+    "viewStrip": "Strip",
+    "viewTabs": "Tabs",
+    "viewToggle": "Toggle view (strip/tabs)"
   },
   "common": {
     "save": "Save",

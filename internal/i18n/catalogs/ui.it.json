@@ -26,7 +26,10 @@
     "minimizedHint": "{n} ridotte nel footer ↓",
     "openFromSidebar": "Apri una nota dalla sidebar.",
     "minimizedLabel": "Ridotte:",
-    "restore": "Ripristina"
+    "restore": "Ripristina",
+    "viewStrip": "Striscia",
+    "viewTabs": "Schede",
+    "viewToggle": "Cambia vista (striscia/schede)"
   },
   "common": {
     "save": "Salva",

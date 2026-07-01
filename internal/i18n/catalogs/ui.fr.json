@@ -13,7 +13,10 @@
     "minimizedHint": "{n} minimized in the footer ↓",
     "openFromSidebar": "Open a note from the sidebar.",
     "minimizedLabel": "Minimized:",
-    "restore": "Restore"
+    "restore": "Restore",
+    "viewStrip": "Bande",
+    "viewTabs": "Onglets",
+    "viewToggle": "Changer de vue (bande/onglets)"
   },
   "_stub": "Scaffolding v1.10 — common/tree/nav/index/confirm/palette/layout/login/note_edit/audit/backlinks/graph/projects_page/project_detail/project_dashboard/search_results/settings/tag_notes/tokens/trash/users translated; other keys fall back to EN. Contribute via CONTRIBUTING.md Translating gosidian section.",
   "common": {

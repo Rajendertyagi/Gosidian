@@ -8,6 +8,37 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.14.0] — 2026-07-01 — "Plancia view mode: strip ↔ tabs"
+
+MINOR release. The window manager (plancia) can now switch, at runtime, between
+the niri-style horizontal **strip** and a **tabs** layout: a horizontally
+scrollable tab bar — each tab showing the window title and a direct close
+button — over a single full-width pane that mounts only the focused window (kept
+alive), so many open windows stay cheap. The toggle lives in the top bar and the
+choice is remembered across reloads. Strip mode is unchanged and stays the
+default, so existing sessions are unaffected until a user opts in.
+
+### Added
+- **Tabs view mode.** A segmented toggle in the top bar switches the plancia
+  between `strip` (the tiling strip) and `tabs` (a scrollable tab bar over one
+  focused pane). In tabs mode each tab shows its window's title and a close
+  button that closes the window directly — no need to minimise it first — and the
+  tab bar scrolls horizontally when there are many windows, keeping the active
+  tab in view. The chosen mode is persisted (`localStorage` `gosidian.ui`).
+- New `plancia.viewStrip` / `plancia.viewTabs` / `plancia.viewToggle` UI strings
+  across all five locale catalogs.
+
+### Changed
+- **plancia dependency bumped to `0.3.0`**, which adds the `v-model:view-mode`
+  layout, a scrollable closable tab bar, and `KeepAlive`-bounded mounting for the
+  tabs pane (only the focused window is mounted). In tabs mode, hosting many
+  windows goes from O(N) mounted subtrees to O(1) — the key lever for large
+  workspaces.
+
+### Notes
+- Additive and backward-compatible: the default view mode is `strip`, so the UI
+  looks and behaves exactly as before until a user switches to tabs. No migration.
+
 ## [2.13.0] — 2026-06-30 — "Agent anchors: referenced agents from the vault"
 
 MINOR release. A new opt-in subsystem lets your vault `type:agent` notes become
