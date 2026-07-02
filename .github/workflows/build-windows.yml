@@ -1,5 +1,3 @@
-.github/workflows/build-windows.yml
-
 name: Build Windows
 
 on:
