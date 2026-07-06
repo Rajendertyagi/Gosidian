@@ -30,7 +30,7 @@ func serverWithToken(t *testing.T, project string, scopes []string) (*Server, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	plaintext, _, err := store.Create("test", project, scopes, 0, "")
+	plaintext, _, err := store.Create("test", splitProjects(project), scopes, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}

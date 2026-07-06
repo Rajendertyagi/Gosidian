@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gosidian/gosidian/internal/auth"
 	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -236,23 +237,42 @@ func (s *Server) handleStale(ctx context.Context, req mcp.CallToolRequest) (*mcp
 // resolveProject pulls the project parameter and enforces token project
 // scoping. Unlike memory_list_notes, memory_plans/skills/pinned/stale require
 // project to be non-empty: operating on the whole vault is deliberately not
-// supported (the semantic of "plans" is tied to a project).
-func (s *Server) resolveProject(tok interface {
-	ProjectFilter() string
-}, req mcp.CallToolRequest) (string, error) {
-	project := strings.TrimSpace(req.GetString("project", ""))
-	scope := tok.ProjectFilter()
-	if scope != "" {
-		if project != "" && project != scope {
-			return "", fmt.Errorf("project %q is outside the token's scope %q", project, scope)
-		}
-		project = scope
+// supported (the semantic of "plans" is tied to a project). Single-project
+// tokens may omit the argument (forced to their project); multi-project
+// tokens must name one of theirs.
+func (s *Server) resolveProject(tok *auth.Token, req mcp.CallToolRequest) (string, error) {
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return "", err
 	}
 	if project == "" {
 		return "", fmt.Errorf("project is required")
 	}
 	if s.projectHidden(project) {
 		return "", fmt.Errorf("project %q is hidden from MCP by config", project)
+	}
+	return project, nil
+}
+
+// scopedProject applies the token scope to an optional project argument:
+// admin tokens pass it through unchanged ("" = vault-wide where the caller
+// supports it), single-project tokens default to their project and may not
+// name another, multi-project tokens must name one of theirs explicitly (an
+// empty argument cannot silently widen a per-project query to vault-wide).
+func scopedProject(tok *auth.Token, project string) (string, error) {
+	project = strings.TrimSpace(project)
+	if tok.IsAdmin() {
+		return project, nil
+	}
+	list := tok.ProjectList()
+	if project == "" {
+		if len(list) == 1 {
+			return list[0], nil
+		}
+		return "", fmt.Errorf("token is scoped to projects [%s]; pass the project argument", tok.ScopeLabel())
+	}
+	if !tok.AllowsProject(project) {
+		return "", fmt.Errorf("project %q is outside the token's scope [%s]", project, tok.ScopeLabel())
 	}
 	return project, nil
 }

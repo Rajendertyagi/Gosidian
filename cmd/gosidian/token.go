@@ -54,7 +54,10 @@ Common options:
 
 Create options:
   --name <s>              Human label (required)
-  --project <s>           Restrict the token to a top-level project (empty = admin)
+  --project <s>           Restrict the token to one or more top-level projects,
+                          comma-separated, e.g. "gosidian" or "agent-a,agent-b"
+                          (empty = admin). A multi-project token suits an
+                          orchestrator spanning several agent projects.
   --scopes read,write     Comma-separated scopes (default: read,write)
   --ttl <duration>        Expiration, e.g. 720h. 0 = no expiry (default)
   --self-improve          Opt this token in to the self-improvement insight loop
@@ -88,16 +91,16 @@ func tokenCreate(args []string) {
 	fs := flag.NewFlagSet("token create", flag.ExitOnError)
 	vaultDir := fs.String("vault", "", "vault directory")
 	name := fs.String("name", "", "token name")
-	project := fs.String("project", "", "restrict to project (empty = admin)")
+	project := fs.String("project", "", "comma-separated project list (empty = admin)")
 	scopesCSV := fs.String("scopes", "read,write", "comma-separated scopes")
 	ttl := fs.Duration("ttl", 0, "expiration (0 = no expiry)")
 	selfImprove := fs.Bool("self-improve", false, "opt this token in to the self-improvement insight loop")
 	_ = fs.Parse(args)
 
 	store := openStore(*vaultDir)
-	scopes := parseScopes(*scopesCSV)
+	scopes := splitCSV(*scopesCSV)
 
-	plaintext, tok, err := store.Create(*name, *project, scopes, *ttl, "")
+	plaintext, tok, err := store.Create(*name, splitCSV(*project), scopes, *ttl, "")
 	if err != nil {
 		log.Fatalf("create: %v", err)
 	}
@@ -111,7 +114,7 @@ func tokenCreate(args []string) {
 	fmt.Printf("Token created.\n\n")
 	fmt.Printf("  id:      %s\n", tok.ID)
 	fmt.Printf("  name:    %s\n", tok.Name)
-	fmt.Printf("  project: %s\n", displayProject(tok.Project))
+	fmt.Printf("  project: %s\n", tok.ScopeLabel())
 	fmt.Printf("  scopes:  %s\n", strings.Join(tok.Scopes, ","))
 	if tok.SelfImproveOptIn {
 		fmt.Printf("  self-improve: opt-in\n")
@@ -146,7 +149,7 @@ func tokenList(args []string) {
 			si = "opt-in"
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-			t.ID, t.Name, displayProject(t.Project),
+			t.ID, t.Name, t.ScopeLabel(),
 			strings.Join(t.Scopes, ","),
 			t.CreatedAt.Format("2006-01-02"),
 			exp, si)
@@ -214,7 +217,7 @@ func optInWord(optIn bool) string {
 	return "withdrawn"
 }
 
-func parseScopes(csv string) []string {
+func splitCSV(csv string) []string {
 	parts := strings.Split(csv, ",")
 	out := make([]string, 0, len(parts))
 	for _, p := range parts {
@@ -224,11 +227,4 @@ func parseScopes(csv string) []string {
 		}
 	}
 	return out
-}
-
-func displayProject(p string) string {
-	if p == "" {
-		return "(admin)"
-	}
-	return p
 }

@@ -8,6 +8,14 @@ Following these keeps retrieval predictable and write safety tight.
 1. **Bootstrap**: `memory_bootstrap(project)` in one call to get the
    hot state + active plans + skills + recent notes + top tags + a
    `missing[]` list of expected-but-absent canonical files.
+   **Repeat bootstraps should be slim**: pass
+   `known_directives_version` (from the previous payload) to omit the
+   directives block, `known_etags={path: etag}` so unchanged
+   hot/README/instruction files come back as `unchanged:true` with no
+   body, and `mode="lite"` to get the `hot.md` frontmatter + outline
+   instead of its full body (pull sections on demand with
+   `memory_get_section`). A frequently-respawned sub-agent pays a few
+   hundred bytes instead of the full payload when nothing changed.
 2. **Discover**: `memory_plans(project, status="in-progress")` or
    `memory_notes_by_tag(tag, project)` for typed retrieval.
    `memory_todos(project, only_open=true)` to enumerate pending
@@ -65,16 +73,58 @@ The three built-in templates are described in
 
 ## Agent-to-agent handoff
 
-When passing the baton between specialised agents:
+When passing the baton between specialised agents, the handoff is a
+note with a server-enforced lifecycle: `pending → claimed → done |
+rejected`.
 
-1. Source agent: `memory_create_handoff(from_agent, to_agent,
-   summary, pending_items)`. Creates
+1. Source agent: `memory_create_handoff(project, from_agent,
+   to_agent, summary, pending_items?)`. Creates
    `<project>/handoffs/YYYYMMDD-<slug>.md` with frontmatter
-   `type:handoff, status:pending`.
-2. Target agent: `memory_pending_handoffs(for_agent=<name>)` on
-   session open.
-3. Target agent closes the handoff with `memory_update` setting
-   `status:done` once the work lands.
+   `type:handoff, status:pending` and a server-stamped `created_by`
+   (token identity — `from_agent`/`to_agent` are declarative role
+   slugs, `*_by` fields are who actually held the credentials).
+2. Target agent: `memory_pending_handoffs(project,
+   for_agent=<name>)` on session open.
+3. **Claim before working**: `memory_claim_handoff(path)`. The flip
+   `pending → claimed` is atomic under a per-note lock — when several
+   workers race for the same handoff exactly one wins and the others
+   get an "already claimed by <who>" error, so work is never done
+   twice.
+4. When the work lands (or is refused):
+   `memory_complete_handoff(path, outcome="done"|"rejected",
+   note?)`. Only the claiming token — or an admin token, the escape
+   hatch for dead agents — can complete; the optional note is
+   appended as an `## Outcome` section.
+5. An orchestrator monitors work in flight with
+   `memory_pending_handoffs(project, status="claimed")` (or
+   `"done"`, `"rejected"`, `"all"`).
 
 This replaces ad-hoc "read the latest plan to figure out what's left"
-with a structured, queryable artifact.
+with a structured, queryable artifact — and, with claim/complete, a
+minimal multi-agent task queue where every note stays plain markdown.
+
+## Waiting for changes (instead of polling)
+
+A worker or orchestrator that would otherwise poll
+`memory_pending_handoffs` / `memory_recent` in a loop should park on
+the change feed:
+
+```text
+# 1. establish the cursor (first call returns immediately on timeout)
+memory_wait_changes(timeout_s=1)                  → {cursor: N}
+
+# 2. loop: block until something changes in scope (max 55s per call)
+memory_wait_changes(cursor=N, timeout_s=55)       → {events: [...], cursor: M}
+#    ...react to events (e.g. a new note under <project>/handoffs/),
+#    then call again with cursor=M — the short replay ring bridges
+#    the gap between two calls, nothing is lost.
+
+# 3. if the response carries resync=true the cursor fell out of the
+#    replay window: reconcile with memory_recent, then resume.
+```
+
+One wait per MCP session: call it back-to-back, not in parallel. A
+multi-project token (see
+[Authentication](authentication.md#per-project-scoping)) waits on all
+of its projects at once — the natural shape for an orchestrator
+supervising several agent projects.

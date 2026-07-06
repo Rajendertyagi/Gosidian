@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/gosidian/gosidian/internal/initprompt"
+	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -24,6 +25,9 @@ func (s *Server) registerBootstrapTool() {
 		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename. In the stub model the instruction file lives in the agent's working dir (outside the vault); when it is not a vault note, `agent_md.expected_external` is true and it is NOT reported in `missing` (which lists only absent vault scaffold such as hot.md / README.md)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 		mcp.WithString("profile", mcp.Description("Optional CLI/agent profile for local agent-anchor materialisation (\"claude\", \"generic\", …). Default \"claude\". When the master switch and the project's use_anchors flag are on and the profile supports native subagents, the response includes an `anchors` block: the set of thin agent-anchor files (each pulls its canonical role from the vault at spawn) to write/reconcile in the agent's cwd, plus a `reconcile` directive. Flags off, or a profile without subagent support, yield no anchors.")),
+		mcp.WithNumber("known_directives_version", mcp.Description("Token economy: the directives_version you already hold (from a previous bootstrap this session family). When it matches the server's current version, directives_block is omitted from the payload — directives_version is always present so you can detect the match. Omit or pass 0 to always receive the block.")),
+		mcp.WithObject("known_etags", mcp.Description("Token economy: map of vault-relative path → etag from a previous bootstrap (e.g. {\"proj/hot.md\": \"...\"}). Files whose etag still matches come back with unchanged:true and no content — re-read only what actually changed. Applies to hot_md, readme and agent_md.")),
+		mcp.WithString("mode", mcp.Description("full (default) or lite. lite replaces the hot.md body with its frontmatter + heading outline — a fraction of the tokens; fetch sections you need via memory_get_section. Combine with known_etags for minimal repeat bootstraps.")),
 	), s.handleBootstrap)
 }
 
@@ -36,6 +40,12 @@ type bootstrapFile struct {
 	// but expected to live in the agent's working dir (the stub model, ADR-010).
 	// Only ever set on the agent_md payload, never on hot.md/README.md.
 	ExpectedExternal bool `json:"expected_external,omitempty"`
+	// Unchanged marks a file whose etag matched the caller's known_etags —
+	// the body was deliberately omitted (Content empty ≠ empty file).
+	Unchanged bool `json:"unchanged,omitempty"`
+	// Frontmatter+Headings replace Content in lite mode (hot.md only).
+	Frontmatter string           `json:"frontmatter,omitempty"`
+	Headings    []outlineHeading `json:"headings,omitempty"`
 }
 
 type bootstrapStats struct {
@@ -97,6 +107,15 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	mode := strings.TrimSpace(req.GetString("mode", "full"))
+	switch mode {
+	case "full", "lite":
+		// ok
+	default:
+		return mcp.NewToolResultErrorf("unknown mode %q (expected full or lite)", mode), nil
+	}
+	knownEtags := extractStringMap(req.GetArguments()["known_etags"])
+
 	payload := map[string]any{
 		"project": project,
 		// Directives are SERVED here (ADR-010): directives_block is the full
@@ -108,14 +127,30 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		"directives_version": initprompt.DirectivesVersion,
 		"stub_version":       initprompt.StubVersion,
 	}
-	if block, _, derr := initprompt.RenderDirectives(project); derr == nil {
-		payload["directives_block"] = block
+	// Version negotiation: a caller that already holds the current directives
+	// skips the whole block — directives_version above is the match signal.
+	if req.GetInt("known_directives_version", 0) != initprompt.DirectivesVersion {
+		if block, _, derr := initprompt.RenderDirectives(project); derr == nil {
+			payload["directives_block"] = block
+		}
 	}
 	var missing []string
 
 	for _, f := range conventionFiles {
 		full := path.Join(project, f.rel)
 		file := s.loadBootstrapFile(full)
+		file = applyKnownEtag(file, knownEtags)
+		if mode == "lite" && f.key == "hot_md" && file.Present && !file.Unchanged {
+			// Lite: the session cache tends to be the payload's heaviest part.
+			// Serve its shape (frontmatter + outline), not its body; the agent
+			// pulls the sections it needs via memory_get_section.
+			content := []byte(file.Content)
+			file.Frontmatter = parser.FrontmatterRawForPath(file.Path, content)
+			for _, h := range parser.ExtractHeadings(content) {
+				file.Headings = append(file.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
+			}
+			file.Content = ""
+		}
 		payload[f.key] = file
 		if !file.Present {
 			missing = append(missing, f.rel)
@@ -133,6 +168,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	agentFile, agentName := s.detectAgentFile(project)
 	if agentFile.Present {
 		payload["agent_md_name"] = agentName
+		agentFile = applyKnownEtag(agentFile, knownEtags)
 	} else {
 		agentFile.ExpectedExternal = true
 	}
@@ -262,6 +298,21 @@ func (s *Server) loadBootstrapFile(rel string) bootstrapFile {
 	}
 }
 
+// applyKnownEtag omits the body of a file whose etag matches the caller's
+// known_etags entry, flagging it Unchanged so the client can tell "omitted
+// because you have it" from "empty file". Keys are vault-relative paths as
+// returned by a previous bootstrap.
+func applyKnownEtag(file bootstrapFile, known map[string]string) bootstrapFile {
+	if !file.Present || file.Path == "" || len(known) == 0 {
+		return file
+	}
+	if et, ok := known[file.Path]; ok && et != "" && et == file.ETag {
+		file.Content = ""
+		file.Unchanged = true
+	}
+	return file
+}
+
 // detectAgentFile returns the first existing instruction file (as a vault note)
 // among agentFileCandidates under the project, plus the name that matched.
 // Returns {Present:false}, "" when none exists. Agent-agnostic (ADR-010).
@@ -369,7 +420,6 @@ func (s *Server) mergeGlobals(local []noteRef, tag, project string, tok tokenSco
 // tokenScoped is a narrow subset of *auth.Token, declared locally so helpers
 // don't depend on the concrete type and tests can stub if needed.
 type tokenScoped interface {
-	ProjectFilter() string
 	AllowsPath(path string) bool
 }
 

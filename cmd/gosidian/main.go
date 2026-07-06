@@ -394,6 +394,7 @@ func main() {
 	// see external-tab + agent edits in real time.
 	mcpServer.SetEvents(eventsHub)
 	mcpServer.SetLintExtraAllowedTags(cfg.Lint.FrontmatterTagVocabulary.ExtraAllowed)
+	mcpServer.SetLintHotOversizeLimit(cfg.Lint.HotOversizeBytes)
 	mcpServer.SetSelfImprove(cfg.SelfImprove.Enabled, cfg.SelfImprove.TargetProject)
 	mcpServer.SetSelfImproveNudge(cfg.SelfImprove.EveryNCalls, cfg.SelfImprove.MaxNudgesPerSession, time.Duration(cfg.SelfImprove.CooldownMinutes)*time.Minute)
 	mcpServer.SetGlobal(cfg.Global.Enabled, cfg.Global.PublicProject, cfg.Global.PrivateProject)

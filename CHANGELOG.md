@@ -8,6 +8,91 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.15.0] — 2026-07-06 — "Agent orchestration bus"
+
+MINOR release. gosidian can now serve as the coordination bus between an
+orchestrator agent and its sub-agents: handoffs gained a real lifecycle with an
+atomic claim, tokens can span multiple projects, and a long-poll change feed
+replaces poll loops. Everything stays a plain markdown note — no queues, no
+message tables — and every change is additive and backward compatible.
+55 MCP tools total.
+
+### Added
+- **Handoff lifecycle** (`pending → claimed → done | rejected`).
+  `memory_claim_handoff` atomically takes a pending handoff in charge under a
+  per-note lock — when several agents race for the same handoff exactly one
+  wins, the others get an "already claimed by …" error, so work is never done
+  twice. `memory_complete_handoff` closes it as `done` or `rejected` (claiming
+  token or an admin only) with an optional `## Outcome` section.
+  `memory_pending_handoffs` gains a `status` filter (`pending` default,
+  `claimed`/`done`/`rejected`/`all`), an optional `for_agent`, and exposes the
+  lifecycle fields per entry.
+- **Server-stamped identity on handoffs.** `created_by`, `claimed_by` and
+  `completed_by` carry the calling token's identity (`name@id`), stamped
+  server-side — they are not tool parameters and cannot be forged.
+  `from_agent`/`to_agent` stay declarative role slugs: declaration and identity
+  live side by side.
+- **Multi-project tokens.** `gosidian token create --project a,b` scopes one
+  token to several projects — the natural shape for an orchestrator
+  coordinating N agent projects without an over-privileged admin token. The
+  REST API accepts `projects: [...]` on `POST /api/v1/admin/tokens`;
+  `memory_self_stats` reports the list. Where a single-project token is
+  silently defaulted, a multi-project token must name the project explicitly —
+  an omitted argument never widens a query.
+- **`memory_wait_changes` long-poll change feed.** Park one call (up to 55s)
+  and wake as soon as a note changes inside the token's scope, instead of
+  burning tokens polling `memory_recent`/`memory_pending_handoffs`. A short
+  replay ring bridges the gap between two consecutive calls via the returned
+  `cursor`; `resync: true` signals the cursor fell out of the window (reconcile
+  with `memory_recent`). One wait per MCP session.
+- **Slim repeat bootstraps.** `memory_bootstrap` accepts
+  `known_directives_version` (matching version omits the directives block),
+  `known_etags` (unchanged hot/README/instruction files come back
+  `unchanged: true` with no body) and `mode: "lite"` (hot.md body replaced by
+  frontmatter + heading outline). A respawned sub-agent pays a few hundred
+  bytes instead of the full payload when nothing changed.
+- **Bounded bulk reads.** `memory_batch_get` gains `mode=outline|frontmatter`
+  (skip bodies entirely) and `max_bytes_per_note` (truncate long ones, flagged
+  `truncated: true`); every entry now carries its `etag`.
+- **`hot-oversize` lint rule** (default on, warning): a `hot.md` past 16 KiB is
+  inlined into every bootstrap payload and dominates session-start cost.
+  Threshold configurable via `[lint] hot_oversize_bytes`.
+- **Agent anchors documentation.** The v2.13.0 anchors feature gets a real page
+  ([docs/mcp/agent-anchors.md](docs/mcp/agent-anchors.md)): the model, the
+  three gating switches, the reconcile flow and `memory_promote_agent` — it was
+  previously only mentioned in this changelog.
+
+### Fixed
+- **`if_match` is now a true compare-and-swap.** The load → check → write
+  sequence in every MCP and HTTP note handler runs under a per-note lock; two
+  concurrent writers passing the etag check in the same window can no longer
+  clobber each other (TOCTOU). Also serializes concurrent `memory_ask` calls
+  (no duplicate OQ ids) and same-second handoff creations (suffix probing
+  instead of overwriting).
+- **Project-scoped tokens can create handoffs.** `memory_create_handoff`
+  authorized against an empty path, which always rejected scoped tokens — only
+  admin tokens could ever hand off. Latent since the tool shipped.
+- **`memory_append` and the handoff tools now publish change events** on the
+  internal hub (note/tree topics), so SPA subscribers and `memory_wait_changes`
+  waiters wake on them like they already did for create/update/delete.
+
+### Changed
+- Operational directives bumped to **v3**: handoff vocabulary and the
+  claim-before-work rule, plus the token-economy guidance (slim bootstraps,
+  bounded bulk reads, hot-oversize grooming). Served fresh by
+  `memory_bootstrap` — projects pick it up automatically.
+- Docs refreshed throughout: orchestration tool group, handoff + change-feed
+  patterns, multi-project token semantics, configuration reference
+  (`GOSIDIAN_ANCHORS_ENABLED`, `lint.hot_oversize_bytes`).
+
+### Notes
+- Fully backward compatible: existing `tokens.json` files load unchanged
+  (legacy single-project records keep working; new multi-project tokens store
+  the first project in the legacy field, so older binaries see a narrower —
+  never wider — scope). Single-project tokens behave exactly as before.
+- After upgrading, MCP clients connected during the restart should reconnect
+  to refresh their tool catalog (3 new tools).
+
 ## [2.14.0] — 2026-07-01 — "Plancia view mode: strip ↔ tabs"
 
 MINOR release. The window manager (plancia) can now switch, at runtime, between

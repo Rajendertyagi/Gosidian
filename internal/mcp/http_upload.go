@@ -43,13 +43,10 @@ func (s *Server) handleHTTPUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Resolve + enforce the project scope, mirroring the MCP tools.
-	project := strings.TrimSpace(r.URL.Query().Get("project"))
-	if pf := tok.ProjectFilter(); pf != "" {
-		if project != "" && project != pf {
-			writeJSONError(w, http.StatusForbidden, "project is outside the token's scope")
-			return
-		}
-		project = pf
+	project, err := scopedProject(tok, r.URL.Query().Get("project"))
+	if err != nil {
+		writeJSONError(w, http.StatusForbidden, err.Error())
+		return
 	}
 
 	if err := r.ParseMultipartForm(attach.MaxBytes + (1 << 20)); err != nil {

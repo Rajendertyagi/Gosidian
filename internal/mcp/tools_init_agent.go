@@ -78,8 +78,8 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 	if project == "" {
 		return mcp.NewToolResultError("project must not be empty"), nil
 	}
-	if scope := tok.ProjectFilter(); scope != "" && project != scope {
-		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
+	if !tok.AllowsProject(project) {
+		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ScopeLabel()), nil
 	}
 	if res := s.rejectIfHidden(project); res != nil {
 		return res, nil

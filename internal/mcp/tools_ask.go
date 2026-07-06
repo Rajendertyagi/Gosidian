@@ -81,6 +81,9 @@ func (s *Server) handleAsk(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 
 	// Load existing file when present; otherwise seed with the canonical
 	// template. Either way we end up with a byte slice and the next OQ id.
+	// Locked so two concurrent asks can't mint the same OQ id.
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	var existing []byte
 	if note, loadErr := s.vault.Load(rel); loadErr == nil {
 		existing = note.Content

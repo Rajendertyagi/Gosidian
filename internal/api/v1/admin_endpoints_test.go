@@ -226,7 +226,7 @@ func TestAdminUsers_DisableCascadesTokens(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Mint an MCP token for carol so we can verify the cascade.
-	plain, _, err := f.mcpStore.Create("carol-agent", "", []string{"read"}, 0, user.ID)
+	plain, _, err := f.mcpStore.Create("carol-agent", nil, []string{"read"}, 0, user.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

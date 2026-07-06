@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
@@ -77,6 +78,10 @@ type Server struct {
 	// change for vaults that do not configure it. Wired by main at
 	// startup via SetLintExtraAllowedTags.
 	lintExtraAllowedTags []string
+	// lintHotOversizeBytes overrides the hot-oversize rule threshold;
+	// <= 0 keeps the lint package default (16 KiB). Wired by main from
+	// [lint] hot_oversize_bytes.
+	lintHotOversizeBytes int64
 	// selfImprove* gate, target and tune the self-improvement loop, wired
 	// by main from config. With enabled=false (default) the
 	// memory_self_improve tool rejects every call and the nudge middleware
@@ -99,6 +104,10 @@ type Server struct {
 	// bootstrap never surfaces an anchors payload — behaviour unchanged.
 	// Per-project opt-in is projects.Flags.UseAnchors.
 	anchorsEnabled bool
+	// waiters tracks in-flight memory_wait_changes calls (one per MCP
+	// session, keyed by correlation id — token id as fallback) so a client
+	// cannot pile up blocking long-polls and exhaust connections.
+	waiters sync.Map
 }
 
 // SetEvents wires the SSE hub used to broadcast note/tree changes
@@ -115,6 +124,12 @@ func (s *Server) SetEvents(h *events.Hub) {
 // validates and dedupes them. Pass nil to revert to built-in only.
 func (s *Server) SetLintExtraAllowedTags(extra []string) {
 	s.lintExtraAllowedTags = extra
+}
+
+// SetLintHotOversizeLimit overrides the hot-oversize lint threshold in
+// bytes. Values <= 0 keep the lint package default.
+func (s *Server) SetLintHotOversizeLimit(bytes int64) {
+	s.lintHotOversizeBytes = bytes
 }
 
 // SetSelfImprove configures the agent-sourced self-improvement loop: the

@@ -69,6 +69,8 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 	}
 	dryRun := req.GetBool("dry_run", false)
 
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	note, err := s.vault.Load(rel)
 	if err != nil {
 		return mcp.NewToolResultErrorf("cannot read %q: %v", rel, err), nil

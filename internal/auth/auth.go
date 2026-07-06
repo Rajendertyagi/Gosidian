@@ -33,13 +33,22 @@ const (
 
 // Token is the persisted record of a provisioned token. The plaintext is never
 // stored; only Hash.
+//
+// Project scope: Projects carries the full list a token may span (the
+// orchestrator-bus case: one orchestrator token over N agent projects).
+// Project remains the legacy single-project field — it is kept populated with
+// the first entry so tokens.json written by this version stays readable by
+// older binaries (which then see a MORE restrictive single-project token,
+// never a wider one). Both empty = admin, sees everything. Always read the
+// scope through ProjectList(), never the raw fields.
 type Token struct {
 	ID               string    `json:"id"`   // short display id (first 8 hex of hash)
 	Name             string    `json:"name"` // human-readable label
 	Hash             string    `json:"hash"` // hex-encoded sha256 of the full token
 	CreatedAt        time.Time `json:"created_at"`
 	ExpiresAt        time.Time `json:"expires_at,omitempty"`          // zero = no expiry
-	Project          string    `json:"project,omitempty"`             // empty = admin, sees everything
+	Project          string    `json:"project,omitempty"`             // legacy single project; see ProjectList
+	Projects         []string  `json:"projects,omitempty"`            // multi-project scope; see ProjectList
 	Scopes           []string  `json:"scopes"`                        // read, write
 	OwnerUserID      string    `json:"owner_user_id,omitempty"`       // webauth user id; empty = admin-owned (CLI)
 	SelfImproveOptIn bool      `json:"self_improve_opt_in,omitempty"` // opt-in to the self-improve nudge loop (per-token)
@@ -60,18 +69,63 @@ func (t *Token) Expired() bool {
 	return !t.ExpiresAt.IsZero() && time.Now().After(t.ExpiresAt)
 }
 
-// AllowsPath reports whether the token's project scope allows access to the
-// given vault-relative note path. Admin tokens (empty Project) allow all.
-func (t *Token) AllowsPath(path string) bool {
-	if t.Project == "" {
-		return true
+// ProjectList returns the token's normalized project scope: the multi-project
+// list when set, the legacy single Project as a one-element list otherwise,
+// nil for admin tokens. All scope decisions go through this accessor so
+// records written before the multi-project era keep working unchanged.
+func (t *Token) ProjectList() []string {
+	if len(t.Projects) > 0 {
+		return t.Projects
 	}
-	return path == t.Project || strings.HasPrefix(path, t.Project+"/")
+	if t.Project != "" {
+		return []string{t.Project}
+	}
+	return nil
 }
 
-// ProjectFilter returns the project prefix to apply to list/search operations,
-// or an empty string for admin tokens.
-func (t *Token) ProjectFilter() string { return t.Project }
+// IsAdmin reports whether the token has no project scope (sees everything).
+func (t *Token) IsAdmin() bool { return len(t.ProjectList()) == 0 }
+
+// AllowsProject reports whether the token may operate on the given top-level
+// project. Admin tokens allow all.
+func (t *Token) AllowsProject(project string) bool {
+	list := t.ProjectList()
+	if len(list) == 0 {
+		return true
+	}
+	for _, p := range list {
+		if p == project {
+			return true
+		}
+	}
+	return false
+}
+
+// AllowsPath reports whether the token's project scope allows access to the
+// given vault-relative note path. Admin tokens allow all; scoped tokens match
+// any of their projects as a path prefix.
+func (t *Token) AllowsPath(path string) bool {
+	list := t.ProjectList()
+	if len(list) == 0 {
+		return true
+	}
+	for _, p := range list {
+		if path == p || strings.HasPrefix(path, p+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+// ScopeLabel renders the project scope for error messages and displays:
+// comma-joined projects, or "(admin)" for unscoped tokens.
+func (t *Token) ScopeLabel() string {
+	list := t.ProjectList()
+	if len(list) == 0 {
+		return "(admin)"
+	}
+	return strings.Join(list, ",")
+}
 
 // Store is a concurrent-safe token store backed by a JSON file. It
 // transparently re-reads the file when its modification time changes, so
@@ -193,8 +247,9 @@ func (s *Store) List() []Token {
 // Create generates a new token, stores its hash, and returns the plaintext
 // (shown only at creation time) together with the stored record. ownerUserID
 // binds the token to a webauth user when the web UI mints it; CLI-created
-// tokens pass "" and behave as admin-owned.
-func (s *Store) Create(name, project string, scopes []string, ttl time.Duration, ownerUserID string) (plaintext string, tok Token, err error) {
+// tokens pass "" and behave as admin-owned. projects is the scope list (nil
+// or empty = admin); entries are trimmed and deduplicated, order preserved.
+func (s *Store) Create(name string, projects []string, scopes []string, ttl time.Duration, ownerUserID string) (plaintext string, tok Token, err error) {
 	if name == "" {
 		return "", Token{}, errors.New("token name required")
 	}
@@ -204,6 +259,12 @@ func (s *Store) Create(name, project string, scopes []string, ttl time.Duration,
 	for _, sc := range scopes {
 		if sc != ScopeRead && sc != ScopeWrite {
 			return "", Token{}, fmt.Errorf("unknown scope %q", sc)
+		}
+	}
+	cleanProjects := normalizeProjects(projects)
+	for _, p := range cleanProjects {
+		if strings.ContainsAny(p, "/\\:") || p == "." || p == ".." || strings.HasPrefix(p, ".") {
+			return "", Token{}, fmt.Errorf("invalid project name %q", p)
 		}
 	}
 
@@ -220,9 +281,17 @@ func (s *Store) Create(name, project string, scopes []string, ttl time.Duration,
 		Name:        name,
 		Hash:        hashHex,
 		CreatedAt:   time.Now().UTC(),
-		Project:     project,
 		Scopes:      append([]string(nil), scopes...),
 		OwnerUserID: ownerUserID,
+	}
+	// Legacy field carries the first project so older binaries reading this
+	// tokens.json see a narrower (never wider) scope; the full list is only
+	// persisted when it actually is a list.
+	if len(cleanProjects) > 0 {
+		tok.Project = cleanProjects[0]
+	}
+	if len(cleanProjects) > 1 {
+		tok.Projects = cleanProjects
 	}
 	if ttl != 0 {
 		tok.ExpiresAt = tok.CreatedAt.Add(ttl)
@@ -360,6 +429,25 @@ func AdminToken() *Token {
 		Name:   "implicit-admin",
 		Scopes: []string{ScopeRead, ScopeWrite},
 	}
+}
+
+// normalizeProjects trims, drops empties and deduplicates while preserving
+// order.
+func normalizeProjects(projects []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(projects))
+	for _, p := range projects {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
 }
 
 // ExtractBearer returns the token from an Authorization: Bearer <token>

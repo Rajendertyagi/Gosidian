@@ -236,6 +236,8 @@ func (r *Router) createNote(w http.ResponseWriter, req *http.Request) {
 	if r.denyWriteProject(w, user.principal(), projectOf(clean)) {
 		return
 	}
+	unlock := r.deps.Vault.LockPath(clean)
+	defer unlock()
 	if _, err := r.deps.Vault.Load(clean); err == nil {
 		WriteError(w, http.StatusConflict, CodeConflict, "note already exists")
 		return
@@ -312,6 +314,8 @@ func (r *Router) updateNote(w http.ResponseWriter, req *http.Request, rel string
 	if r.denyWriteProject(w, user.principal(), projectOf(rel)) {
 		return
 	}
+	unlock := r.deps.Vault.LockPath(rel)
+	defer unlock()
 	existing, err := r.deps.Vault.Load(rel)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -369,6 +373,8 @@ func (r *Router) deleteNote(w http.ResponseWriter, req *http.Request, rel string
 	if r.denyWriteProject(w, user.principal(), projectOf(rel)) {
 		return
 	}
+	unlock := r.deps.Vault.LockPath(rel)
+	defer unlock()
 	if _, err := r.deps.Vault.Load(rel); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			WriteError(w, http.StatusNotFound, CodeNotFound, "note not found")

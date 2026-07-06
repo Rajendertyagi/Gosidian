@@ -1,15 +1,21 @@
 # MCP tool catalogue
 
-**50 tools** cover the full retrieval → write → workflow → self-check
-cycle for agent memory.
+**55 tools** cover the full retrieval → write → workflow →
+orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
 for precise schemas; the groupings below are the conceptual map.
 
 ## Triage / bootstrap
 
-- `memory_bootstrap(project)` — single-call session start: hot state +
-  active plans + skills + recent notes + top tags
+- `memory_bootstrap(project, known_directives_version?, known_etags?,
+  mode?)` — single-call session start: hot state + active plans +
+  skills + recent notes + top tags. The optional knobs slim repeat
+  bootstraps down to a fraction of the tokens: a matching
+  `known_directives_version` omits the directives block, `known_etags`
+  (path → etag from the previous call) returns unchanged files as
+  `unchanged:true` with no body, and `mode="lite"` replaces the
+  `hot.md` body with its frontmatter + heading outline
 - `memory_recent(project)` — notes recently modified
 - `memory_pinned(project)` — notes tagged `pinned`
 - `memory_stale(project, older_than)` — unmodified long enough to
@@ -29,7 +35,10 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_get(path)`, `memory_get_section(path, heading)`,
   `memory_get_frontmatter(path)`, `memory_get_outline(path)` — full
   body vs cheap triage variants
-- `memory_batch_get(paths)` — one round-trip for multiple notes
+- `memory_batch_get(paths, mode?, max_bytes_per_note?)` — one
+  round-trip for multiple notes; `mode=outline|frontmatter` skips
+  bodies entirely, `max_bytes_per_note` truncates long ones (flagged
+  `truncated:true`), and every entry carries its `etag`
 - `memory_list_notes(project)`, `memory_list_projects()`,
   `memory_list_tags(project?)`
 - `memory_notes_by_tag(tag, project?)`
@@ -90,14 +99,39 @@ The single-step / pre-uploader split, the equivalent REST endpoint
 `POST /api/upload`, and the full error catalogue live in
 [Upload flow](upload.md).
 
+## Orchestration (agent-to-agent handoffs + change feed)
+
+The handoff lifecycle is `pending → claimed → done | rejected`;
+`created_by` / `claimed_by` / `completed_by` are stamped server-side
+from the caller's token identity and cannot be forged, while
+`from_agent` / `to_agent` stay declarative role slugs. See
+[Agent patterns](patterns.md#agent-to-agent-handoff) for the flow.
+
+- `memory_create_handoff(project, from_agent, to_agent, summary,
+  pending_items?)` — create a `status:pending` handoff note under
+  `<project>/handoffs/`
+- `memory_pending_handoffs(project, for_agent?, status?)` — list
+  handoffs by lifecycle status (`pending` default, or
+  `claimed`/`done`/`rejected`/`all` to monitor work in flight)
+- `memory_claim_handoff(path)` — atomically flip `pending → claimed`
+  under a per-note lock: when several agents race for the same
+  handoff exactly one wins, the others get an "already claimed" error
+- `memory_complete_handoff(path, outcome, note?)` — close a claimed
+  handoff as `done` or `rejected` (claimer or admin token only),
+  optionally appending an `## Outcome` section
+- `memory_wait_changes(project?, cursor?, timeout_s?)` — long-poll for
+  note changes inside the token's scope instead of polling in a loop:
+  blocks up to `timeout_s` (max 55s), returns as soon as something
+  changes, and resumes gap-free from the returned `cursor`.
+  `resync:true` means the cursor fell out of the short replay window —
+  reconcile with `memory_recent`
+
 ## Workflow
 
-- `memory_create_handoff(from_agent, to_agent, summary, pending_items)`
-- `memory_pending_handoffs(for_agent)`
 - `memory_compact(path, keep_last_n, archive_summary, dry_run?)` —
   shrink log-shaped notes safely
-- `memory_self_stats()` — token identity + rate-limit snapshot (for
-  auto-throttling)
+- `memory_self_stats()` — token identity (including the multi-project
+  scope list) + rate-limit snapshot (for auto-throttling)
 - `memory_project_scaffold(project, template?, variables?)` — idempotent
   Karpathy-Wiki-Stack bootstrap
 - `memory_init_agent(project, existing_content?)` — produce the
@@ -114,7 +148,9 @@ The single-step / pre-uploader split, the equivalent REST endpoint
 
 - `memory_lint(project, rules?, min_severity?)` — structural vault
   hygiene: `broken-wikilink`, `orphan-note`, `frontmatter-missing`,
-  `frontmatter-tag-unknown`, `status-incoherent`. Zero
+  `frontmatter-tag-unknown`, `status-incoherent`, `hot-oversize`
+  (a `hot.md` past 16 KiB dominates every bootstrap payload —
+  threshold configurable via `[lint] hot_oversize_bytes`). Zero
   `severity:error` on a coherent vault.
 - `memory_self_improve(category, title, friction, confidence, …)` —
   *experimental, opt-in, off by default*: record a structured insight
@@ -124,16 +160,24 @@ The single-step / pre-uploader split, the equivalent REST endpoint
 ## Audit
 
 - `memory_audit_tail(filters?)` — stream the audit log
-- `memory_pending_handoffs(for_agent)` — see Workflow
+- `memory_pending_handoffs(project, for_agent?, status?)` — see
+  Orchestration
 
 ## Invariants
 
 - **ETag optimistic locking** is uniform across every write tool: pass
   `if_match=<etag>` from the matching `memory_get*` to refuse a
-  concurrent modification.
+  concurrent modification. The whole load → check → write sequence
+  runs under a per-note lock, so `if_match` is a true
+  compare-and-swap: among N concurrent writers carrying the same etag
+  exactly one wins.
 - **Scoped tokens** restrict every call transparently: a token scoped
-  to `project=foo` can only read/write `foo/`, and `memory_search`
-  with `projects=[...]` silently intersects with its scope.
+  to one or more projects (`--project foo` or `--project foo,bar`)
+  can only read/write inside them, and `memory_search` with
+  `projects=[...]` silently intersects with the scope. Multi-project
+  tokens must name the project explicitly where a single-project
+  token would be defaulted — an omitted argument never widens a
+  query.
 - **Cross-project** is opt-in — `memory_search projects=["a","b"]`
   and `memory_outlinks include_cross_project=true` — so default
   behaviour stays tightly scoped.

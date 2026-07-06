@@ -62,6 +62,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GLOBAL_ENABLED` | `global.enabled` | `false` |
 | `GOSIDIAN_GLOBAL_PUBLIC_PROJECT` | `global.public_project` | `global` |
 | `GOSIDIAN_GLOBAL_PRIVATE_PROJECT` | `global.private_project` | `global-private` |
+| `GOSIDIAN_ANCHORS_ENABLED` | `agent_anchors.enabled` | `false` (master switch for [agent anchors](mcp/agent-anchors.md); per-project opt-in via the `use_anchors` flag) |
+| — | `lint.hot_oversize_bytes` | `16384` (threshold for the `hot-oversize` lint rule) |
 
 The `config.toml` at `<vault>/.gosidian/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/index"
@@ -19,6 +20,7 @@ type Vault struct {
 	cache      *loadCache
 	htmlNotes  bool
 	mediaNotes bool
+	locks      sync.Map // canonical rel path → *sync.Mutex, see LockPath
 }
 
 // New returns a Vault rooted at the given directory. A 128-entry LRU load

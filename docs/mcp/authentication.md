@@ -13,7 +13,7 @@ switches auth on globally.
 gosidian token create --vault ./vault \
   --name my-agent \
   --scopes read,write \
-  --project gosidian \        # optional: restrict to one project
+  --project gosidian \        # optional: restrict to one or more projects
   --ttl 720h                  # optional: expiry (default: no expiry)
 ```
 
@@ -38,6 +38,38 @@ A token created with `--project foo` sees only `foo/*` in every tool
 response. `memory_search projects=["bar"]` from such a token returns
 an empty result set (no error) because `bar` is outside the token's
 scope.
+
+### Multi-project tokens
+
+`--project` accepts a comma-separated list:
+
+```bash
+gosidian token create --vault ./vault \
+  --name orchestrator \
+  --scopes read,write \
+  --project agent-a,agent-b,agent-c
+```
+
+The token reads and writes in all listed projects and nowhere else —
+the natural shape for an **orchestrator** that dispatches handoffs to
+several agent projects without holding an over-privileged admin
+token. Semantics to know:
+
+- **Explicit project required**: where a single-project token is
+  silently defaulted to its project (`memory_list_notes`,
+  `memory_bootstrap`, …), a multi-project token must name one of its
+  projects — an omitted argument never silently widens a query.
+  `memory_wait_changes` is the exception by design: with no `project`
+  filter it watches all of the token's projects at once.
+- **Not an admin**: project lifecycle tools
+  (`memory_create_project` / `memory_delete_project` /
+  `memory_rename_project`) still require an unscoped token.
+- **Search intersects**: `memory_search projects=[...]` keeps only
+  the projects inside the scope.
+- The REST API accepts the same shape (`POST /api/v1/admin/tokens`
+  with `projects: ["a","b"]`); `memory_self_stats` reports the list.
+- **Backward compatible**: single-project tokens behave exactly as
+  before, and `tokens.json` files from older versions load unchanged.
 
 ## Token rotation
 

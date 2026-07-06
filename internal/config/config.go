@@ -95,6 +95,9 @@ type LDAPConfig struct {
 // .gosidian/config.toml.
 type LintConfig struct {
 	FrontmatterTagVocabulary FrontmatterTagVocabulary `toml:"frontmatter_tag_vocabulary"`
+	// HotOversizeBytes overrides the hot-oversize rule threshold (bytes).
+	// 0 or absent keeps the built-in default (16 KiB).
+	HotOversizeBytes int64 `toml:"hot_oversize_bytes"`
 }
 
 // FrontmatterTagVocabulary lets a vault add tags to the closed vocabulary

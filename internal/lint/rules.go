@@ -17,6 +17,39 @@ var allRules = []ruleSpec{
 	{name: "frontmatter-missing", defaultSeverity: SeverityError, fn: checkFrontmatterMissing},
 	{name: "frontmatter-tag-unknown", defaultSeverity: SeverityWarning, fn: checkFrontmatterTagUnknown},
 	{name: "status-incoherent", defaultSeverity: SeverityWarning, fn: checkStatusIncoherent},
+	{name: "hot-oversize", defaultSeverity: SeverityWarning, fn: checkHotOversize},
+}
+
+// DefaultHotOversizeBytes is the hot-oversize threshold when the vault does
+// not configure one. hot.md is inlined into every memory_bootstrap payload,
+// so past ~16 KiB the session cache starts dominating the token cost of
+// every session start.
+const DefaultHotOversizeBytes = 16 * 1024
+
+// checkHotOversize warns when <project>/hot.md outgrows the threshold. The
+// fix is grooming, not truncation: move history to log.md / plan Outcomes
+// (memory_compact automates the log-shaped part).
+func checkHotOversize(_ context.Context, l *Linter, project string) ([]Issue, error) {
+	rel := project + "/hot.md"
+	note, err := l.vault.Load(rel)
+	if err != nil {
+		return nil, nil // absent hot.md is scaffold territory, not an oversize issue
+	}
+	limit := l.hotOversizeBytes
+	if limit <= 0 {
+		limit = DefaultHotOversizeBytes
+	}
+	if int64(len(note.Content)) <= limit {
+		return nil, nil
+	}
+	return []Issue{{
+		Severity: SeverityWarning,
+		File:     rel,
+		Rule:     "hot-oversize",
+		Message: fmt.Sprintf(
+			"hot.md is %d bytes (threshold %d): it is inlined into every memory_bootstrap, so it now dominates session-start cost — groom it (move history to log.md / plan Outcomes, or memory_compact) instead of letting it grow",
+			len(note.Content), limit),
+	}}, nil
 }
 
 // optionalRules are known and selectable by name but excluded from the default

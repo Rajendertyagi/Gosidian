@@ -59,8 +59,8 @@ func (s *Server) handlePromoteAgent(ctx context.Context, req mcp.CallToolRequest
 	if errRes != nil {
 		return errRes, nil
 	}
-	if scope := tok.ProjectFilter(); scope != "" && project != scope {
-		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
+	if !tok.AllowsProject(project) {
+		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ScopeLabel()), nil
 	}
 	if _, err := s.vault.Load(rel); err == nil {
 		return mcp.NewToolResultErrorf("canonical agent %q already exists; nothing to promote", rel), nil

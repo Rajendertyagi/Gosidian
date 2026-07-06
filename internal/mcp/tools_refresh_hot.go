@@ -64,6 +64,8 @@ func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) 
 	if !tok.AllowsPath(hotPath) {
 		return mcp.NewToolResultErrorf("hot path %q is outside the token's scope", hotPath), nil
 	}
+	unlock := s.vault.LockPath(hotPath)
+	defer unlock()
 	hot, err := s.vault.Load(hotPath)
 	if err != nil {
 		return mcp.NewToolResultErrorf("cannot read %s: %v", hotPath, err), nil

@@ -82,11 +82,22 @@ type Linter struct {
 	// Populated via WithExtraAllowedTags from a vault's
 	// .gosidian/config.toml [lint.frontmatter_tag_vocabulary].
 	extraAllowedTags map[string]struct{}
+	// hotOversizeBytes is the hot-oversize threshold; <= 0 means
+	// DefaultHotOversizeBytes. Populated via WithHotOversizeLimit from
+	// [lint] hot_oversize_bytes.
+	hotOversizeBytes int64
 }
 
 // New wires a Linter against a live vault + index.
 func New(v *vault.Vault, idx *index.Index) *Linter {
 	return &Linter{vault: v, index: idx}
+}
+
+// WithHotOversizeLimit overrides the hot-oversize threshold in bytes. Values
+// <= 0 keep DefaultHotOversizeBytes. Returns the receiver for chaining.
+func (l *Linter) WithHotOversizeLimit(bytes int64) *Linter {
+	l.hotOversizeBytes = bytes
+	return l
 }
 
 // WithExtraAllowedTags adds tags to the closed vocabulary the

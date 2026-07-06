@@ -375,3 +375,36 @@ func TestLint_ProjectRequired(t *testing.T) {
 		t.Error("expected error when project is empty")
 	}
 }
+
+func TestLint_HotOversize(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+	big := "---\ntitle: Hot\ntags: [type:index]\n---\n\n# Hot\n\n" + strings.Repeat("x", 300)
+	seed(t, v, idx, "p/hot.md", big)
+
+	// Under the (default) threshold: silent.
+	issues, err := l.Run(context.Background(), "p", []string{"hot-oversize"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("under default threshold, issues = %+v", issues)
+	}
+
+	// Over a tightened threshold: one warning pointing at hot.md.
+	issues, err = l.WithHotOversizeLimit(100).Run(context.Background(), "p", []string{"hot-oversize"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 1 || issues[0].Rule != "hot-oversize" || issues[0].Severity != SeverityWarning || issues[0].File != "p/hot.md" {
+		t.Fatalf("issues = %+v", issues)
+	}
+
+	// No hot.md at all: rule stays silent (scaffold rules cover absence).
+	issues, err = l.Run(context.Background(), "empty-project", []string{"hot-oversize"}, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("missing hot.md must not fire hot-oversize: %+v", issues)
+	}
+}

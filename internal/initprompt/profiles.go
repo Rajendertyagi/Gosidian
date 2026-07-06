@@ -77,7 +77,15 @@ const StubVersion = 2
 // v2 (2026-06-09, IMP-049): directives now instruct pre-stub projects to
 // self-convert their instruction file at bootstrap — breaks the first-conversion
 // chicken-and-egg so existing projects heal without a manual rollout.
-const DirectivesVersion = 2
+//
+// v3 (2026-07-06, orchestrator-bus M2+M3+M5): handoff lifecycle — documents
+// the pending→claimed→done|rejected states, the claim-before-work rule
+// (memory_claim_handoff / memory_complete_handoff) and the server-stamped
+// created_by/claimed_by/completed_by identity fields; adds type:handoff and
+// the handoff status vocabulary to the closed tag list. Also documents the
+// bootstrap token-economy knobs (known_directives_version / known_etags /
+// mode=lite, batch_get outline/frontmatter modes, hot-oversize lint rule).
+const DirectivesVersion = 3
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

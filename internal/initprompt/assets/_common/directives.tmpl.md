@@ -117,10 +117,35 @@ inutile alla prossima sessione.
 
 ### Vocabolario tag (chiuso)
 
-- `type:{memory,agent,plan,skill,doc,index}` — categoria della nota
+- `type:{memory,agent,plan,skill,doc,index,handoff}` — categoria della nota
 - `status:{draft,in-progress,done,archived}` — solo su plan
+- `status:{pending,claimed,done,rejected}` — solo su handoff (vedi sotto)
 - `topic:<area>` — dominio (es. `topic:deploy`, `topic:api`)
 - `pinned` — sempre in superficie al bootstrap
 - `importance: 1..5` nel frontmatter — priorità (complementare a pinned)
+
+### Handoff fra agenti (lifecycle)
+
+Un handoff (`memory_create_handoff`) passa contesto da un agente a un altro
+come nota in `{{PROJECT}}/handoffs/`. Ciclo di vita: `pending → claimed →
+done | rejected`. Se ricevi lavoro via handoff: scoprilo con
+`memory_pending_handoffs`, **prendilo in carico con `memory_claim_handoff`
+prima di iniziare** (il claim è atomico: fra più agenti concorrenti ne vince
+uno solo) e chiudilo con `memory_complete_handoff` (outcome `done` o
+`rejected`, con nota di esito opzionale). `created_by`/`claimed_by`/
+`completed_by` sono stampati dal server dall'identità del token — non
+falsificabili; `from_agent`/`to_agent` restano slug di ruolo dichiarativi.
+Non editare a mano il frontmatter di lifecycle.
+
+### Economia dei token (bootstrap ripetuti e letture bulk)
+
+Dal secondo bootstrap in poi risparmia contesto: passa
+`known_directives_version` (se coincide, queste direttive vengono omesse),
+`known_etags` con gli etag di hot/README/agent_md dell'ultimo bootstrap
+(i file invariati tornano `unchanged:true` senza body) e `mode: "lite"`
+(frontmatter+outline di hot.md invece del body; le sezioni servono via
+`memory_get_section`). Per letture bulk usa `memory_batch_get` con
+`mode: outline|frontmatter` o `max_bytes_per_note`. Se `memory_lint`
+segnala `hot-oversize`, compatta hot.md invece di lasciarlo crescere.
 
 <!-- /gosidian:directives -->

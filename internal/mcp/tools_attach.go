@@ -259,12 +259,9 @@ func (s *Server) handleListAttachments(ctx context.Context, req mcp.CallToolRequ
 	if errRes != nil {
 		return errRes, nil
 	}
-	project := req.GetString("project", "")
-	if tok.ProjectFilter() != "" {
-		if project != "" && project != tok.ProjectFilter() {
-			return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ProjectFilter()), nil
-		}
-		project = tok.ProjectFilter()
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if project != "" {
 		if res := s.rejectIfHidden(project); res != nil {
