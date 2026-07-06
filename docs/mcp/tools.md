@@ -15,7 +15,9 @@ for precise schemas; the groupings below are the conceptual map.
   `known_directives_version` omits the directives block, `known_etags`
   (path → etag from the previous call) returns unchanged files as
   `unchanged:true` with no body, and `mode="lite"` replaces the
-  `hot.md` body with its frontmatter + heading outline
+  `hot.md` body with its frontmatter + heading outline. `mode` defaults
+  to **auto**: an oversize `hot.md` is served lite automatically
+  (flagged `auto_lite:true`); pass `mode="full"` to force the body
 - `memory_recent(project)` — notes recently modified
 - `memory_pinned(project)` — notes tagged `pinned`
 - `memory_stale(project, older_than)` — unmodified long enough to
@@ -32,9 +34,14 @@ for precise schemas; the groupings below are the conceptual map.
 - `memory_search(query, projects?=[...], include_outline?,
   include_frontmatter?)` — FTS5 with optional enrichment and
   cross-project scope
-- `memory_get(path)`, `memory_get_section(path, heading)`,
+- `memory_get(path, raw?, max_bytes?)`, `memory_get_section(path, heading)`,
   `memory_get_frontmatter(path)`, `memory_get_outline(path)` — full
-  body vs cheap triage variants
+  body vs cheap triage variants. `memory_get` has an **oversize
+  guard**: a body over 24 KiB comes back truncated (frontmatter +
+  outline + first chunk, `truncated:true`, full `size`, a hint) so an
+  append-only log can't flood the caller's context; `raw:true`
+  bypasses it, `max_bytes` caps even below the threshold. The `etag`
+  always stamps the full note, so `if_match` works unchanged
 - `memory_batch_get(paths, mode?, max_bytes_per_note?)` — one
   round-trip for multiple notes; `mode=outline|frontmatter` skips
   bodies entirely, `max_bytes_per_note` truncates long ones (flagged

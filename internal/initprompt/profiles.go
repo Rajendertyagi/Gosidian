@@ -97,7 +97,12 @@ const StubVersion = 2
 // the CSV table-note bullet (memory_create_table_note, capabilities.table_notes,
 // cell values not indexed → caption required) and the ingest table routes
 // long tabular data to a linked table note instead of the markdown body.
-const DirectivesVersion = 5
+//
+// v6 (2026-07-06, token-economy round 2): full prose tightening (-24%, same
+// rules); the token-economy section documents the new memory_get oversize
+// guard (bodies over 24 KiB come back truncated with outline + hint;
+// raw:true bypasses) and the bootstrap auto-lite default for oversize hot.md.
+const DirectivesVersion = 6
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

@@ -232,3 +232,32 @@ func TestStore_SelfImproveOptIn(t *testing.T) {
 		t.Error("unknown id should error")
 	}
 }
+
+func TestStore_SetToolProfile(t *testing.T) {
+	s := newStore(t)
+	_, tok, err := s.Create("worker", []string{"proj"}, []string{ScopeRead, ScopeWrite}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.ToolProfile != "" || tok.IsCoreProfile() {
+		t.Errorf("fresh token should default to full profile: %+v", tok)
+	}
+	if err := s.SetToolProfile(tok.ID, "bogus"); err == nil {
+		t.Error("invalid profile must be rejected")
+	}
+	if err := s.SetToolProfile(tok.ID, ToolProfileCore); err != nil {
+		t.Fatal(err)
+	}
+	// Persisted: reopen the store from disk and check the field survived.
+	reopened, err := Open(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.List()
+	if len(got) != 1 || !got[0].IsCoreProfile() {
+		t.Errorf("tool profile did not survive reload: %+v", got)
+	}
+	if err := s.SetToolProfile("nope", ToolProfileCore); err == nil {
+		t.Error("unknown token id must error")
+	}
+}

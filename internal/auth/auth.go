@@ -52,7 +52,26 @@ type Token struct {
 	Scopes           []string  `json:"scopes"`                        // read, write
 	OwnerUserID      string    `json:"owner_user_id,omitempty"`       // webauth user id; empty = admin-owned (CLI)
 	SelfImproveOptIn bool      `json:"self_improve_opt_in,omitempty"` // opt-in to the self-improve nudge loop (per-token)
+	ToolProfile      string    `json:"tool_profile,omitempty"`        // MCP tool surface: "" | "full" (everything) or "core" (worker subset)
 }
+
+// Tool profiles: which MCP tool surface a token sees. Empty means full —
+// existing tokens keep the whole catalogue (backward compatible). "core"
+// exposes only the worker subset (read/write/search/upload/handoff), cutting
+// the per-session schema cost for sub-agents.
+const (
+	ToolProfileFull = "full"
+	ToolProfileCore = "core"
+)
+
+// ValidToolProfile reports whether p is an accepted tool_profile value.
+func ValidToolProfile(p string) bool {
+	return p == "" || p == ToolProfileFull || p == ToolProfileCore
+}
+
+// IsCoreProfile reports whether the token is restricted to the core tool
+// subset. Empty/"full" (and admin tokens, which have no profile) see all.
+func (t *Token) IsCoreProfile() bool { return t.ToolProfile == ToolProfileCore }
 
 // HasScope reports whether the token carries the given scope.
 func (t *Token) HasScope(s string) bool {
@@ -383,6 +402,23 @@ func (s *Store) SetSelfImproveOptIn(id string, optIn bool) error {
 	for i := range s.tokens {
 		if s.tokens[i].ID == id {
 			s.tokens[i].SelfImproveOptIn = optIn
+			return s.save()
+		}
+	}
+	return fmt.Errorf("token %q not found", id)
+}
+
+// SetToolProfile assigns the MCP tool profile ("", "full" or "core") to an
+// existing token and persists the store.
+func (s *Store) SetToolProfile(id, profile string) error {
+	if !ValidToolProfile(profile) {
+		return fmt.Errorf("invalid tool profile %q (expected core or full)", profile)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for i := range s.tokens {
+		if s.tokens[i].ID == id {
+			s.tokens[i].ToolProfile = profile
 			return s.save()
 		}
 	}

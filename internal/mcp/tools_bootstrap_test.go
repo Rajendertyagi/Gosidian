@@ -148,6 +148,43 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	}
 }
 
+func TestMCP_Bootstrap_AutoLite(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	// hot.md past the oversize threshold → auto mode serves it lite.
+	big := "---\ntitle: hot\ntype: index\n---\n\n# Hot\n\n## Focus\n\n" +
+		strings.Repeat("filler line for the oversize threshold\n", 600)
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "auto/hot.md", "content": big})); res.IsError {
+		t.Fatalf("seed: %s", expectError(t, res))
+	}
+
+	parseHot := func(body string) bootstrapFile {
+		t.Helper()
+		var p struct {
+			HotMD bootstrapFile `json:"hot_md"`
+		}
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.HotMD
+	}
+
+	// Default (mode unset) → lite shape with auto_lite flag.
+	res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": "auto"}))
+	hot := parseHot(resultText(t, res))
+	if !hot.AutoLite || hot.Content != "" || len(hot.Headings) == 0 {
+		t.Errorf("auto: want lite shape with auto_lite, got auto_lite=%v len(content)=%d headings=%d",
+			hot.AutoLite, len(hot.Content), len(hot.Headings))
+	}
+
+	// Explicit full → body served, no auto_lite.
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "auto", "mode": "full"}))
+	hot = parseHot(resultText(t, res))
+	if hot.AutoLite || hot.Content == "" {
+		t.Errorf("full: want body, got auto_lite=%v len=%d", hot.AutoLite, len(hot.Content))
+	}
+}
+
 func TestMCP_Bootstrap_EmptyProject(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	// No seed — project "void" has zero notes.

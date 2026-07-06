@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -97,8 +98,10 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read the full content of a note by its vault-relative path (e.g. 'project/note.md')."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
+		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
+		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
@@ -495,7 +498,36 @@ type noteContent struct {
 	ETag    string          `json:"etag"`
 	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
 	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
+	// Oversize-guard fields (plan 20260706-token-economy-round2): set only
+	// when the body was truncated. ETag always stamps the FULL note, so
+	// optimistic locking works unchanged on a truncated read.
+	Truncated   bool             `json:"truncated,omitempty"`
+	Size        int64            `json:"size,omitempty"` // full body size in bytes
+	Frontmatter string           `json:"frontmatter,omitempty"`
+	Headings    []outlineHeading `json:"headings,omitempty"`
+	// OutlineTotal is the real heading count; Headings is capped (see
+	// getTruncMaxHeadings) so a 300-section log can't flood via its outline.
+	OutlineTotal int    `json:"outline_total,omitempty"`
+	Hint         string `json:"hint,omitempty"`
 }
+
+// getBodySoftCap is the memory_get oversize threshold: a larger body comes
+// back truncated (outline + first chunk) unless raw:true. Append-only files
+// like log.md grow to hundreds of KiB — one unguarded read would flood the
+// caller's context.
+const getBodySoftCap = 24 << 10
+
+// getTruncChunk is the body prefix served with a truncated response.
+const getTruncChunk = 4 << 10
+
+// getTruncMaxHeadings caps the outline of a truncated response: an append-only
+// log can carry 300+ sections and its outline alone would dwarf the body chunk
+// (observed: 334 headings ≈ 50 KiB). We keep the first headings for structure
+// and the tail for recency.
+const (
+	getTruncMaxHeadings  = 80
+	getTruncHeadHeadings = 20
+)
 
 func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tok, errRes := s.authorizeRead(ctx)
@@ -522,6 +554,43 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "" {
 		nc.Kind = kind
 		nc.Media = ref
+	}
+
+	// Oversize guard: truncate the body (default threshold, or the caller's
+	// explicit max_bytes) unless raw:true. The truncated response carries the
+	// frontmatter + outline so the caller can target a section next.
+	limit := 0
+	if !req.GetBool("raw", false) {
+		if mb := req.GetInt("max_bytes", 0); mb > 0 && len(note.Content) > mb {
+			limit = mb
+		} else if mb == 0 && len(note.Content) > getBodySoftCap {
+			limit = getTruncChunk
+		}
+	}
+	if limit > 0 {
+		cut := note.Content[:limit]
+		if i := bytes.LastIndexByte(cut, '\n'); i > 0 {
+			cut = cut[:i+1]
+		}
+		nc.Content = string(cut)
+		nc.Truncated = true
+		nc.Size = note.Size
+		nc.Frontmatter = parser.FrontmatterRawForPath(note.Path, note.Content)
+		hs := parser.ExtractHeadings(note.Content)
+		nc.OutlineTotal = len(hs)
+		if len(hs) > getTruncMaxHeadings {
+			capped := make([]parser.Heading, 0, getTruncMaxHeadings)
+			capped = append(capped, hs[:getTruncHeadHeadings]...)
+			capped = append(capped, hs[len(hs)-(getTruncMaxHeadings-getTruncHeadHeadings):]...)
+			hs = capped
+		}
+		for _, h := range hs {
+			nc.Headings = append(nc.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
+		}
+		nc.Hint = fmt.Sprintf("body truncated (%d of %d bytes): fetch one section with memory_get_section, or pass raw:true for the full body", len(nc.Content), note.Size)
+		if nc.OutlineTotal > len(nc.Headings) {
+			nc.Hint += fmt.Sprintf("; outline capped to %d of %d headings (first %d + most recent)", len(nc.Headings), nc.OutlineTotal, getTruncHeadHeadings)
+		}
 	}
 	return mcp.NewToolResultJSON(nc)
 }

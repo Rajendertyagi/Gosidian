@@ -8,6 +8,55 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.17.0] — 2026-07-06 — "Token economy: read guard + tool profiles"
+
+MINOR release focused on the token cost of agent sessions: an oversize guard
+on the most-called read tool, an opt-in worker tool profile that cuts the
+per-session schema surface by ~60%, slimmer tool descriptions and a
+lighter bootstrap. All changes are additive and backward compatible; every
+existing token and client keeps its current behaviour.
+
+### Added
+- **Per-token tool profiles.** A token created with `--tool-profile core`
+  (CLI) or `tool_profile: "core"` (`POST /api/v1/admin/tokens`) sees only
+  the worker subset of the MCP catalogue — session start, note CRUD,
+  targeted reads, search/list basics, both upload tools, the full handoff
+  lifecycle and `memory_wait_changes` (~21 tools instead of 56, cutting a
+  sub-agent's per-session schema cost by ~60%). The media/table note
+  creators are admitted dynamically only when their vault flag is on, and
+  `memory_self_improve` only for opted-in tokens. The profile is an
+  **access-control boundary**: a tool outside it is absent from
+  `tools/list` *and* answers `tool not found` when called by name.
+  Default is `full` — existing tokens are untouched. Profile shown in
+  `gosidian token list` and `memory_self_stats`.
+- **`memory_get` oversize guard.** A note body over 24 KiB now comes back
+  truncated — frontmatter + heading outline (capped at 80 headings:
+  first 20 + the most recent) + the first 4 KiB chunk, with
+  `truncated: true`, the full `size` and a hint pointing at
+  `memory_get_section`. `raw: true` bypasses the guard; `max_bytes` caps
+  explicitly even below the threshold. The `etag` always stamps the full
+  note, so `if_match` optimistic locking is unchanged. Rationale: an
+  append-only log can reach hundreds of KiB — one unguarded read of a
+  431 KiB file used to cost ~110k tokens; it now returns ~12 KiB.
+
+### Changed
+- **Bootstrap `mode` defaults to auto**: an oversize `hot.md` is served in
+  lite shape (frontmatter + outline, flagged `auto_lite: true`); explicit
+  `full`/`lite` behave as before. The `anchors` block no longer ships its
+  reconcile directive when the desired set is empty.
+- **Operational directives v6**: full prose tightening (−24%, same rules);
+  the token-economy section documents the read guard and auto-lite.
+- **Slimmer tool descriptions** on the six heaviest schemas (bootstrap,
+  media/table note creators, init_agent, both upload tools) — 40-50%
+  shorter, with details moved to the docs.
+
+### Notes
+- No migration required. `tool_profile` is empty (= `full`) on every
+  existing token; assign `core` deliberately to sub-agent tokens.
+- Agents that read large notes through `memory_get` should follow the
+  truncated response's hint (`memory_get_section`, or `raw: true` when the
+  whole body is really needed).
+
 ## [2.16.0] — 2026-07-06 — "CSV table notes + capability discovery"
 
 MINOR release. Two discoverability-first features: long tabular data (audit

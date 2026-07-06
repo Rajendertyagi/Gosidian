@@ -61,6 +61,9 @@ Create options:
   --scopes read,write     Comma-separated scopes (default: read,write)
   --ttl <duration>        Expiration, e.g. 720h. 0 = no expiry (default)
   --self-improve          Opt this token in to the self-improvement insight loop
+  --tool-profile <s>      MCP tool surface: "full" (default, whole catalogue) or
+                          "core" (worker subset — read/write/search/upload/handoff;
+                          cuts the per-session schema cost for sub-agents)
 
 Opt-in options:
   --id <s>                Token id from 'token list' (mutually exclusive with --all)
@@ -95,7 +98,12 @@ func tokenCreate(args []string) {
 	scopesCSV := fs.String("scopes", "read,write", "comma-separated scopes")
 	ttl := fs.Duration("ttl", 0, "expiration (0 = no expiry)")
 	selfImprove := fs.Bool("self-improve", false, "opt this token in to the self-improvement insight loop")
+	toolProfile := fs.String("tool-profile", "", "MCP tool surface: full (default) or core")
 	_ = fs.Parse(args)
+
+	if !auth.ValidToolProfile(*toolProfile) {
+		log.Fatalf("invalid --tool-profile %q (expected core or full)", *toolProfile)
+	}
 
 	store := openStore(*vaultDir)
 	scopes := splitCSV(*scopesCSV)
@@ -110,6 +118,12 @@ func tokenCreate(args []string) {
 		}
 		tok.SelfImproveOptIn = true
 	}
+	if *toolProfile != "" {
+		if err := store.SetToolProfile(tok.ID, *toolProfile); err != nil {
+			log.Fatalf("set tool profile: %v", err)
+		}
+		tok.ToolProfile = *toolProfile
+	}
 
 	fmt.Printf("Token created.\n\n")
 	fmt.Printf("  id:      %s\n", tok.ID)
@@ -118,6 +132,9 @@ func tokenCreate(args []string) {
 	fmt.Printf("  scopes:  %s\n", strings.Join(tok.Scopes, ","))
 	if tok.SelfImproveOptIn {
 		fmt.Printf("  self-improve: opt-in\n")
+	}
+	if tok.ToolProfile != "" {
+		fmt.Printf("  tool-profile: %s\n", tok.ToolProfile)
 	}
 	if !tok.ExpiresAt.IsZero() {
 		fmt.Printf("  expires: %s\n", tok.ExpiresAt.Format(time.RFC3339))
@@ -138,7 +155,7 @@ func tokenList(args []string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tNAME\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tSELF-IMPROVE")
+	fmt.Fprintln(w, "ID\tNAME\tPROJECT\tSCOPES\tCREATED\tEXPIRES\tSELF-IMPROVE\tPROFILE")
 	for _, t := range tokens {
 		exp := "-"
 		if !t.ExpiresAt.IsZero() {
@@ -148,11 +165,15 @@ func tokenList(args []string) {
 		if t.SelfImproveOptIn {
 			si = "opt-in"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+		profile := t.ToolProfile
+		if profile == "" {
+			profile = "full"
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 			t.ID, t.Name, t.ScopeLabel(),
 			strings.Join(t.Scopes, ","),
 			t.CreatedAt.Format("2006-01-02"),
-			exp, si)
+			exp, si, profile)
 	}
 	_ = w.Flush()
 }

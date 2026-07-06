@@ -119,4 +119,19 @@ func TestBootstrap_AgentAnchors_Gating(t *testing.T) {
 	if _, ok := parse(res); !ok {
 		t.Error("default profile claude: expected anchors")
 	}
+
+	// 6. anchors enabled but empty desired set → block present (items:[] +
+	// target_dir so stale local anchors can still be cleaned) WITHOUT the
+	// ~500-char reconcile directive (token economy, plan 20260706).
+	if err := pstore.Set("empty", projects.Flags{UseAnchors: true}); err != nil {
+		t.Fatal(err)
+	}
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "empty", "profile": "claude"}))
+	ab, ok = parse(res)
+	if !ok {
+		t.Fatal("empty set: anchors block should still be present")
+	}
+	if len(ab.Items) != 0 || ab.Reconcile != "" || ab.TargetDir == "" {
+		t.Errorf("empty set: want items=0, no reconcile, target_dir set; got %+v", ab)
+	}
 }

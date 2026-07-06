@@ -14,7 +14,8 @@ Following these keeps retrieval predictable and write safety tight.
    hot/README/instruction files come back as `unchanged:true` with no
    body, and `mode="lite"` to get the `hot.md` frontmatter + outline
    instead of its full body (pull sections on demand with
-   `memory_get_section`). A frequently-respawned sub-agent pays a few
+   `memory_get_section`); with `mode` unset an oversize `hot.md` goes
+   lite automatically (`auto_lite:true`). A frequently-respawned sub-agent pays a few
    hundred bytes instead of the full payload when nothing changed.
 2. **Discover**: `memory_plans(project, status="in-progress")` or
    `memory_notes_by_tag(tag, project)` for typed retrieval.

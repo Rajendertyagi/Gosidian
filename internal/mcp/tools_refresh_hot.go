@@ -38,12 +38,12 @@ func (s *Server) registerRefreshHotTool() {
 }
 
 type refreshHotResult struct {
-	Project    string `json:"project"`
-	Updated    bool   `json:"updated"`
-	Reason     string `json:"reason,omitempty"`
-	Entries    int    `json:"entries"`
-	HotPath    string `json:"hot_path"`
-	NewETag    string `json:"new_etag,omitempty"`
+	Project string `json:"project"`
+	Updated bool   `json:"updated"`
+	Reason  string `json:"reason,omitempty"`
+	Entries int    `json:"entries"`
+	HotPath string `json:"hot_path"`
+	NewETag string `json:"new_etag,omitempty"`
 }
 
 func (s *Server) handleRefreshHot(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {

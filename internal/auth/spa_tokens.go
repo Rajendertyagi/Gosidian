@@ -52,9 +52,9 @@ const (
 // SpaToken is the on-disk shape (kept tight; the Hash is a SHA-256 hex
 // digest of the plaintext, never the plaintext itself).
 type SpaToken struct {
-	ID         string    `json:"id"`         // first 8 hex of Hash, displayable
-	Hash       string    `json:"hash"`       // sha256 hex of plaintext
-	UserID     string    `json:"user_id"`    // webauth user.ID
+	ID         string    `json:"id"`      // first 8 hex of Hash, displayable
+	Hash       string    `json:"hash"`    // sha256 hex of plaintext
+	UserID     string    `json:"user_id"` // webauth user.ID
 	UserAgent  string    `json:"user_agent,omitempty"`
 	IssuedAt   time.Time `json:"issued_at"`
 	ExpiresAt  time.Time `json:"expires_at"`  // sliding deadline

@@ -20,11 +20,12 @@ func (s *Server) registerSelfStatsTool() {
 }
 
 type selfStatsTokenInfo struct {
-	ID       string   `json:"id"`
-	Name     string   `json:"name,omitempty"`
-	Project  string   `json:"project,omitempty"`  // legacy single-project display (first project)
-	Projects []string `json:"projects,omitempty"` // full multi-project scope; empty = admin
-	Scopes   []string `json:"scopes,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name,omitempty"`
+	Project     string   `json:"project,omitempty"`  // legacy single-project display (first project)
+	Projects    []string `json:"projects,omitempty"` // full multi-project scope; empty = admin
+	Scopes      []string `json:"scopes,omitempty"`
+	ToolProfile string   `json:"tool_profile,omitempty"` // "core" when restricted; empty = full
 }
 
 func (s *Server) handleSelfStats(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -33,11 +34,12 @@ func (s *Server) handleSelfStats(ctx context.Context, req mcp.CallToolRequest) (
 		return errRes, nil
 	}
 	info := selfStatsTokenInfo{
-		ID:       tok.ID,
-		Name:     tok.Name,
-		Project:  tok.Project,
-		Projects: tok.ProjectList(),
-		Scopes:   append([]string(nil), tok.Scopes...),
+		ID:          tok.ID,
+		Name:        tok.Name,
+		Project:     tok.Project,
+		Projects:    tok.ProjectList(),
+		Scopes:      append([]string(nil), tok.Scopes...),
+		ToolProfile: tok.ToolProfile,
 	}
 	stats := s.limiter.Stats(tok.ID)
 	payload := map[string]any{

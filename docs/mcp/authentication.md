@@ -14,7 +14,8 @@ gosidian token create --vault ./vault \
   --name my-agent \
   --scopes read,write \
   --project gosidian \        # optional: restrict to one or more projects
-  --ttl 720h                  # optional: expiry (default: no expiry)
+  --ttl 720h \                # optional: expiry (default: no expiry)
+  --tool-profile core         # optional: worker tool subset (default: full)
 ```
 
 The plaintext token is printed **once** and hashed on disk (SHA-256).
@@ -31,6 +32,28 @@ Losing it means revoking and recreating.
 An admin token (no `--project` scope) can also call
 `memory_create_project` / `memory_delete_project` /
 `memory_rename_project`.
+
+## Tool profiles
+
+`--tool-profile` controls which slice of the MCP tool catalogue the
+token sees (REST: `tool_profile` on `POST /api/v1/admin/tokens`;
+introspection: `memory_self_stats`):
+
+- **`full`** (default, and the value every pre-existing token keeps):
+  the whole catalogue.
+- **`core`**: the worker subset — session start (`memory_bootstrap`),
+  note CRUD, targeted reads (`get_section`/`get_outline`/
+  `get_frontmatter`/`batch_get`), `memory_search`/`list_notes`/
+  `notes_by_tag`/`list_projects`, both upload tools, the full handoff
+  lifecycle and `memory_wait_changes`. The media/table note creators
+  appear only when their vault feature flag is on, and
+  `memory_self_improve` only for tokens opted into that loop.
+
+The profile is an **access-control boundary**, not a display filter: a
+tool outside the profile is absent from `tools/list` *and* answers
+`tool not found` if called by name. Give `core` to sub-agent tokens to
+cut their per-session schema cost (~60-70% fewer tool descriptions);
+keep `full` for orchestrators and interactive use.
 
 ## Per-project scoping
 

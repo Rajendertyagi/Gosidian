@@ -16,7 +16,7 @@ import (
 // or other hidden top-level dirs are skipped to avoid pulling Obsidian's
 // settings/cache.
 //
-//   gosidian import-vault --from <obsidian-vault> --to <gosidian-vault>
+//	gosidian import-vault --from <obsidian-vault> --to <gosidian-vault>
 func runImportCmd(args []string) {
 	fset := flag.NewFlagSet("import-vault", flag.ExitOnError)
 	from := fset.String("from", "", "source vault directory")

@@ -15,8 +15,8 @@ func seedImportanceVault(t *testing.T, s *Server) string {
 		{"proj/default.md", "---\ntitle: default\n---\n\n# default"}, // implicit 3
 		{"proj/low.md", "---\ntitle: low\nimportance: 2\n---\n\n# low"},
 		{"proj/archival.md", "---\ntitle: archival\nimportance: 1\n---\n\n# archival"},
-		{"proj/garbage.md", "---\ntitle: garbage\nimportance: abc\n---\n\n# garbage"}, // unparseable → default 3
-		{"proj/too-high.md", "---\ntitle: too-high\nimportance: 99\n---\n\n# clamped"},  // clamped to 5
+		{"proj/garbage.md", "---\ntitle: garbage\nimportance: abc\n---\n\n# garbage"},  // unparseable → default 3
+		{"proj/too-high.md", "---\ntitle: too-high\nimportance: 99\n---\n\n# clamped"}, // clamped to 5
 		{"other/foreign.md", "---\ntitle: foreign\nimportance: 5\n---\n\nnot mine"},
 	}
 	for _, n := range notes {

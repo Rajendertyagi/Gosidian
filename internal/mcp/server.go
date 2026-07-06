@@ -304,6 +304,9 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		server.WithToolCapabilities(true),
 		server.WithToolHandlerMiddleware(instrumentMiddleware),
 		server.WithToolHandlerMiddleware(s.selfImproveNudgeMiddleware),
+		// Per-token tool profile: applied to tools/list and enforced on
+		// tools/call by mcp-go (access-control boundary, not cosmetic).
+		server.WithToolFilter(s.filterToolsByProfile),
 	)
 	s.registerTools()
 	s.registerResourcesAndPrompts()

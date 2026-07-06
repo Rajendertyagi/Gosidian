@@ -243,9 +243,9 @@ func leadingHashes(s string) int {
 
 // parseCheckboxLine recognises GitHub-flavored checkbox lines:
 //
-//	- [ ] text
-//	- [x] text
-//	- [X] text
+//   - [ ] text
+//   - [x] text
+//   - [X] text
 //
 // with any leading whitespace. Returns (entry, true) on match; (zero, false)
 // otherwise. Only the `-` bullet is recognised (not `*`, `+`): we fix the
