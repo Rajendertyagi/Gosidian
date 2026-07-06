@@ -8,6 +8,25 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.17.1] — 2026-07-06 — "Fragment wikilinks join the graph"
+
+PATCH release. One index-level fix with a visible payoff on any vault that
+uses `[[note#heading]]` cross-references. No migration required — the
+startup rescan re-resolves existing links automatically.
+
+### Fixed
+- **`[[note#heading]]` wikilinks now resolve in the index.** The link
+  resolver never stripped the `#fragment`, so every fragment link stayed
+  unresolved: invisible to **backlinks, graph, hubs and path** queries, and
+  flagged as a broken wikilink by `memory_lint` (in the reference vault,
+  230 of 249 "broken" warnings were this false positive). The web UI
+  renderer was unaffected — it strips the fragment independently — which is
+  why the links worked in preview and the bug stayed latent. Fragments are
+  presentation-level (Obsidian semantics): the path part resolves to the
+  note, and a pure `[[#heading]]` self-link records no cross-note edge.
+  After upgrading, the first startup scan repairs the index and the graph
+  gains the previously-missing edges.
+
 ## [2.17.0] — 2026-07-06 — "Token economy: read guard + tool profiles"
 
 MINOR release focused on the token cost of agent sessions: an oversize guard
