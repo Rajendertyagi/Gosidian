@@ -20,6 +20,12 @@ type projectView struct {
 	SkipGitSync   bool   `json:"skip_git_sync"`
 	// Public marks the project as visible to guest-role users (read-only).
 	Public bool `json:"public"`
+	// UseGlobals opts the project into the shared "global" projects merge at
+	// bootstrap. UseAnchors opts it into local agent-anchor materialisation.
+	// Both only take effect when the respective server master switch is on
+	// (settingsView.GlobalsEnabled / AnchorsEnabled).
+	UseGlobals bool `json:"use_globals"`
+	UseAnchors bool `json:"use_anchors"`
 	// ModTime drives "most recent" sorting in the SPA's project
 	// pickers (graph filter, switcher). RFC 3339 UTC. Empty when
 	// the vault entry hasn't been stat-able.
@@ -39,6 +45,8 @@ type updateProjectRequest struct {
 	HiddenFromMCP *bool   `json:"hidden_from_mcp,omitempty"`
 	SkipGitSync   *bool   `json:"skip_git_sync,omitempty"`
 	Public        *bool   `json:"public,omitempty"`
+	UseGlobals    *bool   `json:"use_globals,omitempty"`
+	UseAnchors    *bool   `json:"use_anchors,omitempty"`
 }
 
 // handleProjects dispatches GET (list) / POST (create) on /projects.
@@ -108,6 +116,8 @@ func (r *Router) listProjects(w http.ResponseWriter, req *http.Request) {
 			HiddenFromMCP: flags.HiddenFromMCP,
 			SkipGitSync:   flags.SkipGitSync,
 			Public:        flags.Public,
+			UseGlobals:    flags.UseGlobals,
+			UseAnchors:    flags.UseAnchors,
 			ModTime:       formatModTime(p.ModTime),
 		})
 	}
@@ -141,6 +151,8 @@ func (r *Router) getProject(w http.ResponseWriter, req *http.Request, name strin
 				HiddenFromMCP: f.HiddenFromMCP,
 				SkipGitSync:   f.SkipGitSync,
 				Public:        f.Public,
+				UseGlobals:    f.UseGlobals,
+				UseAnchors:    f.UseAnchors,
 			})
 			return
 		}
@@ -213,7 +225,7 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 	// Apply flags first (cheap, no fs movement) so a failing rename
 	// still leaves the flags durable.
 	flagsChanged := false
-	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || body.Public != nil {
+	if body.HiddenFromMCP != nil || body.SkipGitSync != nil || body.Public != nil || body.UseGlobals != nil || body.UseAnchors != nil {
 		current := r.projectFlag(name)
 		if body.HiddenFromMCP != nil {
 			current.HiddenFromMCP = *body.HiddenFromMCP
@@ -223,6 +235,12 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		}
 		if body.Public != nil {
 			current.Public = *body.Public
+		}
+		if body.UseGlobals != nil {
+			current.UseGlobals = *body.UseGlobals
+		}
+		if body.UseAnchors != nil {
+			current.UseAnchors = *body.UseAnchors
 		}
 		if r.deps.Projects != nil {
 			if err := r.deps.Projects.Set(name, current); err != nil {
@@ -272,6 +290,8 @@ func (r *Router) updateProject(w http.ResponseWriter, req *http.Request, name st
 		HiddenFromMCP: flags.HiddenFromMCP,
 		SkipGitSync:   flags.SkipGitSync,
 		Public:        flags.Public,
+		UseGlobals:    flags.UseGlobals,
+		UseAnchors:    flags.UseAnchors,
 	})
 }
 

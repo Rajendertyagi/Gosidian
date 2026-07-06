@@ -50,9 +50,9 @@ func TestCreateMediaNote_Success(t *testing.T) {
 		t.Error("caption not written to body")
 	}
 	// The note resolves as a (non-broken) image media note end-to-end.
-	ref, ok := s.vault.MediaRefForNote(note.Path, note.Content)
-	if !ok || ref.Broken || ref.MIME != "image/png" {
-		t.Errorf("media ref not resolved: ok=%v ref=%+v", ok, ref)
+	ref, kind := s.vault.MediaRefForNote(note.Path, note.Content)
+	if kind != "image" || ref.Broken || ref.MIME != "image/png" {
+		t.Errorf("media ref not resolved: kind=%q ref=%+v", kind, ref)
 	}
 }
 
@@ -105,8 +105,8 @@ func TestCreateMediaNote_BridgeFilename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("note not created at pics/shot.md: %v", err)
 	}
-	if ref, ok := s.vault.MediaRefForNote(note.Path, note.Content); !ok || ref.Broken || ref.MIME != "image/png" {
-		t.Errorf("media ref not resolved: ok=%v ref=%+v", ok, ref)
+	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "image" || ref.Broken || ref.MIME != "image/png" {
+		t.Errorf("media ref not resolved: kind=%q ref=%+v", kind, ref)
 	}
 	// The staged file must be consumed after a successful upload.
 	if _, err := os.Stat(staged); !os.IsNotExist(err) {

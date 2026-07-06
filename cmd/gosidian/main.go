@@ -272,6 +272,10 @@ func main() {
 	if cfg.Vault.MediaNotes {
 		log.Printf("media notes enabled: markdown notes with type:image + media: resolved as image notes (ADR-013)")
 	}
+	v.SetTableNotes(cfg.Vault.TableNotes)
+	if cfg.Vault.TableNotes {
+		log.Printf("table notes enabled: markdown notes with type:table + media: resolved as CSV table notes (ADR-016)")
+	}
 	// Web-side login rate-limit + session TTL configuration moved
 	// to internal/api/v1 — the legacy server.ConfigureLogin retired
 	// at the v2.0 cutover alongside the cookie-session middleware.

@@ -62,7 +62,44 @@ corrente, aggiorna il vault:
 | Bug osservato anche fuori scope del task corrente | `{{PROJECT}}/docs/bugs.md` | `memory_append` come `## BUG-NNN` |
 | Domanda aperta senza risposta immediata | `{{PROJECT}}/docs/open-questions.md` | `memory_append` sezione "Aperte" come `### OQ-NNN` |
 | Improvement / technical debt identificato | `{{PROJECT}}/docs/improvements.md` | `memory_append` come `## IMP-NNN` |
+| Report/dashboard/widget HTML self-contained | nota `.html` nel folder pertinente (es. `{{PROJECT}}/docs/`) | `memory_create` con path `.html` (richiede `capabilities.html_notes`) |
+| Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_create_table_note` (richiede `capabilities.table_notes`) — non incollare la tabella nel body |
+| File binario (screenshot, PDF, zip) | attachment del vault | `memory_upload_attachment` / `memory_upload_resource` — per file grandi POST all'endpoint `/upload`, **mai** base64 nel contesto |
 | Fine task | `{{PROJECT}}/log.md` + `{{PROJECT}}/hot.md` | `memory_append` log, `memory_edit` hot |
+
+### Formati di nota e allegati
+
+Il payload di bootstrap include un blocco `capabilities` con i formati attivi
+su **questa** istanza (`html_notes`, `media_notes`, limiti/estensioni degli
+allegati): consultalo prima di scegliere il formato.
+
+- **Markdown è il default.** Contenuto semplice, piccolo, diff-abile,
+  ricercabile: nel dubbio la nota è una `.md`. Gli altri formati sono
+  eccezioni motivate, non alternative equivalenti.
+- **Note `.html` native** (se `capabilities.html_notes`): un path `.html` in
+  `memory_create` crea una nota HTML first-class — frontmatter in un commento
+  HTML di testa, indicizzata in ricerca/grafo/backlink come una `.md`,
+  renderizzata nella web UI in iframe sandbox. Usale **solo** per contenuto
+  intrinsecamente HTML (report generati, dashboard/viz self-contained con JS
+  inline); gli asset esterni sono bloccati by-design — inline tutto.
+- **Allegati** (screenshot, PDF, CSV, dataset, zip): usa
+  `memory_upload_attachment` (allegato per una nota, ritorna l'embed) o
+  `memory_upload_resource` (handle indipendente). Per file oltre pochi KB
+  **non** passare base64 nel contesto: POST multipart (field `file`, bearer
+  token) all'endpoint `/upload` — il tuo URL MCP con `/sse` sostituito da
+  `/upload`. Limite e estensioni ammesse in `capabilities.attachments`.
+- **Media notes** (se `capabilities.media_notes`): un'immagine diventa nota
+  first-class con `memory_create_media_note` — nota `.md` con `type: image` +
+  puntatore `media:` all'attachment; la caption nel body è ciò che entra in
+  ricerca, scrivila sempre.
+- **Table notes** (se `capabilities.table_notes`): dati tabellari lunghi
+  (audit report, export) diventano nota first-class con
+  `memory_create_table_note` — nota `.md` con `type: table` + puntatore
+  `media:` a un attachment `.csv`, resa come tabella paginata nella web UI e
+  linkabile dal report con un wikilink. Header di colonna e numero righe
+  vengono inlinati nel body (ricercabili); i **valori** delle celle no —
+  scrivi una caption che dica cosa contiene la tabella. Non incollare tabelle
+  lunghe nel body markdown.
 
 ### Regola delle ripetizioni
 

@@ -8,6 +8,68 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.16.0] — 2026-07-06 — "CSV table notes + capability discovery"
+
+MINOR release. Two discoverability-first features: long tabular data (audit
+reports, exports) becomes a first-class **CSV table note** rendered as a
+paginated table in the web UI, and agents now learn the instance's content
+formats at session start from a new **`capabilities` block** served by
+`memory_bootstrap`. Everything stays a plain markdown note; all changes are
+additive and backward compatible, new features are off by default with no
+migration required. 56 MCP tools total.
+
+### Added
+- **CSV table notes** (ADR-016, opt-in via `[vault] table_notes` /
+  `GOSIDIAN_VAULT_TABLE_NOTES`, default off). A table note is a normal `.md`
+  whose frontmatter declares `type: table` + a `media:` pointer to a `.csv`
+  attachment — it participates in tags, links, backlinks, graph and full-text
+  search like any note, and the SPA renders the CSV as a **paginated table**
+  (500 rows/page, text-only cells, download link, comma/semicolon/tab
+  delimiter auto-detection). Column headers and the row count are inlined
+  into the body so they land in search; cell values are intentionally not
+  indexed — the caption is the retrievable text. A broken pointer degrades to
+  a placeholder, never an error.
+- **`memory_create_table_note`** MCP tool (56th): uploads (or references) the
+  CSV and creates the pointing note in one atomic call; rejects unparsable
+  CSV before writing the note; accepts `attachment` (already-uploaded path,
+  cheapest), `bridge_filename`, `source_path` or base64 `data`.
+- **`capabilities` block in `memory_bootstrap`**: reports whether
+  `html_notes`, `media_notes` and `table_notes` are enabled on this instance,
+  plus the attachment surface (size cap, allowed extensions, the HTTP
+  `/upload` endpoint hint and the upload tool names) — so agents discover
+  content formats at session start instead of inside individual tool schemas.
+- **Per-project flag toggles in the projects admin UI**: `use_anchors` and
+  `use_globals` can now be flipped from the web UI (owner/admin only)
+  instead of editing `.gosidian/projects.json`.
+
+### Changed
+- **Operational directives v5** (served by `memory_bootstrap`): new «note
+  formats & attachments» section — markdown stays the declared default,
+  `.html` is reserved for intrinsically-HTML content, binaries go through
+  the upload tools (never base64 for large files), long tabular data goes to
+  a linked table note; the ingest table routes each artifact type
+  accordingly, cross-referencing the live `capabilities` block.
+- `memory_create` now documents native `.html` notes in its description
+  (gated by `html_notes`); `memory_bootstrap`'s description documents the
+  `capabilities` block.
+- Lint frontmatter vocabulary gains `type:table`.
+
+### Fixed
+- Trashing a project now collects notes of **every** recognised extension
+  for index cleanup — previously `.html` notes in a trashed project left
+  stale entries in search/graph/backlinks.
+- The markdown-preview wikilink resolver now resolves extension-less links
+  against every note extension, so `[[links]]` to `.html` notes render as
+  live links instead of dangling ones.
+
+### Notes
+- `table_notes` is **off by default**; enabling it requires no migration.
+  With the flag off, a `.md` carrying `type: table` renders as ordinary
+  markdown and API responses carry no `kind`/`media` overlay.
+- Clients connected via MCP must **reconnect** to see the new
+  `memory_create_table_note` tool (tool lists are snapshotted at session
+  start).
+
 ## [2.15.0] — 2026-07-06 — "Agent orchestration bus"
 
 MINOR release. gosidian can now serve as the coordination bus between an

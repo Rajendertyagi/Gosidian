@@ -5,7 +5,7 @@ into a vault project under `<project>/attachments/`:
 
 | Strada | Quando preferirla |
 |---|---|
-| **HTTP upload (`/upload`)** ⭐ | **Primary for agents.** Multipart upload authenticated by your **MCP bearer token** — the bytes travel over HTTP, never through the model context as base64. The path mirrors your `/sse` endpoint (`/sse` → `/upload`); returns `{path, url, mime, kind, size}`. Pass the returned `path` to `memory_create_media_note` as `attachment`, or splice the `url` into a note. |
+| **HTTP upload (`/upload`)** ⭐ | **Primary for agents.** Multipart upload authenticated by your **MCP bearer token** — the bytes travel over HTTP, never through the model context as base64. The path mirrors your `/sse` endpoint (`/sse` → `/upload`); returns `{path, url, mime, kind, size}`. Pass the returned `path` to `memory_create_media_note` / `memory_create_table_note` as `attachment`, or splice the `url` into a note. |
 | **MCP `bridge_filename`** | Co-located deploys: stage the file in `GOSIDIAN_MCP_BRIDGE_DIR` and pass its name; the server reads + consumes it. No HTTP call needed. |
 | **MCP `memory_upload_attachment`** | Single-step: upload (base64 `data` / `source_path` / `bridge_filename`) + return a ready-to-splice markdown embed. base64 is costly — prefer the HTTP POST for large files. |
 | **MCP `memory_upload_resource`** | Two-step: upload first, decide note placement later. Same sources; same base64 caveat. |
@@ -70,7 +70,8 @@ curl -X POST "$UPLOAD?project=Work" \
 - Same `internal/attach.Store` pipeline: 10 MiB cap, extension
   allowlist, magic-bytes MIME verification.
 - **Compose with media notes**: POST the image → take the returned
-  `path` → `memory_create_media_note({attachment: path, caption: …})`.
+  `path` → `memory_create_media_note({attachment: path, caption: …})`
+  (or `memory_create_table_note` for a CSV).
   The image lives once; agents read only the caption (ADR-013).
 
 ## REST `/api/upload`

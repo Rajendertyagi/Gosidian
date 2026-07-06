@@ -44,19 +44,20 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	body := resultText(t, res)
 
 	var p struct {
-		Project           string               `json:"project"`
-		HotMD             bootstrapFile        `json:"hot_md"`
-		Readme            bootstrapFile        `json:"readme"`
-		AgentMD           bootstrapFile        `json:"agent_md"`
-		ActivePlans       []noteRef            `json:"active_plans"`
-		AvailableSkills   []noteRef            `json:"available_skills"`
-		AvailableAgents   []noteRef            `json:"available_agents"`
-		RecentNotes       []recentNoteResponse `json:"recent_notes"`
-		Stats             bootstrapStats       `json:"stats"`
-		Missing           []string             `json:"missing"`
-		DirectivesVersion int                  `json:"directives_version"`
-		DirectivesBlock   string               `json:"directives_block"`
-		StubVersion       int                  `json:"stub_version"`
+		Project           string                 `json:"project"`
+		HotMD             bootstrapFile          `json:"hot_md"`
+		Readme            bootstrapFile          `json:"readme"`
+		AgentMD           bootstrapFile          `json:"agent_md"`
+		ActivePlans       []noteRef              `json:"active_plans"`
+		AvailableSkills   []noteRef              `json:"available_skills"`
+		AvailableAgents   []noteRef              `json:"available_agents"`
+		RecentNotes       []recentNoteResponse   `json:"recent_notes"`
+		Stats             bootstrapStats         `json:"stats"`
+		Missing           []string               `json:"missing"`
+		DirectivesVersion int                    `json:"directives_version"`
+		DirectivesBlock   string                 `json:"directives_block"`
+		StubVersion       int                    `json:"stub_version"`
+		Capabilities      *bootstrapCapabilities `json:"capabilities"`
 	}
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse: %v body=%s", err, body)
@@ -126,6 +127,24 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	}
 	if !strings.Contains(p.DirectivesBlock, proj) {
 		t.Error("directives_block should be rendered for the project")
+	}
+
+	// capabilities: always present, mirrors live config (flags off in the test
+	// server) and carries the attachment surface incl. the /upload hint.
+	if p.Capabilities == nil {
+		t.Fatal("capabilities block should always be present")
+	}
+	if p.Capabilities.HTMLNotes || p.Capabilities.MediaNotes {
+		t.Errorf("test server has html/media notes off, got %+v", p.Capabilities)
+	}
+	if p.Capabilities.Attachments.MaxMiB != 10 {
+		t.Errorf("attachments.max_mib = %d, want 10", p.Capabilities.Attachments.MaxMiB)
+	}
+	if len(p.Capabilities.Attachments.Extensions) == 0 {
+		t.Error("attachments.extensions should not be empty")
+	}
+	if !strings.Contains(p.Capabilities.Attachments.UploadEndpointHint, "/upload") {
+		t.Error("attachments.upload_endpoint_hint should mention /upload")
 	}
 }
 

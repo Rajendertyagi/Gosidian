@@ -5,9 +5,10 @@ export interface NoteSummary {
   title: string
 }
 
-// MediaRef is the resolved image payload of a media note (ADR-013), populated
-// by the backend when the media_notes feature is on and the note declares
-// `type: image`. `broken` is true when the `media:` pointer doesn't resolve.
+// MediaRef is the resolved payload of a media-style note — an image media
+// note (ADR-013, `type: image`) or a CSV table note (ADR-016, `type: table`)
+// — populated by the backend when the matching feature flag is on. `broken`
+// is true when the `media:` pointer doesn't resolve.
 export interface MediaRef {
   path: string
   url: string
@@ -23,7 +24,7 @@ export interface Note {
   etag: string
   size: number
   mod_time: string
-  kind?: 'image'
+  kind?: 'image' | 'table'
   media?: MediaRef
 }
 

@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**55 tools** cover the full retrieval → write → workflow →
+**56 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -94,6 +94,11 @@ for precise schemas; the groupings below are the conceptual map.
   image media note (ADR-013): uploads the image **and** creates the `.md`
   with `type: image` + `media:` + the caption, atomically. Requires
   `media_notes` enabled; images only
+- `memory_create_table_note(project, attachment|data|source_path|bridge_filename, caption?, title?, path?)` —
+  CSV table note (ADR-016): uploads (or references) the CSV **and** creates
+  the `.md` with `type: table` + `media:` + the caption, atomically; column
+  headers + row count are inlined into the body for search. Requires
+  `table_notes` enabled; `.csv` only
 
 The single-step / pre-uploader split, the equivalent REST endpoint
 `POST /api/upload`, and the full error catalogue live in

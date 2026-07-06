@@ -478,8 +478,8 @@ func (r *Router) toNoteResponse(n *vault.Note) noteResponse {
 		Size:    n.Size,
 		ModTime: n.ModTime.UTC().Format(rfc3339Z),
 	}
-	if ref, ok := r.deps.Vault.MediaRefForNote(n.Path, n.Content); ok {
-		resp.Kind = "image"
+	if ref, kind := r.deps.Vault.MediaRefForNote(n.Path, n.Content); kind != "" {
+		resp.Kind = kind
 		resp.Media = ref
 	}
 	return resp

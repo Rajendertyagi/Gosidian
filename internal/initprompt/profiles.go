@@ -85,7 +85,19 @@ const StubVersion = 2
 // the handoff status vocabulary to the closed tag list. Also documents the
 // bootstrap token-economy knobs (known_directives_version / known_etags /
 // mode=lite, batch_get outline/frontmatter modes, hot-oversize lint rule).
-const DirectivesVersion = 3
+//
+// v4 (2026-07-06, capability discovery): new «Formati di nota e allegati»
+// section — markdown stays the declared default; .html native notes and the
+// attachment upload tools (with the HTTP /upload endpoint, never base64 for
+// large files) are now discoverable from the directives, cross-referencing
+// the `capabilities` block that memory_bootstrap serves alongside; two new
+// ingest-table rows route HTML artifacts and binary files accordingly.
+//
+// v5 (2026-07-06, ADR-016 table notes): «Formati di nota e allegati» gains
+// the CSV table-note bullet (memory_create_table_note, capabilities.table_notes,
+// cell values not indexed → caption required) and the ingest table routes
+// long tabular data to a linked table note instead of the markdown body.
+const DirectivesVersion = 5
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

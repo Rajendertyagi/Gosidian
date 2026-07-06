@@ -9,12 +9,13 @@ import (
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
-// MediaRef is the resolved image payload of a media note: a markdown note whose
-// frontmatter declares `type: image` and a `media:` pointer to an image
-// attachment (ADR-013, Framing B). The note itself stays a plain .md — body is
-// the searchable caption/transcript — so all the note machinery (index, FTS,
-// tags, links, graph) is untouched; this struct is an overlay the read paths
-// surface so the SPA never has to parse frontmatter.
+// MediaRef is the resolved payload of a media-style note: a markdown note
+// whose frontmatter declares a payload kind (`type: image`, ADR-013, or
+// `type: table`, ADR-016) and a `media:` pointer to the attachment carrying
+// the bytes. The note itself stays a plain .md — body is the searchable
+// caption/transcript — so all the note machinery (index, FTS, tags, links,
+// graph) is untouched; this struct is an overlay the read paths surface so
+// the SPA never has to parse frontmatter.
 type MediaRef struct {
 	Path   string `json:"path"`             // vault-relative attachment path (the resolved `media:` value)
 	URL    string `json:"url"`              // serving URL, e.g. /vault-files/<path>
@@ -53,55 +54,74 @@ func (v *Vault) ResolveAttachmentByName(name string) (string, bool) {
 	return "", false
 }
 
-// MediaRefForNote inspects a note's frontmatter and, when media notes are
-// enabled AND the note declares `type: image`, returns the resolved image
-// reference plus true. The second return reports whether the note is a media
-// note at all (independent of whether the pointer resolves), so callers can set
-// kind="image" even for a broken pointer.
+// MediaRefForNote inspects a note's frontmatter and, when the matching feature
+// flag is enabled AND the note declares a payload kind (`type: image` with
+// media_notes on, ADR-013; `type: table` with table_notes on, ADR-016),
+// returns the resolved payload reference plus the kind. An empty kind means
+// the note is ordinary markdown. The kind is reported even for a broken
+// pointer, so callers can still tag the note and the SPA renders a
+// placeholder.
 //
-// Resolution failures (missing `media:` key, path escape, non-image extension,
-// file absent) are NOT errors: the ref is returned with Broken=true so the SPA
-// renders a placeholder instead of the read failing. When media notes are
-// disabled the note is treated as ordinary markdown (returns nil, false), which
-// keeps the feature fully backward-compatible behind its flag.
-func (v *Vault) MediaRefForNote(rel string, content []byte) (*MediaRef, bool) {
-	if !v.mediaNotes {
-		return nil, false
-	}
+// Resolution failures (missing `media:` key, path escape, wrong extension for
+// the kind, file absent) are NOT errors: the ref is returned with Broken=true
+// so the read never fails. With the flag off the note is treated as ordinary
+// markdown, which keeps each feature fully backward-compatible.
+func (v *Vault) MediaRefForNote(rel string, content []byte) (*MediaRef, string) {
 	raw := parser.FrontmatterRawForPath(rel, content)
 	if raw == "" {
-		return nil, false
+		return nil, ""
 	}
 	fields := parser.ParseFrontmatterFields(raw)
-	kind, _ := fields["type"].(string)
-	if !strings.EqualFold(strings.TrimSpace(kind), "image") {
-		return nil, false
+	declared, _ := fields["type"].(string)
+	var kind string
+	var extOK func(ext string) (mime string, ok bool)
+	switch strings.ToLower(strings.TrimSpace(declared)) {
+	case "image":
+		if !v.mediaNotes {
+			return nil, ""
+		}
+		kind = "image"
+		extOK = func(ext string) (string, bool) {
+			mime, isImage, err := attach.ValidateExt(ext)
+			return mime, err == nil && isImage
+		}
+	case "table":
+		if !v.tableNotes {
+			return nil, ""
+		}
+		kind = "table"
+		extOK = func(ext string) (string, bool) {
+			mime, _, err := attach.ValidateExt(ext)
+			return mime, err == nil && ext == ".csv"
+		}
+	default:
+		return nil, ""
 	}
 
 	mediaPath, _ := fields["media"].(string)
 	mediaPath = strings.TrimSpace(mediaPath)
 	if mediaPath == "" {
-		return &MediaRef{Broken: true}, true
+		return &MediaRef{Broken: true}, kind
 	}
 
 	// Sanitize the pointer (rejects ".." escapes) and validate it points at a
-	// readable image inside the vault.
+	// readable attachment of the right type inside the vault.
 	clean, err := v.Rel(mediaPath)
 	if err != nil {
-		return &MediaRef{Path: mediaPath, Broken: true}, true
+		return &MediaRef{Path: mediaPath, Broken: true}, kind
 	}
 	ref := &MediaRef{Path: clean, URL: "/vault-files/" + clean}
-	mime, isImage, err := attach.ValidateExt(strings.ToLower(filepath.Ext(clean)))
-	if err != nil || !isImage {
+	mime, ok := extOK(strings.ToLower(filepath.Ext(clean)))
+	if !ok {
 		ref.Broken = true
-		return ref, true
+		return ref, kind
 	}
 	fi, err := os.Stat(filepath.Join(v.Root, filepath.FromSlash(clean)))
 	if err != nil || fi.IsDir() {
 		ref.Broken = true
-		return ref, true
+		return ref, kind
 	}
 	ref.MIME = mime
 	ref.Size = fi.Size()
-	return ref, true
+	return ref, kind
 }

@@ -132,9 +132,9 @@ func (s *Server) registerTools() {
 	), s.handleGetOutline)
 
 	s.impl.AddTool(mcp.NewTool("memory_create",
-		mcp.WithDescription("Create a new note at the given path. Fails if the note already exists."),
+		mcp.WithDescription("Create a new note at the given path. Fails if the note already exists. Markdown (.md) is the default note format; a path ending in .html creates a native single-file HTML note (frontmatter in a leading HTML comment, indexed/linked like a .md, rendered sandboxed in the web UI) when the instance has html_notes enabled — see `capabilities` in memory_bootstrap. Reserve .html for intrinsically-HTML content (generated reports, self-contained dashboards); prefer .md otherwise."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path, e.g. 'project/new-note.md'.")),
-		mcp.WithString("content", mcp.Required(), mcp.Description("Full markdown content of the note.")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Full content of the note: markdown for .md paths, a self-contained HTML document for .html paths.")),
 	), s.handleCreate)
 
 	s.impl.AddTool(mcp.NewTool("memory_update",
@@ -206,6 +206,7 @@ func (s *Server) registerTools() {
 
 	s.registerAttachmentTools()
 	s.registerMediaTools()
+	s.registerTableTools()
 	s.registerAuditTools()
 	s.registerBootstrapTool()
 	s.registerDiscoveryTools()
@@ -518,8 +519,8 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		Content: string(note.Content),
 		ETag:    note.ETag(),
 	}
-	if ref, ok := s.vault.MediaRefForNote(note.Path, note.Content); ok {
-		nc.Kind = "image"
+	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "" {
+		nc.Kind = kind
 		nc.Media = ref
 	}
 	return mcp.NewToolResultJSON(nc)

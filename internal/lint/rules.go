@@ -247,6 +247,7 @@ var knownTagValues = map[string]map[string]struct{}{
 		"handoff": {},
 		"insight": {},
 		"image":   {},
+		"table":   {},
 	},
 	"topic": {
 		"mcp":     {},

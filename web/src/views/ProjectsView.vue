@@ -7,6 +7,7 @@ import {
   deleteProject,
   type Project,
 } from '@/api/projects'
+import { getSettings } from '@/api/settings'
 import { useTreeStore } from '@/stores/tree'
 import { useAuthStore } from '@/stores/auth'
 import { useWindowsStore, type OpenSpec } from 'plancia'
@@ -19,6 +20,11 @@ const treeStore = useTreeStore()
 const auth = useAuthStore()
 const store = useWindowsStore()
 const openWindow = inject<(spec: OpenSpec) => string>('openWindow', (s) => store.open(s))
+
+// Master switches: use_anchors/use_globals only take effect when the server
+// master switch is on. We surface them so the toggles can flag "no effect yet".
+const anchorsMaster = ref(false)
+const globalsMaster = ref(false)
 
 /** Explore a project as a graph window (its link neighbourhood). */
 function openProjectGraph(name: string) {
@@ -79,6 +85,44 @@ async function togglePublic(p: Project) {
   await load()
 }
 
+async function toggleGlobals(p: Project) {
+  await updateProject(p.name, { use_globals: !p.use_globals })
+  await load()
+}
+
+async function toggleAnchors(p: Project) {
+  await updateProject(p.name, { use_anchors: !p.use_anchors })
+  await load()
+}
+
+function globalsTitle(p: Project): string {
+  if (!globalsMaster.value)
+    return 'Global-projects master switch (GOSIDIAN_GLOBAL_ENABLED) is off — this flag has no effect until it is enabled on the server.'
+  return p.use_globals
+    ? 'Globals on: this project merges the shared global skills/agents at bootstrap. Click to disable.'
+    : 'Click to merge the shared global skills/agents into this project at bootstrap.'
+}
+
+function anchorsTitle(p: Project): string {
+  if (!anchorsMaster.value)
+    return 'Agent-anchor master switch (GOSIDIAN_ANCHORS_ENABLED) is off — this flag has no effect until it is enabled on the server.'
+  return p.use_anchors
+    ? "Anchors on: this project's vault agents are materialised as local .claude/agents anchors at bootstrap. Click to disable."
+    : 'Click to materialise this project’s vault agents as local subagent anchors at bootstrap.'
+}
+
+/** Master switches decide whether use_anchors/use_globals have any effect.
+ *  Non-fatal: on failure the toggles still work, they just lose the hint. */
+async function loadMasters() {
+  try {
+    const s = await getSettings()
+    anchorsMaster.value = s.anchors_enabled
+    globalsMaster.value = s.globals_enabled
+  } catch {
+    /* member+ only; guests never see these toggles anyway */
+  }
+}
+
 async function rename(p: Project) {
   const newSlug = prompt(`Rename "${p.name}" to:`, p.name)
   if (!newSlug || newSlug === p.name) return
@@ -102,7 +146,10 @@ async function destroy(p: Project) {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  load()
+  loadMasters()
+})
 </script>
 
 <template>
@@ -111,7 +158,10 @@ onMounted(load)
     <p class="text-sm text-text-muted mb-6">
       Top-level vault folders. <em>private</em>/<em>public</em> controls guest visibility
       (public = readable by guest-role users); <em>skip-git</em> excludes from auto-commit;
-      <em>hidden</em> keeps the project invisible to MCP agents.
+      <em>hidden</em> keeps the project invisible to MCP agents;
+      <em>globals</em> merges the shared global skills/agents at bootstrap;
+      <em>anchors</em> materialises vault agents as local subagent files at bootstrap
+      (both need their server master switch on — dimmed when off).
     </p>
 
     <form
@@ -170,6 +220,26 @@ onMounted(load)
             :title="p.hidden_from_mcp ? 'Click to expose to MCP again' : 'Click to hide from MCP'"
             @click="toggleHidden(p)"
           >hidden</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="[
+              p.use_globals ? 'bg-accent/20 text-accent' : 'border border-border',
+              globalsMaster ? '' : 'opacity-50',
+            ]"
+            :title="globalsTitle(p)"
+            @click="toggleGlobals(p)"
+          >globals</button>
+          <button
+            type="button"
+            class="text-xs px-2 py-1 rounded"
+            :class="[
+              p.use_anchors ? 'bg-accent/20 text-accent' : 'border border-border',
+              anchorsMaster ? '' : 'opacity-50',
+            ]"
+            :title="anchorsTitle(p)"
+            @click="toggleAnchors(p)"
+          >anchors</button>
 
           <button
             v-if="auth.isOwner"

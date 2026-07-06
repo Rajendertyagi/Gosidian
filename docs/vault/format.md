@@ -134,6 +134,44 @@ The plancia in tiling mode with three side-by-side windows… (caption → FTS)
 
 See **ADR-013** for the rationale.
 
+### CSV table notes
+
+Long tabular data (audit reports, exports) can be a **first-class note**
+(ADR-016) with the same mechanism as image media notes: a normal `.md`
+whose frontmatter declares `type: table` and a `media:` pointer to a
+`.csv` attachment. The web UI renders the CSV as a **paginated table**;
+the report note links the table note with a wikilink instead of embedding
+thousands of rows in its body. Off by default; enable with
+`[vault] table_notes = true` (or the `GOSIDIAN_VAULT_TABLE_NOTES`
+environment variable).
+
+```markdown
+---
+title: Access audit July
+type: table
+media: project/attachments/def456.csv
+tags: [project, type:table]
+---
+
+Portal access log, July export. (caption -> FTS)
+
+Columns: user, action, ts
+Rows: 12480
+```
+
+- The **column headers and row count** are inlined into the body (the MCP
+  tool does it automatically) and land in full-text search; the cell
+  **values are not indexed** — write a caption saying what the table
+  contains.
+- On read the backend resolves `media:` and exposes `kind: "table"` plus a
+  `media` object (`url`, `mime`, `size`); a broken pointer degrades to a
+  placeholder.
+- `.csv` only; the comma / semicolon / tab delimiter is auto-detected.
+- Create one via the MCP tool `memory_create_table_note` (upload + note,
+  atomic).
+
+See **ADR-016** for the rationale.
+
 ## Bootstrap templates
 
 Three templates ship with the binary and are seeded into

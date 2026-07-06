@@ -27,6 +27,12 @@ type settingsView struct {
 	// MemberScope gates project access: "all" (legacy: owner/member see every
 	// project) or "members" (private projects require per-project membership).
 	MemberScope string `json:"member_scope"`
+	// AnchorsEnabled / GlobalsEnabled are the read-only server master switches
+	// (GOSIDIAN_ANCHORS_ENABLED / GOSIDIAN_GLOBAL_ENABLED). The SPA reads them
+	// to tell whether a project's use_anchors/use_globals flag has any effect.
+	// Never settable via PUT — they live in config/env, not the SPA.
+	AnchorsEnabled bool `json:"anchors_enabled"`
+	GlobalsEnabled bool `json:"globals_enabled"`
 }
 
 type gitSettings struct {
@@ -225,7 +231,9 @@ func toSettingsView(c *config.Config) settingsView {
 			WritePerMinute: c.MCP.WritePerMinute,
 			MaxNoteBytes:   c.MCP.MaxNoteBytes,
 		},
-		TOTPMode: c.Webauth.TOTPMode,
+		TOTPMode:       c.Webauth.TOTPMode,
+		AnchorsEnabled: c.AgentAnchors.Enabled,
+		GlobalsEnabled: c.Global.Enabled,
 	}
 }
 

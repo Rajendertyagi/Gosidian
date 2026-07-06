@@ -10,8 +10,10 @@ import (
 	"errors"
 	"os"
 	"path"
+	"sort"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/initprompt"
 	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
@@ -22,7 +24,7 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename. In the stub model the instruction file lives in the agent's working dir (outside the vault); when it is not a vault note, `agent_md.expected_external` is true and it is NOT reported in `missing` (which lists only absent vault scaffold such as hot.md / README.md)."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. `capabilities` reports this instance's content formats — whether .html native notes, image media notes and CSV table notes are enabled, plus attachment limits/extensions and the HTTP /upload endpoint hint for large files. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename. In the stub model the instruction file lives in the agent's working dir (outside the vault); when it is not a vault note, `agent_md.expected_external` is true and it is NOT reported in `missing` (which lists only absent vault scaffold such as hot.md / README.md)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 		mcp.WithString("profile", mcp.Description("Optional CLI/agent profile for local agent-anchor materialisation (\"claude\", \"generic\", …). Default \"claude\". When the master switch and the project's use_anchors flag are on and the profile supports native subagents, the response includes an `anchors` block: the set of thin agent-anchor files (each pulls its canonical role from the vault at spawn) to write/reconcile in the agent's cwd, plus a `reconcile` directive. Flags off, or a profile without subagent support, yield no anchors.")),
 		mcp.WithNumber("known_directives_version", mcp.Description("Token economy: the directives_version you already hold (from a previous bootstrap this session family). When it matches the server's current version, directives_block is omitted from the payload — directives_version is always present so you can detect the match. Omit or pass 0 to always receive the block.")),
@@ -65,6 +67,46 @@ type bootstrapPendingInsights struct {
 	Project string    `json:"project"`
 	Count   int       `json:"count"`
 	Notes   []noteRef `json:"notes"`
+}
+
+// bootstrapCapabilities advertises this instance's content capabilities at
+// session start, so agents learn what note formats and file channels exist
+// without having to open individual tool schemas. Flags mirror the live vault
+// config; static guidance on WHEN to use each format lives in the directives
+// («Formati di nota e allegati»), which cross-reference this block.
+type bootstrapCapabilities struct {
+	HTMLNotes   bool                      `json:"html_notes"`
+	MediaNotes  bool                      `json:"media_notes"`
+	TableNotes  bool                      `json:"table_notes"`
+	Attachments bootstrapAttachCapability `json:"attachments"`
+}
+
+type bootstrapAttachCapability struct {
+	MaxMiB             int      `json:"max_mib"`
+	Extensions         []string `json:"extensions"`
+	UploadEndpointHint string   `json:"upload_endpoint_hint"`
+	Tools              []string `json:"tools"`
+}
+
+// buildCapabilities assembles the capabilities block from live config and the
+// attach allowlist. Extensions are sorted (dot-less) for stable output.
+func (s *Server) buildCapabilities() bootstrapCapabilities {
+	exts := make([]string, 0, len(attach.AllowedExt))
+	for ext := range attach.AllowedExt {
+		exts = append(exts, strings.TrimPrefix(ext, "."))
+	}
+	sort.Strings(exts)
+	return bootstrapCapabilities{
+		HTMLNotes:  s.vault.HTMLNotesEnabled(),
+		MediaNotes: s.vault.MediaNotesEnabled(),
+		TableNotes: s.vault.TableNotesEnabled(),
+		Attachments: bootstrapAttachCapability{
+			MaxMiB:             attach.MaxBytes >> 20,
+			Extensions:         exts,
+			UploadEndpointHint: "for large files POST multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
+			Tools:              []string{"memory_upload_attachment", "memory_upload_resource"},
+		},
+	}
 }
 
 // conventionFiles maps the relative-to-project filename to the key we expose
@@ -126,6 +168,10 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		// must be regenerated via memory_init_agent.
 		"directives_version": initprompt.DirectivesVersion,
 		"stub_version":       initprompt.StubVersion,
+		// capabilities: per-instance content-format discovery (plan
+		// 20260706-capability-discovery-bootstrap). Always present — an agent
+		// must see html_notes:false, not silence, to know .html is off here.
+		"capabilities": s.buildCapabilities(),
 	}
 	// Version negotiation: a caller that already holds the current directives
 	// skips the whole block — directives_version above is the match signal.

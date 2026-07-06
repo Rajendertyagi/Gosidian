@@ -19,15 +19,15 @@ import (
 
 // Config is the top-level settings document.
 type Config struct {
-	Git         GitConfig         `toml:"git"`
-	MCP         MCPConfig         `toml:"mcp"`
-	Trash       TrashConfig       `toml:"trash"`
-	Theme       ThemeConfig       `toml:"theme"`
-	Webauth     WebauthConfig     `toml:"webauth"`
-	Vault       VaultConfig       `toml:"vault"`
-	I18n        I18nConfig        `toml:"i18n"`
-	Lint        LintConfig        `toml:"lint"`
-	LDAP        LDAPConfig        `toml:"ldap"`
+	Git          GitConfig          `toml:"git"`
+	MCP          MCPConfig          `toml:"mcp"`
+	Trash        TrashConfig        `toml:"trash"`
+	Theme        ThemeConfig        `toml:"theme"`
+	Webauth      WebauthConfig      `toml:"webauth"`
+	Vault        VaultConfig        `toml:"vault"`
+	I18n         I18nConfig         `toml:"i18n"`
+	Lint         LintConfig         `toml:"lint"`
+	LDAP         LDAPConfig         `toml:"ldap"`
 	SelfImprove  SelfImproveConfig  `toml:"self_improve"`
 	Global       GlobalConfig       `toml:"global"`
 	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
@@ -137,6 +137,7 @@ type VaultConfig struct {
 	CacheSize  int  `toml:"cache_size"`  // LRU entries; 0 disables; default 128
 	HTMLNotes  bool `toml:"html_notes"`  // treat single-file .html as first-class notes; default false (ADR-011)
 	MediaNotes bool `toml:"media_notes"` // resolve image media notes (type: image + media: pointer); default false (ADR-013)
+	TableNotes bool `toml:"table_notes"` // resolve CSV table notes (type: table + media: pointer); default false (ADR-016)
 }
 
 // I18nConfig chooses the default UI language and the list of enabled ones.
@@ -374,6 +375,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_VAULT_MEDIA_NOTES"); v != "" {
 		c.Vault.MediaNotes = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_VAULT_TABLE_NOTES"); v != "" {
+		c.Vault.TableNotes = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v

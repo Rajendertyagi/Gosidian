@@ -9,6 +9,14 @@ export interface Project {
    *  visible to owner/member only. "Public" = visible to all authenticated
    *  users including guests, not anonymous. */
   public: boolean
+  /** Opt the project into the shared "global" projects merge at bootstrap.
+   *  Only effective when the server master switch (settings.globals_enabled)
+   *  is on. */
+  use_globals: boolean
+  /** Opt the project into local agent-anchor materialisation at bootstrap.
+   *  Only effective when the server master switch (settings.anchors_enabled)
+   *  is on. */
+  use_anchors: boolean
   /** RFC 3339 UTC string of the directory's mtime — proxy for
    *  "last activity" (fs birth time isn't preserved by rsync /
    *  git checkout / container layer copy). Empty when stat failed. */
@@ -25,6 +33,8 @@ export interface UpdateProjectRequest {
   hidden_from_mcp?: boolean
   skip_git_sync?: boolean
   public?: boolean
+  use_globals?: boolean
+  use_anchors?: boolean
 }
 
 export async function listProjects(): Promise<Project[]> {

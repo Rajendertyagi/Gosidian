@@ -29,6 +29,8 @@ export interface Settings {
   mcp: MCPSettings
   totp_mode: string // off | optional | required (global two-factor policy)
   member_scope: string // all (legacy) | members (per-project membership gating)
+  anchors_enabled: boolean // read-only master switch GOSIDIAN_ANCHORS_ENABLED
+  globals_enabled: boolean // read-only master switch GOSIDIAN_GLOBAL_ENABLED
 }
 
 export interface UpdateSettings {

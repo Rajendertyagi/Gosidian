@@ -20,6 +20,7 @@ type Vault struct {
 	cache      *loadCache
 	htmlNotes  bool
 	mediaNotes bool
+	tableNotes bool
 	locks      sync.Map // canonical rel path → *sync.Mutex, see LockPath
 }
 
@@ -62,9 +63,25 @@ func (v *Vault) SetMediaNotes(on bool) { v.mediaNotes = on }
 // MediaNotesEnabled reports whether image media notes are resolved.
 func (v *Vault) MediaNotesEnabled() bool { return v.mediaNotes }
 
+// SetTableNotes toggles whether markdown notes whose frontmatter declares
+// `type: table` + a `media:` pointer to a .csv attachment are resolved as
+// table notes (rendered as a table in the SPA). Default false. Wired from
+// [vault] table_notes / GOSIDIAN_VAULT_TABLE_NOTES. See ADR-016. Like media
+// notes, table notes are plain .md files — noteExtensions is untouched.
+func (v *Vault) SetTableNotes(on bool) { v.tableNotes = on }
+
+// TableNotesEnabled reports whether CSV table notes are resolved.
+func (v *Vault) TableNotesEnabled() bool { return v.tableNotes }
+
 // noteExtensions are the file extensions gosidian recognises as notes. Markdown
 // is always a note; .html is gated by the htmlNotes feature flag (IsNoteFile).
 var noteExtensions = []string{".md", ".html"}
+
+// NoteExtensions returns the recognised note-file extensions, flag-independent
+// (lowercase, with leading dot). For callers outside the vault (trash cleanup,
+// preview link resolution) that must not hardcode ".md" — over-matching a
+// disabled extension is harmless there, missing one is a stale-index bug.
+func NoteExtensions() []string { return append([]string(nil), noteExtensions...) }
 
 // IsNoteFile reports whether name (a path or basename) is a note file: always
 // true for .md, true for .html only when the html-notes feature is enabled.

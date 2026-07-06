@@ -14,7 +14,23 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/gosidian/gosidian/internal/vault"
 )
+
+// isNotePath reports whether p carries a recognised note extension
+// (flag-independent: over-collecting a disabled extension only makes the
+// caller's index cleanup a no-op, while hardcoding ".md" left .html notes
+// stale in the index — BUG-023).
+func isNotePath(p string) bool {
+	ext := strings.ToLower(filepath.Ext(p))
+	for _, e := range vault.NoteExtensions() {
+		if ext == e {
+			return true
+		}
+	}
+	return false
+}
 
 // Bin operates on a vault root + a hidden trash directory inside it.
 type Bin struct {
@@ -72,7 +88,7 @@ func (b *Bin) DiscardProject(name string) (string, []string, error) {
 		if err != nil || d.IsDir() {
 			return nil
 		}
-		if !strings.EqualFold(filepath.Ext(p), ".md") {
+		if !isNotePath(p) {
 			return nil
 		}
 		rel, _ := filepath.Rel(b.vaultRoot, p)
@@ -93,10 +109,10 @@ func (b *Bin) DiscardProject(name string) (string, []string, error) {
 
 // Entry is one item in the trash listing.
 type Entry struct {
-	ID         string    // filename inside the trash dir
-	OriginPath string    // best-effort original vault-relative path
+	ID          string // filename inside the trash dir
+	OriginPath  string // best-effort original vault-relative path
 	DiscardedAt time.Time
-	IsDir      bool
+	IsDir       bool
 }
 
 // List returns all current trash entries, newest first.
@@ -161,7 +177,7 @@ func (b *Bin) Restore(id string) ([]string, error) {
 			if err != nil || d.IsDir() {
 				return nil
 			}
-			if !strings.EqualFold(filepath.Ext(p), ".md") {
+			if !isNotePath(p) {
 				return nil
 			}
 			rel, _ := filepath.Rel(b.vaultRoot, p)
