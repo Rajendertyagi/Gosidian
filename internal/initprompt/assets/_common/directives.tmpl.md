@@ -127,7 +127,9 @@ dichiarativi. Non editare a mano il frontmatter di lifecycle.
 ### Economia dei token
 
 - **Bootstrap ripetuti**: passa `known_directives_version` (match → blocco
-  omesso) e `known_etags` (file invariati → `unchanged:true` senza body).
+  omesso) e `known_etags` (file invariati → `unchanged:true` senza body);
+  sui progetti con anchors attivi anche `known_anchor_metas`
+  (canonical → meta_version: item invariati senza `content`).
   `mode` default è **auto**: hot.md oltre soglia arriva in forma lite
   (frontmatter+outline, `auto_lite:true`) — le sezioni via
   `memory_get_section`.

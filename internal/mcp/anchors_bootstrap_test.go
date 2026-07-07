@@ -27,6 +27,7 @@ type anchorsBlock struct {
 		Content     string `json:"content"`
 		MetaVersion string `json:"meta_version"`
 		Canonical   string `json:"canonical"`
+		Unchanged   bool   `json:"unchanged"`
 	} `json:"items"`
 	Reconcile string `json:"reconcile"`
 }
@@ -133,5 +134,97 @@ func TestBootstrap_AgentAnchors_Gating(t *testing.T) {
 	}
 	if len(ab.Items) != 0 || ab.Reconcile != "" || ab.TargetDir == "" {
 		t.Errorf("empty set: want items=0, no reconcile, target_dir set; got %+v", ab)
+	}
+
+	// 7. harness.materialize:false → the note stays canonical (listed in
+	// available_agents) but is excluded from the anchors desired set; a
+	// previously-materialised anchor becomes an orphan the reconcile flow
+	// removes (IMP-070).
+	_, _ = s.handleCreate(ctx, call(map[string]any{
+		"path":    "proj/agents/orchestrator.md",
+		"content": "---\ntitle: Orchestrator\ndescription: coordination role, not spawnable\ntags: [proj, type:agent]\ntype: agent\nharness:\n  materialize: false\n---\n\n# Orchestrator\n",
+	}))
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude"}))
+	ab, ok = parse(res)
+	if !ok {
+		t.Fatal("materialize opt-out: anchors block should be present")
+	}
+	if len(ab.Items) != 1 || ab.Items[0].Canonical != "proj/agents/frontend-engineer.md" {
+		t.Errorf("materialize opt-out: want only frontend-engineer in items, got %+v", ab.Items)
+	}
+}
+
+func TestBootstrap_AgentAnchors_KnownMetasDelta(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	pstore, err := projects.Open(filepath.Join(t.TempDir(), "projects.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetProjects(pstore)
+	s.SetAgentAnchors(true)
+	ctx := context.Background()
+	if err := pstore.Set("proj", projects.Flags{UseAnchors: true}); err != nil {
+		t.Fatal(err)
+	}
+	mkAgent(t, s, ctx, "proj/agents/alpha.md", "Alpha", "proj")
+	mkAgent(t, s, ctx, "proj/agents/beta.md", "Beta", "proj")
+
+	parse := func(res *mcplib.CallToolResult) anchorsBlock {
+		t.Helper()
+		var p struct {
+			Anchors *anchorsBlock `json:"anchors"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if p.Anchors == nil {
+			t.Fatal("expected anchors payload")
+		}
+		return *p.Anchors
+	}
+
+	// First bootstrap: full content, collect the metas.
+	res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude"}))
+	first := parse(res)
+	if len(first.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(first.Items))
+	}
+	metas := map[string]any{}
+	for _, it := range first.Items {
+		if it.Content == "" || it.Unchanged {
+			t.Errorf("first bootstrap: item %s should carry content", it.Canonical)
+		}
+		metas[it.Canonical] = it.MetaVersion
+	}
+
+	// Repeat with all metas known → every item unchanged, no content, but the
+	// reconcile directive still ships (the "leave it" rule lives there).
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude", "known_anchor_metas": metas}))
+	second := parse(res)
+	if len(second.Items) != 2 {
+		t.Fatalf("delta items = %d, want 2", len(second.Items))
+	}
+	for _, it := range second.Items {
+		if !it.Unchanged || it.Content != "" {
+			t.Errorf("known meta: item %s should be unchanged with no content, got unchanged=%v content=%dB",
+				it.Canonical, it.Unchanged, len(it.Content))
+		}
+		if it.MetaVersion == "" {
+			t.Errorf("known meta: item %s must still carry meta_version", it.Canonical)
+		}
+	}
+	if second.Reconcile == "" {
+		t.Error("delta bootstrap: reconcile directive should still be present")
+	}
+
+	// Stale meta for beta → beta full, alpha unchanged (mixed delta).
+	metas["proj/agents/beta.md"] = "0000deadbeef"
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "proj", "profile": "claude", "known_anchor_metas": metas}))
+	third := parse(res)
+	for _, it := range third.Items {
+		wantUnchanged := it.Canonical == "proj/agents/alpha.md"
+		if it.Unchanged != wantUnchanged || (it.Content == "") != wantUnchanged {
+			t.Errorf("mixed delta: item %s unchanged=%v content=%dB", it.Canonical, it.Unchanged, len(it.Content))
+		}
 	}
 }

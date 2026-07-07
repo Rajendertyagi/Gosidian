@@ -102,7 +102,11 @@ const StubVersion = 2
 // rules); the token-economy section documents the new memory_get oversize
 // guard (bodies over 24 KiB come back truncated with outline + hint;
 // raw:true bypasses) and the bootstrap auto-lite default for oversize hot.md.
-const DirectivesVersion = 6
+//
+// v7 (2026-07-07, anchors round 2): the token-economy section documents
+// known_anchor_metas — the bootstrap anchors delta for anchor-enabled
+// projects (canonical → meta_version; unchanged items ship without content).
+const DirectivesVersion = 7
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

@@ -60,9 +60,13 @@ type initAgentResponse struct {
 // the canonical vault note it pulls from.
 type anchorRef struct {
 	Path        string `json:"path"`
-	Content     string `json:"content"`
+	Content     string `json:"content,omitempty"`
 	MetaVersion string `json:"meta_version"`
 	Canonical   string `json:"canonical"`
+	// Unchanged marks an anchor whose meta_version matched the caller's
+	// known_anchor_metas — the content was deliberately omitted (bootstrap
+	// delta, IMP-068). Content empty ≠ empty anchor.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -164,7 +168,11 @@ func (s *Server) buildAgentAnchors(project string, profile initprompt.Profile, t
 		if err != nil {
 			continue
 		}
-		ar, err := initprompt.RenderAgentAnchor(profile, anchorInputFromNote(a.Path, note.Content))
+		in := anchorInputFromNote(a.Path, note.Content)
+		if !in.Materialize {
+			continue
+		}
+		ar, err := initprompt.RenderAgentAnchor(profile, in)
 		if err != nil {
 			continue
 		}
@@ -180,12 +188,12 @@ func (s *Server) buildAgentAnchors(project string, profile initprompt.Profile, t
 
 // anchorInputFromNote builds the anchor metadata from a type:agent note,
 // applying defaults (name/description) and the optional `harness:` frontmatter
-// overrides (name, description, model, tools).
+// overrides (name, description, model, tools, materialize).
 func anchorInputFromNote(path string, content []byte) initprompt.AnchorInput {
 	raw := parser.FrontmatterRawForPath(path, content)
 	fields := parser.ParseFrontmatterFields(raw)
 	slug := anchorSlug(path)
-	in := initprompt.AnchorInput{CanonicalPath: path, Slug: slug, Name: slug}
+	in := initprompt.AnchorInput{CanonicalPath: path, Slug: slug, Name: slug, Materialize: true}
 	if d, ok := fields["description"].(string); ok {
 		in.Description = d
 	}
@@ -199,11 +207,33 @@ func anchorInputFromNote(path string, content []byte) initprompt.AnchorInput {
 		if v, ok := h["model"].(string); ok && strings.TrimSpace(v) != "" {
 			in.Model = v
 		}
-		if v, ok := h["tools"].([]string); ok && len(v) > 0 {
-			in.Tools = v
+		switch v := h["tools"].(type) {
+		case []string:
+			if len(v) > 0 {
+				in.Tools = v
+			}
+		case string:
+			// Scalar form: `tools: all` inherits the CLI's full toolset.
+			if strings.EqualFold(strings.TrimSpace(v), "all") {
+				in.ToolsAll = true
+			}
+		}
+		// The block parser is untyped: booleans arrive as strings.
+		if v, ok := h["materialize"].(string); ok && isFrontmatterFalse(v) {
+			in.Materialize = false
 		}
 	}
 	return in
+}
+
+// isFrontmatterFalse reports whether an untyped harness scalar spells a
+// negative boolean.
+func isFrontmatterFalse(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "no", "off":
+		return true
+	}
+	return false
 }
 
 // anchorSlug derives the anchor file basename (without extension) from the

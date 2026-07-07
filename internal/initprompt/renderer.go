@@ -182,7 +182,9 @@ type AnchorInput struct {
 	Name          string   // optional override (harness.name); defaults to Slug
 	Description   string   // routing hint (harness.description or the note description)
 	Tools         []string // optional override (harness.tools); defaults to DefaultAnchorTools
+	ToolsAll      bool     // harness.tools "all": omit the tools line so the CLI grants its full default toolset
 	Model         string   // optional (harness.model)
+	Materialize   bool     // harness.materialize; false keeps the role vault-only (no local anchor)
 }
 
 // AnchorResult is a rendered agent anchor: a thin local file plus the
@@ -214,12 +216,14 @@ func RenderAgentAnchor(profile Profile, in AnchorInput) (AnchorResult, error) {
 	}
 	name := coalesce(in.Name, in.Slug)
 	tools := in.Tools
-	if len(tools) == 0 {
+	if in.ToolsAll {
+		tools = nil
+	} else if len(tools) == 0 {
 		tools = DefaultAnchorTools
 	}
 	desc := strings.TrimSpace(in.Description)
 	model := strings.TrimSpace(in.Model)
-	metaVersion := anchorMetaVersion(in.CanonicalPath, name, desc, tools, model)
+	metaVersion := anchorMetaVersion(in.CanonicalPath, name, desc, tools, in.ToolsAll, model)
 
 	body, err := assetsFS.ReadFile(prof.AnchorTemplate)
 	if err != nil {
@@ -229,10 +233,16 @@ func RenderAgentAnchor(profile Profile, in AnchorInput) (AnchorResult, error) {
 	if model != "" {
 		modelLine = "model: " + model + "\n"
 	}
+	// ToolsAll omits the tools line entirely: the reference CLI treats a
+	// missing tools key as "inherit the full default toolset".
+	toolsLine := ""
+	if !in.ToolsAll {
+		toolsLine = "tools: " + strings.Join(tools, ", ") + "\n"
+	}
 	vars := map[string]string{
 		"NAME":           name,
 		"DESCRIPTION":    yamlInline(desc),
-		"TOOLS":          strings.Join(tools, ", "),
+		"TOOLS_LINE":     toolsLine,
 		"MODEL_LINE":     modelLine,
 		"CANONICAL":      in.CanonicalPath,
 		"META_VERSION":   metaVersion,
@@ -250,10 +260,17 @@ func RenderAgentAnchor(profile Profile, in AnchorInput) (AnchorResult, error) {
 
 // anchorMetaVersion is a short sha256 over the anchor-relevant metadata, in a
 // fixed order with NUL separators so distinct field layouts cannot collide.
-func anchorMetaVersion(canonical, name, desc string, tools []string, model string) string {
+// The tools-all case hashes a NUL-prefixed sentinel no real tool list can
+// produce; every other input keeps the pre-tools-all hash (mass-rewrite guard:
+// TestRenderAgentAnchor_MetaVersionGolden).
+func anchorMetaVersion(canonical, name, desc string, tools []string, toolsAll bool, model string) string {
+	joined := strings.Join(tools, ",")
+	if toolsAll {
+		joined = "\x00all"
+	}
 	h := sha256.New()
 	fmt.Fprintf(h, "canonical\x00%s\x00name\x00%s\x00description\x00%s\x00tools\x00%s\x00model\x00%s",
-		canonical, name, desc, strings.Join(tools, ","), model)
+		canonical, name, desc, joined, model)
 	return hex.EncodeToString(h.Sum(nil))[:12]
 }
 

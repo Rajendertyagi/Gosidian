@@ -65,9 +65,42 @@ files carrying a `gosidian:anchor` marker whose `canonical` is no
 longer in the set (orphans). **Never touch files without the
 marker** — those are hand-written ("foreign") subagents.
 
+On repeat bootstraps, pass `known_anchor_metas` (a map of
+`canonical → meta_version` from the previous round): items whose meta
+still matches come back as `{path, canonical, meta_version,
+unchanged: true}` with no `content`, mirroring the `known_etags`
+mechanism. An `unchanged` item means "leave the file as is"; if it
+went missing from disk, re-bootstrap without the param to get the
+content back.
+
 Anchor files are generated artifacts: gitignore them
 (`.claude/agents/` entries with the marker), like any other build
 output.
+
+## Harness overrides (`harness:` frontmatter block)
+
+A `type:agent` note controls its anchor shell through an optional
+`harness:` block in the frontmatter:
+
+```yaml
+harness:
+  name: custom-name        # anchor name (default: the note slug)
+  description: routing …   # routing hint (default: the note description)
+  model: sonnet            # optional model line
+  tools: [Read, Bash]      # explicit toolset (default: a least-privilege preset)
+  materialize: false       # keep the role vault-only (no local anchor)
+```
+
+Two special values:
+
+- `tools: all` renders the anchor **without** a `tools:` line, which
+  the CLI interprets as "inherit the full default toolset" — no more
+  enumerating (and drifting) 15+ tool names per role.
+- `materialize: false` opts the note out of materialisation: it stays
+  a canonical, listable role (e.g. an orchestrator that must not be
+  spawnable as a subagent) but never appears in the anchors set. An
+  already-materialised anchor becomes an orphan and is removed by the
+  normal reconcile flow.
 
 ## Adopting a hand-written subagent
 
@@ -78,6 +111,15 @@ system-prompt body becomes a canonical `type:agent` vault note (the
 frontmatter block) and the tool returns a thin anchor to replace the
 original file. Deliberately human-gated — promotion is a curation
 decision, not an automatic sweep.
+
+When the canonical note **already exists** (a role created before
+anchors), pass `adopt_into_existing: true`: the existing body is
+never touched (it stays the source of truth), a `harness:` block is
+inserted only if missing, and the foreign body comes back in
+`foreign_body_for_review` with an instruction to fold any unique
+content into the canonical note via `memory_edit` before replacing
+the foreign file with the returned anchor. Without the flag, the
+exists-error explains exactly this.
 
 ## Why not just copy the file?
 

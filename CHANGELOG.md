@@ -8,6 +8,47 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.18.0] — 2026-07-07 — "Anchors round 2: harness overrides + bootstrap delta"
+
+MINOR release rounding off the agent-anchors feature (v2.13.0) with the
+four sharp edges found while adopting it at scale. All changes are additive
+and backward compatible: existing anchors keep their `meta_version`
+byte-for-byte (guarded by a pinned golden test), so **no anchor file is
+rewritten** after upgrading. No migration required.
+
+### Added
+- **`harness.tools: all`** on a `type:agent` note renders its anchor
+  *without* a `tools:` line, which the CLI interprets as "inherit the full
+  default toolset" — no more enumerating (and drifting) 15+ tool names per
+  role. The explicit list form and the least-privilege default preset are
+  unchanged.
+- **`harness.materialize: false`** keeps a role vault-only: the note stays
+  canonical and listable (e.g. an orchestrator that must not be spawnable
+  as a subagent) but is excluded from the bootstrap anchors set; an
+  already-materialised anchor becomes an orphan and the normal reconcile
+  flow removes it.
+- **`known_anchor_metas` on `memory_bootstrap`.** Repeat bootstraps of an
+  anchor-enabled project no longer pay the full anchors block: pass the
+  `canonical → meta_version` map from the previous round and matching items
+  come back as `{path, canonical, meta_version, unchanged: true}` with no
+  content — the anchors counterpart of `known_etags`. Operational
+  directives bumped to **v7** to document it.
+- **`adopt_into_existing` on `memory_promote_agent`.** Promoting a foreign
+  local agent file whose canonical `type:agent` note already exists (a role
+  created before anchors) no longer dead-ends: the existing body is never
+  touched, a `harness:` block is inserted only if missing, and the foreign
+  body comes back in `foreign_body_for_review` with a fold-check
+  instruction. Without the flag, the exists-error now explains exactly
+  this.
+
+### Changed
+- The anchors reconcile directive covers the two new cases: `unchanged`
+  items ("leave the file as is; re-bootstrap without the param if it went
+  missing") and foreign files whose canonical already exists (suggesting
+  `adopt_into_existing`).
+- `docs/mcp/agent-anchors.md` documents the `harness:` frontmatter block,
+  the bootstrap delta and the adopt flow.
+
 ## [2.17.1] — 2026-07-06 — "Fragment wikilinks join the graph"
 
 PATCH release. One index-level fix with a visible payoff on any vault that

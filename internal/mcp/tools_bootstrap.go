@@ -25,11 +25,12 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload endpoint hint. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags and use mode lite — see the parameter docs."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload endpoint hint. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
 		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
 		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: files whose etag still matches come back unchanged:true with no body (hot_md, readme, agent_md).")),
+		mcp.WithObject("known_anchor_metas", mcp.Description("Map of canonical vault path → meta_version from a previous bootstrap's anchors.items: anchors whose meta still matches come back as {path, canonical, meta_version, unchanged:true} with no content. If an unchanged anchor file is missing from disk, re-bootstrap without this param to get the content back.")),
 		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section); auto switches to lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
 	), s.handleBootstrap)
 }
@@ -139,7 +140,7 @@ var agentFileCandidates = []string{"AGENTS.md", "CLAUDE.md", ".cursor/rules.mdc"
 // anchorReconcileDirective tells the agent how to apply the desired anchor set
 // against its cwd. The server is cwd-blind: it only computes the desired files
 // + their meta_version; the agent (which has filesystem access) does the diff.
-const anchorReconcileDirective = "Riconcilia gli agenti referenziati in `target_dir` (file gitignored). Per ogni item: se il file non esiste → scrivilo con `content`; se esiste con un marker `<!-- gosidian:anchor ... meta=X -->` e X≠`meta_version` → riscrivilo; se X=`meta_version` → lascialo. Rimuovi i file con marker `gosidian:anchor` il cui `canonical` non è più fra gli items (orphan). NON toccare file SENZA il marker `gosidian:anchor` (foreign, scritti a mano): segnalali e proponi l'adozione con `memory_promote_agent`."
+const anchorReconcileDirective = "Riconcilia gli agenti referenziati in `target_dir` (file gitignored). Per ogni item: se il file non esiste → scrivilo con `content`; se esiste con un marker `<!-- gosidian:anchor ... meta=X -->` e X≠`meta_version` → riscrivilo; se X=`meta_version` → lascialo. Item con `unchanged:true` (content omesso, meta già tuo): lascialo com'è; se il file manca dal disco, ripeti il bootstrap senza `known_anchor_metas` per riavere il content. Rimuovi i file con marker `gosidian:anchor` il cui `canonical` non è più fra gli items (orphan). NON toccare file SENZA il marker `gosidian:anchor` (foreign, scritti a mano): segnalali e proponi l'adozione con `memory_promote_agent` (con `adopt_into_existing:true` se la nota canonica type:agent esiste già)."
 
 // anchorsEnabledFor reports whether the bootstrap should surface agent anchors
 // for (project, profile): master switch on, the project opted into use_anchors,
@@ -267,6 +268,16 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		items, aerr := s.buildAgentAnchors(project, profile, tok)
 		if aerr != nil {
 			return mcp.NewToolResultErrorFromErr("anchors lookup failed", aerr), nil
+		}
+		// Delta on repeat bootstraps (IMP-068): anchors whose meta_version the
+		// caller already holds ship without content, mirroring known_etags.
+		if knownMetas := extractStringMap(req.GetArguments()["known_anchor_metas"]); len(knownMetas) > 0 {
+			for i := range items {
+				if knownMetas[items[i].Canonical] == items[i].MetaVersion {
+					items[i].Content = ""
+					items[i].Unchanged = true
+				}
+			}
 		}
 		anchors := map[string]any{
 			"profile":    string(profile),
