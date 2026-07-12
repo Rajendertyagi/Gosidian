@@ -54,7 +54,7 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 func (s *Server) checkWriteLimits(tok *auth.Token, contentSize int) *mcp.CallToolResult {
 	if s.maxNoteBytes > 0 && int64(contentSize) > s.maxNoteBytes {
 		metrics.MCPRateLimitHits.Inc()
-		return mcp.NewToolResultErrorf("note size %d exceeds limit of %d bytes", contentSize, s.maxNoteBytes)
+		return mcp.NewToolResultErrorf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes)
 	}
 	id := ""
 	if tok != nil {
@@ -135,20 +135,20 @@ func (s *Server) registerTools() {
 	), s.handleGetOutline)
 
 	s.impl.AddTool(mcp.NewTool("memory_create",
-		mcp.WithDescription("Create a new note at the given path. Fails if the note already exists. Markdown (.md) is the default note format; a path ending in .html creates a native single-file HTML note (frontmatter in a leading HTML comment, indexed/linked like a .md, rendered sandboxed in the web UI) when the instance has html_notes enabled — see `capabilities` in memory_bootstrap. Reserve .html for intrinsically-HTML content (generated reports, self-contained dashboards); prefer .md otherwise."),
+		mcp.WithDescription("Create a new note at the given path. Fails if the note already exists. Markdown (.md) is the default note format; a path ending in .html creates a native single-file HTML note (frontmatter in a leading HTML comment, indexed/linked like a .md, rendered sandboxed in the web UI) when the instance has html_notes enabled — see `capabilities` in memory_bootstrap. Reserve .html for intrinsically-HTML content (generated reports, self-contained dashboards); prefer .md otherwise. Size guard: content is capped (default 1 MiB) and costs ~1 token/char through the context — for a large body already on disk use memory_ingest instead."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path, e.g. 'project/new-note.md'.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Full content of the note: markdown for .md paths, a self-contained HTML document for .html paths.")),
 	), s.handleCreate)
 
 	s.impl.AddTool(mcp.NewTool("memory_update",
-		mcp.WithDescription("Overwrite an existing note's content. Fails if the note does not exist. Pass if_match (the etag returned by a previous memory_get) for optimistic locking: the call is rejected if the note has changed since you last read it."),
+		mcp.WithDescription("Overwrite an existing note's content. Fails if the note does not exist. Pass if_match (the etag returned by a previous memory_get) for optimistic locking: the call is rejected if the note has changed since you last read it. Size guard: content is capped (default 1 MiB) — for a large body already on disk use memory_ingest with overwrite:true instead."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note to update.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("New full markdown content.")),
 		mcp.WithString("if_match", mcp.Description("Optional etag from a previous memory_get. When provided, the call fails if the note's current etag differs — reload and retry.")),
 	), s.handleUpdate)
 
 	s.impl.AddTool(mcp.NewTool("memory_append",
-		mcp.WithDescription("Append content to a note. Creates the note if it does not exist. Use this to log observations incrementally. Pass if_match for optimistic locking against concurrent writes (only checked when the note already exists)."),
+		mcp.WithDescription("Append content to a note. Creates the note if it does not exist. Use this to log observations incrementally. Pass if_match for optimistic locking against concurrent writes (only checked when the note already exists). Size guard: the merged note is capped (default 1 MiB)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Markdown to append. A blank line is inserted before the new content if the file is non-empty.")),
 		mcp.WithString("if_match", mcp.Description("Optional etag from a previous memory_get. When provided and the note exists, the call fails if the note's current etag differs.")),
@@ -210,6 +210,7 @@ func (s *Server) registerTools() {
 	s.registerAttachmentTools()
 	s.registerMediaTools()
 	s.registerTableTools()
+	s.registerIngestTool()
 	s.registerAuditTools()
 	s.registerBootstrapTool()
 	s.registerDiscoveryTools()
@@ -662,7 +663,7 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
 	}
 	if strings.HasSuffix(strings.ToLower(rel), ".html") && !s.vault.HTMLNotesEnabled() {
-		return mcp.NewToolResultError("html notes are disabled; enable [vault] html_notes (GOSIDIAN_VAULT_HTML_NOTES) to create .html notes"), nil
+		return mcp.NewToolResultError("html notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] html_notes / GOSIDIAN_VAULT_HTML_NOTES)"), nil
 	}
 	tok, errRes := s.authorizeWrite(ctx, rel)
 	if errRes != nil {

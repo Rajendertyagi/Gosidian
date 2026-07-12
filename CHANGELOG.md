@@ -8,6 +8,61 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.19.0] — 2026-07-12 — "one-door ingestion"
+
+### Added
+- **`memory_ingest` — the single front door for saving files** (57th MCP
+  tool). One call routes any file by extension: `.csv` → table note,
+  image → media note, `.md`/`.html` → the note itself (body read
+  server-side, no tokens through the model context), anything else →
+  plain attachment. Sources, cheapest first: `bridge_filename` (staged in
+  the bridge dir), `source_path` (inside an allowed upload root), `url`,
+  an already-uploaded `attachment`, or base64 `data` as the last resort.
+  Force a kind with `as`; note ingestion supports `overwrite:true` with
+  `if_match` CAS. In auto mode a table/media route whose vault flag is
+  off degrades to a plain attachment with a teaching warning.
+- **Single-use upload tickets** (`transfer: "http"`): the tool response
+  carries a one-time upload URL (TTL 5 min, no bearer needed — the
+  unguessable ticket is the credential, bound to the minting token so
+  scope, audit and limits apply unchanged). POST the file there
+  (multipart, field `file`) and the server executes the parked intent
+  and answers like the tool would. Any redemption attempt consumes the
+  ticket. Remote agents save a file with one tool call plus one `curl`.
+- **Fetch-by-URL ingestion**: `memory_ingest` can download the file
+  itself (CI artifacts, internal services). Gated by the new
+  `mcp.ingest_url_allowlist` / `GOSIDIAN_INGEST_URL_ALLOWLIST` prefix
+  allowlist — the SSRF boundary: it gates the initial URL and every
+  redirect hop, empty means disabled. 10 MiB cap, 20 s timeout.
+- Bootstrap `capabilities.attachments` now surfaces `bridge_dir`,
+  `allowed_upload_roots` and `ingest_url_enabled`, so a co-located agent
+  learns the cheap staging path up front instead of after a wasteful
+  base64 upload.
+
+### Changed
+- **`core` tool profile**: `memory_ingest` replaces the legacy upload
+  matrix (`memory_upload_attachment`, `memory_upload_resource` and the
+  dynamic media/table-creator admissions) — workers see one file door;
+  the dedicated tools remain in the `full` profile for explicit
+  stage-then-attach workflows.
+- **Errors now teach the way out**: the `source_path` rejection explains
+  the allowed-roots model and the full channel hierarchy (a rejection
+  never meant "filesystem not shared"); the no-source error mentions the
+  HTTP and ticket channels; "… notes are disabled" points at the live
+  per-project toggle UI; the note-size cap error routes to table/media
+  notes and `memory_ingest`. `memory_create`/`update`/`append` declare
+  the 1 MiB cap in their descriptions.
+- Operational directives bumped to **v8**: file-saving guidance now
+  leads with `memory_ingest` (sources cheapest-first, bridge dir from
+  capabilities, url + ticket channels).
+- Docs: `docs/mcp/upload.md` rewritten around the one-line decision tree
+  ("to save a file, call `memory_ingest`"), with the ticket flow and
+  redemption status codes documented.
+
+### Notes
+- No migration required. Existing tokens keep their profile; `full`
+  tokens see the legacy tools unchanged. The `url` source ships disabled
+  until an allowlist is configured.
+
 ## [2.18.0] — 2026-07-07 — "Anchors round 2: harness overrides + bootstrap delta"
 
 MINOR release rounding off the agent-anchors feature (v2.13.0) with the

@@ -106,7 +106,15 @@ const StubVersion = 2
 // v7 (2026-07-07, anchors round 2): the token-economy section documents
 // known_anchor_metas — the bootstrap anchors delta for anchor-enabled
 // projects (canonical → meta_version; unchanged items ship without content).
-const DirectivesVersion = 7
+//
+// v8 (2026-07-11, ADR-018 one-door ingestion): «Formati di nota e allegati»
+// now leads with memory_ingest as THE way to save a file (extension routing,
+// sources cheapest-first incl. the bridge dir surfaced in
+// capabilities.attachments.bridge_dir, the url source and the transfer:http
+// single-use ticket); the ingest-rules table routes CSV/binary files through
+// memory_ingest; the legacy upload tools are footnoted for explicit
+// stage-then-attach flows.
+const DirectivesVersion = 8
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

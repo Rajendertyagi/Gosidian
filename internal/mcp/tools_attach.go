@@ -110,7 +110,7 @@ func (s *Server) storeAttachmentFromRequest(ctx context.Context, project, filena
 	}
 
 	if sourcePath == "" && dataB64 == "" {
-		return nil, 0, mcp.NewToolResultError("provide one of: bridge_filename (staged file), source_path (server path), or data (base64)")
+		return nil, 0, mcp.NewToolResultError("provide one of: bridge_filename (staged file), source_path (server path), or data (base64). For large files avoid base64: POST the bytes to the HTTP /upload endpoint (your /sse URL with /sse→/upload, bearer token) or mint a single-use upload URL with memory_ingest transfer:\"http\"")
 	}
 
 	if sourcePath != "" {

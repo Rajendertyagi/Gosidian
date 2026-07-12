@@ -52,8 +52,8 @@ Quando scopri qualcosa che sopravvive al task corrente:
 | Domanda aperta | `{{PROJECT}}/docs/open-questions.md` | `memory_append` sezione "Aperte", `### OQ-NNN` |
 | Improvement / tech debt | `{{PROJECT}}/docs/improvements.md` | `memory_append` `## IMP-NNN` |
 | Report/dashboard HTML self-contained | nota `.html` (es. `{{PROJECT}}/docs/`) | `memory_create` path `.html` (se `capabilities.html_notes`) |
-| Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_create_table_note` (se `capabilities.table_notes`) |
-| File binario (screenshot, PDF, zip) | attachment del vault | upload tool; file grandi via POST `/upload`, **mai** base64 |
+| Dati tabellari lunghi (audit, export CSV) | table note linkata dal report | `memory_ingest` del `.csv` + caption (se `capabilities.table_notes`) |
+| File binario (screenshot, PDF, zip) | attachment/media note del vault | `memory_ingest` (bridge dir, `source_path`, `url` o ticket `transfer:"http"`; **mai** base64 per file grandi) |
 | Fine task | `{{PROJECT}}/log.md` + `hot.md` | `memory_append` log, `memory_edit` hot |
 
 **Cattura immediata**: bug/OQ/improvement si scrivono **quando emergono**,
@@ -72,18 +72,24 @@ consultalo prima di scegliere.
   `memory_create` → nota HTML first-class (frontmatter in commento di testa,
   indicizzata come una `.md`, resa in iframe sandbox). **Solo** per contenuto
   intrinsecamente HTML; asset esterni bloccati — inline tutto.
-- **Allegati**: `memory_upload_attachment` (embed per una nota) /
-  `memory_upload_resource` (handle). Oltre pochi KB **niente base64**: POST
-  multipart (field `file`, bearer) all'endpoint `/upload` (URL MCP con
-  `/sse` → `/upload`). Limiti/estensioni in `capabilities.attachments`.
-- **Media notes** (se `capabilities.media_notes`): immagine first-class via
-  `memory_create_media_note` — la caption nel body è il testo ricercabile,
-  scrivila sempre.
-- **Table notes** (se `capabilities.table_notes`): dati tabellari lunghi via
-  `memory_create_table_note` — nota `.md` `type: table` + `media:` a un
-  `.csv`, resa come tabella paginata e linkabile dal report. Header e numero
-  righe indicizzati; i valori delle celle no — scrivi una caption. Non
-  incollare tabelle lunghe nel body markdown.
+- **File su disco → `memory_ingest`**: la porta unica per "salva questo
+  file" — instrada da sola per estensione (`.csv` → table note, immagine →
+  media note, `.md`/`.html` → nota vera con body letto server-side, altro →
+  attachment). Sorgenti dalla più economica: `bridge_filename` (path in
+  `capabilities.attachments.bridge_dir`), `source_path` (dentro le allowed
+  roots), `url` (se `ingest_url_enabled`), ticket `transfer:"http"` (mint →
+  un POST del file, senza bearer), base64 `data` solo per file piccoli.
+  Limiti/estensioni in `capabilities.attachments`. I tool dedicati
+  (`memory_upload_attachment`/`memory_upload_resource`) restano per i flussi
+  espliciti stage-then-attach.
+- **Media notes** (se `capabilities.media_notes`): immagine first-class —
+  `memory_ingest` di un'immagine la crea da solo; la caption nel body è il
+  testo ricercabile, scrivila sempre.
+- **Table notes** (se `capabilities.table_notes`): dati tabellari lunghi —
+  `memory_ingest` di un `.csv` crea la nota `type: table` + `media:`, resa
+  come tabella paginata e linkabile dal report. Header e numero righe
+  indicizzati; i valori delle celle no — scrivi una caption. Non incollare
+  tabelle lunghe nel body markdown.
 
 ### Plan: vault vs scratchpad
 

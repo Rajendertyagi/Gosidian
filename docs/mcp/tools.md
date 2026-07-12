@@ -1,6 +1,6 @@
 # MCP tool catalogue
 
-**56 tools** cover the full retrieval → write → workflow →
+**57 tools** cover the full retrieval → write → workflow →
 orchestration → self-check cycle for agent memory.
 
 Consult each tool's `description` via your client's `tools/list` call
@@ -89,6 +89,19 @@ for precise schemas; the groupings below are the conceptual map.
 
 ## Attachments
 
+- `memory_ingest(project, bridge_filename|source_path|url|attachment|data, transfer?, as?, note_path?, title?, caption?, overwrite?, if_match?)` —
+  the single front door for "store this file": routes by extension —
+  `.csv` → table note, image → media note, `.md`/`.html` → the note itself
+  (body read server-side, no tokens through the context), anything else →
+  plain attachment. `as` forces a kind; in auto mode a table/media route
+  whose vault flag is off degrades to a plain attachment with a warning.
+  `url` makes the server fetch the file itself (gated by the
+  `ingest_url_allowlist` prefix allowlist, `GOSIDIAN_INGEST_URL_ALLOWLIST`;
+  the allowlist also gates every redirect hop). `transfer: "http"` mints a
+  **single-use upload ticket** instead: POST the bytes (multipart, field
+  `file`, no bearer — the ticket is the credential, TTL 5 min) to the
+  returned `/ingest/<ticket>` endpoint and the server executes the parked
+  intent on receipt. The dedicated tools below remain for explicit workflows
 - `memory_upload_attachment(project, data|source_path, filename)` —
   single-step upload returning a ready-to-splice markdown embed
 - `memory_upload_resource(project, data|source_path, filename, kind?)` —

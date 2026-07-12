@@ -88,20 +88,21 @@ func TestToolProfile_DynamicAdmissions(t *testing.T) {
 	s, _, _ := newTestServer(t)
 	worker := &auth.Token{ID: "w2", Name: "worker", Scopes: []string{auth.ScopeRead, auth.ScopeWrite}, ToolProfile: auth.ToolProfileCore}
 
-	// Flags off: no media/table creators in core.
-	names := listToolNames(t, s, coreCtx(worker))
-	if _, ok := names["memory_create_table_note"]; ok {
-		t.Error("table creator should be hidden while table_notes is off")
-	}
-
-	// table_notes on → the creator joins the core surface.
+	// ADR-018: the legacy upload matrix stays hidden from core even with the
+	// flags on — memory_ingest is the single door and routes internally.
 	s.vault.SetTableNotes(true)
-	names = listToolNames(t, s, coreCtx(worker))
-	if _, ok := names["memory_create_table_note"]; !ok {
-		t.Error("table creator should appear once table_notes is on")
+	s.vault.SetMediaNotes(true)
+	names := listToolNames(t, s, coreCtx(worker))
+	for _, legacy := range []string{
+		"memory_create_table_note", "memory_create_media_note",
+		"memory_upload_attachment", "memory_upload_resource",
+	} {
+		if _, ok := names[legacy]; ok {
+			t.Errorf("%s should stay full-profile-only under ADR-018", legacy)
+		}
 	}
-	if _, ok := names["memory_create_media_note"]; ok {
-		t.Error("media creator should stay hidden while media_notes is off")
+	if _, ok := names["memory_ingest"]; !ok {
+		t.Error("memory_ingest should be in the core surface")
 	}
 
 	// Self-improve opt-in admits memory_self_improve.

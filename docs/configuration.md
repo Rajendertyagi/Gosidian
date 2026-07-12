@@ -29,6 +29,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
+| `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated URL prefixes the `memory_ingest` `url` source may fetch from — the allowlist is the SSRF boundary and also gates every redirect hop) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
 | `GOSIDIAN_THEME_PRESET` | `theme.preset` | `midnight-luxury` |

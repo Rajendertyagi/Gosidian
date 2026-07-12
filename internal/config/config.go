@@ -187,6 +187,7 @@ type MCPConfig struct {
 	MaxNoteBytes       int64    `toml:"max_note_bytes"`       // default 1 MiB
 	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
 	BridgeDir          string   `toml:"bridge_dir"`           // staging dir for bridge_filename uploads (auto-allowed root; IMP-059)
+	IngestURLAllowlist []string `toml:"ingest_url_allowlist"` // URL prefixes memory_ingest may fetch from; empty disables the url source (ADR-018)
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -305,6 +306,16 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_MCP_BRIDGE_DIR"); v != "" {
 		c.MCP.BridgeDir = strings.TrimSpace(v)
+	}
+	if v := os.Getenv("GOSIDIAN_INGEST_URL_ALLOWLIST"); v != "" {
+		var prefixes []string
+		for _, p := range strings.Split(v, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				prefixes = append(prefixes, p)
+			}
+		}
+		c.MCP.IngestURLAllowlist = prefixes
 	}
 	if v := os.Getenv("GOSIDIAN_TRASH_ENABLED"); v != "" {
 		c.Trash.Enabled = envBool(v)

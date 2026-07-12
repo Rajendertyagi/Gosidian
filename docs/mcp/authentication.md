@@ -44,10 +44,12 @@ introspection: `memory_self_stats`):
 - **`core`**: the worker subset — session start (`memory_bootstrap`),
   note CRUD, targeted reads (`get_section`/`get_outline`/
   `get_frontmatter`/`batch_get`), `memory_search`/`list_notes`/
-  `notes_by_tag`/`list_projects`, both upload tools, the full handoff
-  lifecycle and `memory_wait_changes`. The media/table note creators
-  appear only when their vault feature flag is on, and
-  `memory_self_improve` only for tokens opted into that loop.
+  `notes_by_tag`/`list_projects`, **`memory_ingest` as the single file
+  door** (it routes to table/media notes and attachments internally, so
+  the dedicated upload/creator tools stay full-profile and workers never
+  pay their schemas), the full handoff lifecycle and
+  `memory_wait_changes`. `memory_self_improve` is admitted only for
+  tokens opted into that loop.
 
 The profile is an **access-control boundary**, not a display filter: a
 tool outside the profile is absent from `tools/list` *and* answers

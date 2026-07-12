@@ -393,6 +393,10 @@ func main() {
 	if cfg.MCP.BridgeDir != "" {
 		log.Printf("mcp bridge dir: %s (stage files here, reference by bridge_filename — IMP-059)", cfg.MCP.BridgeDir)
 	}
+	mcpServer.SetIngestURLAllowlist(cfg.MCP.IngestURLAllowlist)
+	if len(cfg.MCP.IngestURLAllowlist) > 0 {
+		log.Printf("mcp ingest url allowlist: %s (memory_ingest url source enabled)", strings.Join(cfg.MCP.IngestURLAllowlist, ", "))
+	}
 	mcpServer.SetProjects(projectsStore)
 	// MCP write handlers publish on the SSE hub so SPA subscribers
 	// see external-tab + agent edits in real time.

@@ -292,8 +292,10 @@ func TestValidateSourcePath_RemoteSetupHint(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for path outside allowed roots")
 	}
-	if !strings.Contains(err.Error(), "data") || !strings.Contains(err.Error(), "remote") {
-		t.Errorf("error should hint at 'data' param + remote setup, got: %v", err)
+	for _, want := range []string{"bridge_filename", "transfer:\"http\"", "data"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error should teach the channel hierarchy (missing %q), got: %v", want, err)
+		}
 	}
 
 	// Case 2: path inside allowed root but file missing (also typical when
@@ -303,8 +305,8 @@ func TestValidateSourcePath_RemoteSetupHint(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for missing file")
 	}
-	if !strings.Contains(err.Error(), "data") || !strings.Contains(err.Error(), "remote") {
-		t.Errorf("missing-file error should also hint at 'data' / remote setup, got: %v", err)
+	if !strings.Contains(err.Error(), "not mounted in the container") || !strings.Contains(err.Error(), "bridge_filename") {
+		t.Errorf("missing-file error should teach the channel hierarchy, got: %v", err)
 	}
 
 	// Case 3: legitimate happy path keeps working without hint pollution.

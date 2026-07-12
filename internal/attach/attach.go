@@ -197,11 +197,16 @@ type Result struct {
 // remoteSetupHint is appended to source_path errors to guide users running
 // gosidian on a remote server (SSH tunnel, separate host) toward the right
 // pattern: source_path is resolved server-side, so a client-side path will
-// never match the allow-list. The base64 `data` parameter is the correct
-// alternative for cross-host uploads. Kept as a const so tests can pin it.
-const remoteSetupHint = "Hint: source_path is resolved on the server filesystem, not the client. " +
-	"For remote deployments (SSH tunnel, separate host, container without a shared volume), " +
-	"use the 'data' parameter (base64-encoded content) instead."
+// never match the allow-list. A rejection here does NOT mean the filesystem
+// is not shared — the path may simply be outside the allowed roots — so the
+// hint teaches the whole channel hierarchy instead of one fallback. Kept as a
+// const so tests can pin it.
+const remoteSetupHint = "Hint: source_path is resolved on the SERVER filesystem and must sit inside the vault, " +
+	"the bridge dir (GOSIDIAN_MCP_BRIDGE_DIR), or an allowed upload root (GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS) — " +
+	"a rejection means the path is outside those roots or not mounted in the container, not necessarily that the filesystem is unshared. " +
+	"Cheapest alternatives in order: stage the file in the bridge dir and pass bridge_filename; " +
+	"POST it over HTTP (memory_ingest transfer:\"http\" mints a single-use upload URL, or the /upload endpoint with your bearer); " +
+	"base64 'data' as the last resort for small files."
 
 // ValidateSourcePath checks that sourcePath is an absolute path pointing to an
 // existing regular file inside one of the allowedRoots. Returns an error

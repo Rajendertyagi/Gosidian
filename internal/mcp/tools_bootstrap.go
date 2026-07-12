@@ -97,6 +97,17 @@ type bootstrapAttachCapability struct {
 	Extensions         []string `json:"extensions"`
 	UploadEndpointHint string   `json:"upload_endpoint_hint"`
 	Tools              []string `json:"tools"`
+	// BridgeDir is the server-side staging directory for bridge_filename
+	// sources, when configured. Surfacing it here closes the ADR-018
+	// chicken-and-egg: a co-located agent learns the cheap path up front
+	// instead of after a wasteful base64 upload.
+	BridgeDir string `json:"bridge_dir,omitempty"`
+	// AllowedUploadRoots are the extra server-side roots source_path may read
+	// from (the vault root and the bridge dir are always implicitly allowed).
+	AllowedUploadRoots []string `json:"allowed_upload_roots,omitempty"`
+	// IngestURLEnabled reports whether the memory_ingest url source has a
+	// non-empty allowlist on this instance.
+	IngestURLEnabled bool `json:"ingest_url_enabled"`
 }
 
 // buildCapabilities assembles the capabilities block from live config and the
@@ -114,8 +125,11 @@ func (s *Server) buildCapabilities() bootstrapCapabilities {
 		Attachments: bootstrapAttachCapability{
 			MaxMiB:             attach.MaxBytes >> 20,
 			Extensions:         exts,
-			UploadEndpointHint: "for large files POST multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
-			Tools:              []string{"memory_upload_attachment", "memory_upload_resource"},
+			UploadEndpointHint: "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
+			Tools:              []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
+			BridgeDir:          s.bridgeDir,
+			AllowedUploadRoots: s.allowedUploadRoots,
+			IngestURLEnabled:   len(s.ingestURLAllow) > 0,
 		},
 	}
 }

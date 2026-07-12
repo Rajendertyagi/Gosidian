@@ -1,44 +1,81 @@
 # Upload flow
 
-gosidian exposes several ways to put a binary file (image, PDF, CSV, …)
-into a vault project under `<project>/attachments/`:
+**The decision tree is one line: to save a file, call `memory_ingest`.**
+
+`memory_ingest` is the single front door (ADR-018): it routes by
+extension — `.csv` → table note, image → media note, `.md`/`.html` →
+the note itself (body read server-side, no tokens through the model
+context), anything else → plain attachment — and accepts the file from
+whichever channel is cheapest in your deployment. Everything below it
+converges on the same code path (`internal/attach.Store`): identical
+10 MiB cap, identical extension allowlist, identical content-addressed
+filename (`<sha256[:16]>.<ext>`), identical magic-bytes verification
+(rejects MIME spoofs).
+
+## memory_ingest — sources, cheapest first
+
+| Source | When | Cost |
+|---|---|---|
+| `bridge_filename` | Co-located deploys: stage the file in the bridge dir (its path is in bootstrap `capabilities.attachments.bridge_dir`), pass the basename; the server reads and **consumes** it | ~zero tokens |
+| `source_path` | Server-resolved absolute path inside the vault, the bridge dir, or an allowed upload root (`GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS`) | ~zero tokens |
+| `transfer: "http"` | **Remote agents with a shell.** No source in the call: the response carries a **single-use upload URL** (TTL 5 min, no bearer — the ticket is the credential). POST the file there and the server executes the parked intent | 1 tool call + 1 curl |
+| `url` | The file is already served somewhere the server can reach (CI artifact, internal screenshot service). Gated by the `ingest_url_allowlist` prefix allowlist (`GOSIDIAN_INGEST_URL_ALLOWLIST`), which also gates every redirect hop; empty = disabled | ~zero tokens |
+| `attachment` | The bytes are already in the vault (e.g. from a previous `/upload` POST): promote them into a table/media note without re-uploading | ~zero tokens |
+| `data` (base64) | Last resort, small files only: ~1 token per character through the model context | expensive |
+
+Force the result kind with `as: table|media|note|attachment` when the
+extension routing is not what you mean. In auto mode a table/media route
+whose vault flag is off degrades to a plain attachment with a warning.
+Note ingestion (`.md`/`.html`) supports `overwrite: true` with `if_match`
+CAS.
+
+### The ticket flow (`transfer: "http"`)
+
+```jsonc
+// 1. Declare the intent — no bytes yet
+{ "name": "memory_ingest", "arguments": {
+    "project": "Work", "transfer": "http",
+    "title": "Q3 audit", "caption": "Export dal gestionale." } }
+// → { "ticket": "…", "endpoint": "/mcp/ingest/<ticket>",
+//     "expires": "…", "method": "POST", "field": "file", "single_use": true }
+```
+
+```bash
+# 2. POST the bytes — same host as your MCP /sse URL, no Authorization header
+curl -sf -F "file=@audit-q3.csv" "https://host/mcp/ingest/<ticket>"
+# → the server executes the intent and answers like the tool would:
+#   { "path": "Work/q3-audit.md", "kind": "table", "columns": [...], "rows": 812 }
+```
+
+The ticket is bound to the token that minted it (scope, audit, and
+limits apply as if the bytes came through the MCP call) and is
+**consumed by the first redemption attempt, success or not** — on
+failure mint a new one. Redemption statuses: `200` executed, `404`
+unknown/already consumed, `410` expired, `422` the intent failed
+(e.g. invalid CSV), `413` over 10 MiB.
+
+Agents behind an SSH tunnel that forwards only the web port (e.g.
+`ssh -L 58080:server:8080`) reach every path through the same forward.
+This is the deployment shape solved by the
+[single-port mode](client-setup.md).
+
+## The lower-level paths
+
+The dedicated tools remain for explicit workflows (and for the web UI):
 
 | Strada | Quando preferirla |
 |---|---|
-| **HTTP upload (`/upload`)** ⭐ | **Primary for agents.** Multipart upload authenticated by your **MCP bearer token** — the bytes travel over HTTP, never through the model context as base64. The path mirrors your `/sse` endpoint (`/sse` → `/upload`); returns `{path, url, mime, kind, size}`. Pass the returned `path` to `memory_create_media_note` / `memory_create_table_note` as `attachment`, or splice the `url` into a note. |
-| **MCP `bridge_filename`** | Co-located deploys: stage the file in `GOSIDIAN_MCP_BRIDGE_DIR` and pass its name; the server reads + consumes it. No HTTP call needed. |
-| **MCP `memory_upload_attachment`** | Single-step: upload (base64 `data` / `source_path` / `bridge_filename`) + return a ready-to-splice markdown embed. base64 is costly — prefer the HTTP POST for large files. |
-| **MCP `memory_upload_resource`** | Two-step: upload first, decide note placement later. Same sources; same base64 caveat. |
+| **HTTP upload (`/upload`)** | Raw multipart upload authenticated by your **MCP bearer token**. The path mirrors your `/sse` endpoint (`/sse` → `/upload`); returns `{path, url, mime, kind, size}`. Pass the returned `path` to `memory_ingest` (or the note creators) as `attachment`. |
+| **MCP `memory_upload_attachment`** | Single-step: upload + return a ready-to-splice markdown embed. |
+| **MCP `memory_upload_resource`** | Two-step stage-then-attach: upload first, decide note placement later. |
 | REST `/api/v1/upload` | Web-UI editor path (drag-and-drop). Authenticated by a **SPA** token (from login), not the MCP token. |
 
-All three converge on the same code path (`internal/attach.Store`):
-identical 10 MiB cap, identical extension allowlist, identical
-content-addressed filename (`<sha256[:16]>.<ext>`), identical
-magic-bytes verification (rejects MIME spoofs).
+## HTTP upload endpoint
 
-## Decision tree
-
-```
-Are you a Claude Code / Cursor / Zed agent with MCP tools available?
-├─ no  → REST /api/upload (multipart, no bearer required by default)
-└─ yes
-   ├─ Will I attach this to a known note in the next turn?
-   │   └─ yes → memory_upload_attachment (returns markdown ready to splice)
-   └─ Otherwise (staging, batch, deferred linking)
-       └─ memory_upload_resource (returns handle: path, url, hash, mime, kind, size)
-```
-
-Agents behind an SSH tunnel that forwards only the web port (e.g.
-`ssh -L 58080:server:8080`) reach all three paths through the same
-forward — REST at `localhost:58080/api/upload`, MCP at
-`localhost:58080/mcp/sse`. This is the deployment shape solved by the
-[single-port mode](client-setup.md).
-
-## HTTP upload endpoint (primary)
-
-The cheapest way for an MCP agent to ingest a file: POST the bytes over
-HTTP, authenticated by the **same bearer token** used for the SSE stream.
-No base64 through the model context, no login, no shared filesystem.
+POST the bytes over HTTP, authenticated by the **same bearer token**
+used for the SSE stream. No base64 through the model context, no login,
+no shared filesystem. (Prefer the `memory_ingest` ticket flow above when
+you also want the note created in the same round trip.)
 
 **The path mirrors your `/sse` endpoint** — replace `/sse` with `/upload`:
 
@@ -201,11 +238,11 @@ directory shared with the agent's host, stage the file there and pass
 The server reads the staged file directly (near-zero token cost), runs
 the same magic-byte/MIME validation and 10 MiB cap, and **consumes**
 (deletes) the staged copy on success. The bridge dir is automatically an
-allowed `source_path` root; a base64 upload larger than ~128 KiB returns
-a `hint` redirecting here. Pair it with image **media notes**
-(ADR-013): upload once, then reference the media note by link — agents
-read only the caption, never the bytes. *Fetch-by-URL ingestion is a
-planned follow-up (IMP-059).*
+allowed `source_path` root and its path is surfaced in bootstrap
+`capabilities.attachments.bridge_dir`; a base64 upload larger than
+~128 KiB returns a `hint` redirecting here. Pair it with image **media
+notes** (ADR-013): upload once, then reference the media note by link —
+agents read only the caption, never the bytes.
 
 ## MCP `memory_upload_resource`
 
@@ -253,7 +290,7 @@ the tools).
 | Missing `project` | `400 Bad Request` `project query param is required` | `project must not be empty` (resource only — attachment allows empty) |
 | Bad `kind` value | `400 Bad Request` `kind must be one of: image, document, auto` | `kind must be one of: image, document, auto` |
 | Unparseable multipart | `400 Bad Request` `bad multipart: <details>` | n/a — MCP encodes args as JSON |
-| Missing `file` field | `400 Bad Request` `missing file field: ...` | `provide either data (base64) or source_path` |
+| Missing `file` field / no source | `400 Bad Request` `missing file field: ...` | `provide one of: bridge_filename (staged file), source_path (server path), or data (base64). …` (the error teaches the HTTP and ticket channels) |
 | Wrong method | `405 Method Not Allowed` `method not allowed` | n/a |
 | File too large (> 10 MiB) | `413 Request Entity Too Large` `file too large (max 10 MiB)` | same message |
 | Extension not allowlisted | `415 Unsupported Media Type` `unsupported file type: .exe` | same message |
