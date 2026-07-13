@@ -3,9 +3,11 @@ package lint
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/parser"
 )
 
@@ -122,6 +124,26 @@ func checkBrokenWikilink(ctx context.Context, l *Linter, project string) ([]Issu
 		for _, o := range outs {
 			if o.TargetPath != "" {
 				continue
+			}
+			// The index resolves note targets only; an attachment embed like
+			// ![[<hash>.webp]] always lands here unresolved. Mirror the
+			// renderer's resolution (ResolveAttachmentByName) so a working
+			// embed is not flagged — the false-positive mode that inflated a
+			// real vault's lint report by ~138 entries.
+			if ext := strings.ToLower(filepath.Ext(o.Target)); ext != "" {
+				if _, isAttachExt := attach.AllowedExt[ext]; isAttachExt {
+					if _, ok := l.vault.ResolveAttachmentByName(o.Target); ok {
+						continue
+					}
+					issues = append(issues, Issue{
+						Severity: SeverityWarning,
+						File:     n.Path,
+						Rule:     "broken-wikilink",
+						Message:  fmt.Sprintf("embed target %q does not resolve to any attachment", o.Target),
+						FixHint:  "restore the file under an attachments/ dir or remove the embed",
+					})
+					continue
+				}
 			}
 			msg := fmt.Sprintf("wikilink target %q does not resolve to any note", o.Target)
 			issues = append(issues, Issue{

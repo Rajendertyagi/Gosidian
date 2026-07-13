@@ -17,7 +17,11 @@ for precise schemas; the groupings below are the conceptual map.
   `unchanged:true` with no body, and `mode="lite"` replaces the
   `hot.md` body with its frontmatter + heading outline. `mode` defaults
   to **auto**: an oversize `hot.md` is served lite automatically
-  (flagged `auto_lite:true`); pass `mode="full"` to force the body
+  (flagged `auto_lite:true`); pass `mode="full"` to force the body.
+  The payload also carries a `maintenance` digest (hot.md size/age,
+  broken wikilinks, stale-note count — indexed queries only): when its
+  `attention` flag is true, the directives ask the agent to propose the
+  relevant grooming at end of task
 - `memory_recent(project)` — notes recently modified
 - `memory_pinned(project)` — notes tagged `pinned`
 - `memory_stale(project, older_than)` — unmodified long enough to

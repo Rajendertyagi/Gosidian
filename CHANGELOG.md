@@ -8,6 +8,42 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.20.0] — 2026-07-13 — "maintenance digest"
+
+### Added
+- **Maintenance digest at bootstrap**: `memory_bootstrap` now serves a
+  per-project `maintenance` block — `hot_size` / `hot_oversize` (vs the
+  lint hot-oversize threshold) / `hot_age_days`, `log_size`,
+  `broken_links` (unresolved wikilinks leaving the project's notes) and
+  `stale_count` (notes untouched for 90+ days, excluding
+  `status:done` / `status:archived`), plus an `attention` flag that
+  fires on the two failure modes that actually happen in the wild: a
+  hot file growing unbounded and broken wikilinks accumulating
+  silently. Numbers only, computed live from indexed queries and two
+  file stats — never a content scan; `memory_lint` stays on-demand and
+  the digest tells the agent *when* to run it. Best-effort: a lookup
+  error degrades to an absent block, never a failed bootstrap.
+- Operational directives bumped to **v9**: the end-of-task workflow
+  gains step 0 — when the bootstrap served `maintenance.attention:
+  true`, propose the relevant grooming (compact the hot file, repair
+  the reported links) before closing. `stale_count` is context, not an
+  obligation.
+
+### Fixed
+- **Attachment embeds are no longer "broken wikilinks"**: the
+  broken-wikilink lint rule now resolves `![[<file>.<ext>]]` targets
+  through the same attachment resolution the renderer uses, so working
+  image embeds stop being flagged (a real vault reported ~138 phantom
+  entries); a genuinely missing embed is still reported, with
+  attachment-specific wording. The maintenance digest's `broken_links`
+  counter excludes attachment-extension targets for the same reason.
+
+### Notes
+- No migration required and nothing to configure: the digest reuses the
+  existing lint hot-oversize threshold (default 16 KiB,
+  `[lint] hot_oversize_bytes` to override); the 90-day stale cutoff is
+  fixed until real-world soak says otherwise.
+
 ## [2.19.0] — 2026-07-12 — "one-door ingestion"
 
 ### Added

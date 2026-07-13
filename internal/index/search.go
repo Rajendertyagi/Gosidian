@@ -305,3 +305,41 @@ func (i *Index) NotesByTagInProject(tag, project string) ([]NoteRow, error) {
 	}
 	return out, rows.Err()
 }
+
+// MaintenanceCounts returns the cheap per-project grooming signals served by
+// the bootstrap maintenance digest (ADR-019): the number of unresolved
+// wikilinks leaving the project's notes, and the number of notes older than
+// staleBefore that are not tagged status:done / status:archived (closed plans
+// and archived notes age by design and would drown the signal). Both are
+// single indexed queries — the digest's cost budget forbids content scans.
+//
+// excludeSuffixes drops targets by extension: the index resolves note targets
+// only, so attachment embeds (![[<hash>.webp]]) are always "unresolved" here
+// even when the file exists and renders — counting them inflated a real
+// vault's digest by ~138 phantom broken links. Genuinely missing embeds are
+// the (fs-aware, on-demand) broken-wikilink lint rule's job.
+func (i *Index) MaintenanceCounts(project string, staleBefore int64, excludeSuffixes []string) (brokenLinks, staleCount int, err error) {
+	like := strings.ReplaceAll(project, "%", `\%`)
+	like = strings.ReplaceAll(like, "_", `\_`) + "/%"
+
+	brokenQ := `SELECT COUNT(*) FROM links JOIN notes ON links.src_id = notes.id
+		 WHERE links.target_path IS NULL AND notes.path LIKE ? ESCAPE '\'`
+	args := []any{like}
+	for _, suf := range excludeSuffixes {
+		brokenQ += ` AND lower(links.target) NOT LIKE ?`
+		args = append(args, "%"+strings.ToLower(suf))
+	}
+	if err = i.db.QueryRow(brokenQ, args...).Scan(&brokenLinks); err != nil {
+		return 0, 0, err
+	}
+
+	if err = i.db.QueryRow(
+		`SELECT COUNT(*) FROM notes
+		 WHERE path LIKE ? ESCAPE '\' AND mtime < ?
+		   AND id NOT IN (SELECT note_id FROM tags WHERE tag IN ('status:done', 'status:archived'))`,
+		like, staleBefore,
+	).Scan(&staleCount); err != nil {
+		return 0, 0, err
+	}
+	return brokenLinks, staleCount, nil
+}

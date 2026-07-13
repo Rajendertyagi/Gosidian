@@ -104,6 +104,11 @@ Status dei plan: `draft` → `in-progress` → `done` | `archived` (tag
 
 ### Workflow end-of-task
 
+0. **Maintenance-check**: se il bootstrap ha servito `maintenance.attention:
+   true` (hot.md oltre soglia e/o wikilink rotti), proponi il grooming
+   relativo prima di chiudere — compatta/riscrivi `{{PROJECT}}/hot.md`,
+   ripara i link segnalati (`memory_lint` per l'elenco). `stale_count` è
+   contesto, non un obbligo.
 1. **Skill-check** (procedura ≥2 volte? → crea la skill)
 2. Aggiorna `{{PROJECT}}/hot.md` (focus, plan chiusi, recent decisions)
 3. Append a `{{PROJECT}}/log.md` (entry tipizzata con data ISO: `bootstrap`,

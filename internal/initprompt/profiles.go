@@ -114,7 +114,12 @@ const StubVersion = 2
 // single-use ticket); the ingest-rules table routes CSV/binary files through
 // memory_ingest; the legacy upload tools are footnoted for explicit
 // stage-then-attach flows.
-const DirectivesVersion = 8
+//
+// v9 (2026-07-12, ADR-019 maintenance digest): the end-of-task workflow gains
+// step 0 — when the bootstrap serves maintenance.attention (hot.md oversize
+// and/or broken wikilinks), propose the relevant grooming before closing;
+// stale_count is context, not an obligation.
+const DirectivesVersion = 9
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

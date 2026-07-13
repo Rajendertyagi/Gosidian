@@ -12,6 +12,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/initprompt"
@@ -25,7 +26,7 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload endpoint hint. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload endpoint hint. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
 		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
 		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
@@ -65,6 +66,28 @@ type bootstrapStats struct {
 	NotesCount int                 `json:"notes_count"`
 	TopTags    []bootstrapTagCount `json:"top_tags"`
 }
+
+// bootstrapMaintenance is the per-project grooming digest (ADR-019): numbers
+// only, computed live from indexed queries and two stats — never a content
+// scan (memory_lint stays on-demand; this block tells the agent WHEN to run
+// it). Attention fires on the two failure modes observed in the wild (hot.md
+// growing unbounded, broken wikilinks accumulating silently); stale_count is
+// informational context, deliberately not a trigger.
+type bootstrapMaintenance struct {
+	HotSize         int64 `json:"hot_size"`
+	HotOversize     bool  `json:"hot_oversize"`
+	HotAgeDays      int   `json:"hot_age_days"`
+	LogSize         int64 `json:"log_size"`
+	BrokenLinks     int   `json:"broken_links"`
+	StaleCount      int   `json:"stale_count"`
+	StaleCutoffDays int   `json:"stale_cutoff_days"`
+	Attention       bool  `json:"attention"`
+}
+
+// maintenanceStaleCutoffDays is the digest's stale threshold. Fixed until the
+// soak says otherwise (ADR-019): notes untouched for longer, and not tagged
+// status:done/status:archived, count as review candidates.
+const maintenanceStaleCutoffDays = 90
 
 type bootstrapTagCount struct {
 	Tag   string `json:"tag"`
@@ -340,6 +363,39 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	payload["stats"] = bootstrapStats{
 		NotesCount: len(projNotes),
 		TopTags:    top,
+	}
+
+	// maintenance digest (ADR-019): best-effort like pending_insights — a
+	// lookup error degrades to an absent block, never a failed bootstrap.
+	staleBefore := time.Now().AddDate(0, 0, -maintenanceStaleCutoffDays).Unix()
+	attachExts := make([]string, 0, len(attach.AllowedExt))
+	for ext := range attach.AllowedExt {
+		attachExts = append(attachExts, ext)
+	}
+	if broken, stale, merr := s.index.MaintenanceCounts(project, staleBefore, attachExts); merr == nil {
+		m := bootstrapMaintenance{
+			BrokenLinks:     broken,
+			StaleCount:      stale,
+			StaleCutoffDays: maintenanceStaleCutoffDays,
+		}
+		hotThreshold := s.lintHotOversizeBytes
+		if hotThreshold <= 0 {
+			hotThreshold = lint.DefaultHotOversizeBytes
+		}
+		if abs, aerr := s.vault.Abs(project + "/hot.md"); aerr == nil {
+			if fi, serr := os.Stat(abs); serr == nil {
+				m.HotSize = fi.Size()
+				m.HotOversize = fi.Size() > hotThreshold
+				m.HotAgeDays = int(time.Since(fi.ModTime()).Hours() / 24)
+			}
+		}
+		if abs, aerr := s.vault.Abs(project + "/log.md"); aerr == nil {
+			if fi, serr := os.Stat(abs); serr == nil {
+				m.LogSize = fi.Size()
+			}
+		}
+		m.Attention = m.HotOversize || m.BrokenLinks > 0
+		payload["maintenance"] = m
 	}
 
 	// pending_insights surfaces the owner's un-triaged self-improvement

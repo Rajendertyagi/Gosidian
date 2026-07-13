@@ -408,3 +408,33 @@ func TestLint_HotOversize(t *testing.T) {
 		t.Fatalf("missing hot.md must not fire hot-oversize: %+v", issues)
 	}
 }
+
+func TestLint_AttachmentEmbedNotBroken(t *testing.T) {
+	l, v, idx := newTestLinter(t)
+
+	// A real webp under the vault-root attachments/ dir, embedded by bare
+	// name (the Obsidian image-embed shape the UI guides use) and by
+	// qualified path — neither may be flagged (they render fine, ADR-013).
+	if err := v.Save("attachments/aabbccdd.webp", []byte("RIFFxxxxWEBPVP8 ")); err != nil {
+		t.Fatal(err)
+	}
+	seed(t, v, idx, "proj/guide.md", "---\ntitle: guide\ntags: [proj, type:doc]\n---\n\n# g\n\n![[aabbccdd.webp]]\n\n![[attachments/aabbccdd.webp]]\n\n[[proj/guide]]\n")
+
+	issues, err := l.Run(context.Background(), "proj", []string{"broken-wikilink"}, "")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(issues) != 0 {
+		t.Errorf("resolving attachment embeds must not be flagged, got: %+v", issues)
+	}
+
+	// A genuinely missing embed IS flagged, with attachment wording.
+	seed(t, v, idx, "proj/bad.md", "---\ntitle: bad\ntags: [proj, type:doc]\n---\n\n# b\n\n![[phantom.webp]]\n")
+	issues, err = l.Run(context.Background(), "proj", []string{"broken-wikilink"}, "")
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(issues) != 1 || !strings.Contains(issues[0].Message, "attachment") {
+		t.Errorf("missing embed should be flagged with attachment wording, got: %+v", issues)
+	}
+}
