@@ -8,6 +8,27 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.20.1] — 2026-07-15 — "hygiene"
+
+### Security
+- **Log injection hardening** (CodeQL `go/log-injection`): the api/v1
+  slow-handler warning now logs `r.URL.EscapedPath()` instead of the
+  decoded path — a client-chosen `%0A` stays percent-encoded instead of
+  forging log lines in the text log format. The JSON production format
+  was already escaping; this closes the text-format gap flagged by code
+  scanning.
+
+### Changed
+- Dependency maintenance: `mark3labs/mcp-go` 0.55→0.56 (avoids full
+  tool-filter scans on call hot paths — the API behind the core/full
+  token profiles), `yuin/goldmark` 1.7.4→1.8.4, `golang.org/x/crypto`
+  0.53→0.54, `golang.org/x/term` 0.44→0.45, `boombuler/barcode`
+  →1.1.0, plus transitive `x/sys` 0.47 and `x/text` 0.40.
+
+### Notes
+- No functional changes and no migration. This release supersedes the
+  open Dependabot PRs, which auto-close on the next dependency rescan.
+
 ## [2.20.0] — 2026-07-13 — "maintenance digest"
 
 ### Added

@@ -203,8 +203,11 @@ func observe(next http.Handler) http.Handler {
 		started := time.Now()
 		next.ServeHTTP(w, r)
 		if d := time.Since(started); d > 500*time.Millisecond {
+			// EscapedPath, not Path: the decoded form can carry client-chosen
+			// control bytes (%0A → newline) that would forge log lines in the
+			// text format (CodeQL go/log-injection).
 			slog.Default().Warn("api/v1: slow handler",
-				"method", r.Method, "path", r.URL.Path, "elapsed", d.String())
+				"method", r.Method, "path", r.URL.EscapedPath(), "elapsed", d.String())
 		}
 	})
 }
