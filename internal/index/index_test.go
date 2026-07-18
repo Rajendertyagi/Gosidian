@@ -240,3 +240,39 @@ func TestIndex_GraphData(t *testing.T) {
 		}
 	}
 }
+
+func TestIndex_FragmentLinkResolution(t *testing.T) {
+	idx := openTest(t)
+
+	// [[note#heading]] must resolve to the note (fragment is
+	// presentation-level, Obsidian semantics) — BUG-025: it used to stay
+	// unresolved, invisible to backlinks/graph and flagged by lint.
+	upsert(t, idx, "proj/bugs.md", "Bug tracker", "# Bugs\n\n## BUG-001\n\nbody")
+	upsert(t, idx, "proj/plan.md", "Plan", "See [[proj/bugs#BUG-001]] and [[Bug tracker#BUG-001]]")
+
+	outs, err := idx.Outlinks("proj/plan.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outs) != 2 {
+		t.Fatalf("outlinks = %+v, want 2", outs)
+	}
+	for _, o := range outs {
+		if o.TargetPath != "proj/bugs.md" {
+			t.Errorf("fragment link %q should resolve to proj/bugs.md, got %q", o.Target, o.TargetPath)
+		}
+	}
+	backs, _ := idx.Backlinks("proj/bugs.md")
+	if len(backs) != 1 || backs[0].Path != "proj/plan.md" {
+		t.Errorf("backlinks = %+v, want [proj/plan.md]", backs)
+	}
+
+	// Pure self-fragment [[#heading]] records no cross-note edge.
+	upsert(t, idx, "proj/self.md", "Self", "Jump to [[#BUG-001]]")
+	outs, _ = idx.Outlinks("proj/self.md")
+	for _, o := range outs {
+		if o.TargetPath != "" {
+			t.Errorf("self-fragment link should stay unresolved, got %+v", o)
+		}
+	}
+}

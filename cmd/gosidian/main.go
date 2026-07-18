@@ -272,6 +272,10 @@ func main() {
 	if cfg.Vault.MediaNotes {
 		log.Printf("media notes enabled: markdown notes with type:image + media: resolved as image notes (ADR-013)")
 	}
+	v.SetTableNotes(cfg.Vault.TableNotes)
+	if cfg.Vault.TableNotes {
+		log.Printf("table notes enabled: markdown notes with type:table + media: resolved as CSV table notes (ADR-016)")
+	}
 	// Web-side login rate-limit + session TTL configuration moved
 	// to internal/api/v1 — the legacy server.ConfigureLogin retired
 	// at the v2.0 cutover alongside the cookie-session middleware.
@@ -389,11 +393,16 @@ func main() {
 	if cfg.MCP.BridgeDir != "" {
 		log.Printf("mcp bridge dir: %s (stage files here, reference by bridge_filename — IMP-059)", cfg.MCP.BridgeDir)
 	}
+	mcpServer.SetIngestURLAllowlist(cfg.MCP.IngestURLAllowlist)
+	if len(cfg.MCP.IngestURLAllowlist) > 0 {
+		log.Printf("mcp ingest url allowlist: %s (memory_ingest url source enabled)", strings.Join(cfg.MCP.IngestURLAllowlist, ", "))
+	}
 	mcpServer.SetProjects(projectsStore)
 	// MCP write handlers publish on the SSE hub so SPA subscribers
 	// see external-tab + agent edits in real time.
 	mcpServer.SetEvents(eventsHub)
 	mcpServer.SetLintExtraAllowedTags(cfg.Lint.FrontmatterTagVocabulary.ExtraAllowed)
+	mcpServer.SetLintHotOversizeLimit(cfg.Lint.HotOversizeBytes)
 	mcpServer.SetSelfImprove(cfg.SelfImprove.Enabled, cfg.SelfImprove.TargetProject)
 	mcpServer.SetSelfImproveNudge(cfg.SelfImprove.EveryNCalls, cfg.SelfImprove.MaxNudgesPerSession, time.Duration(cfg.SelfImprove.CooldownMinutes)*time.Minute)
 	mcpServer.SetGlobal(cfg.Global.Enabled, cfg.Global.PublicProject, cfg.Global.PrivateProject)

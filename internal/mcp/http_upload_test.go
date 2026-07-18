@@ -30,7 +30,7 @@ func serverWithToken(t *testing.T, project string, scopes []string) (*Server, st
 	if err != nil {
 		t.Fatal(err)
 	}
-	plaintext, _, err := store.Create("test", project, scopes, 0, "")
+	plaintext, _, err := store.Create("test", splitProjects(project), scopes, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,8 +133,8 @@ func TestCreateMediaNote_Attachment(t *testing.T) {
 	if !strings.Contains(string(note.Content), "media: "+res.Path) {
 		t.Errorf("note does not reference the attachment:\n%s", note.Content)
 	}
-	if ref, ok := s.vault.MediaRefForNote(note.Path, note.Content); !ok || ref.Broken {
-		t.Errorf("media ref not resolved: ok=%v ref=%+v", ok, ref)
+	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "image" || ref.Broken {
+		t.Errorf("media ref not resolved: kind=%q ref=%+v", kind, ref)
 	}
 }
 

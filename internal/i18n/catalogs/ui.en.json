@@ -103,6 +103,15 @@
   "media": {
     "not_found": "Image not found"
   },
+  "table": {
+    "not_found": "CSV file not found",
+    "load_error": "Could not load the CSV file",
+    "rows": "rows",
+    "page_of": "Page {page} of {total}",
+    "prev": "Previous",
+    "next": "Next",
+    "download": "Download CSV"
+  },
   "nav": {
     "projects": "Projects",
     "tags": "Tags",

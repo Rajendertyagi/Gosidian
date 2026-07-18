@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 )
 
 func TestPromoteAgent(t *testing.T) {
@@ -67,11 +69,123 @@ func TestPromoteAgent(t *testing.T) {
 		t.Errorf("anchor missing canonical pull:\n%s", p.Anchor.Content)
 	}
 
-	// Idempotency guard: promoting again over an existing canonical note errors.
+	// Idempotency guard: promoting again over an existing canonical note
+	// errors, and the error teaches the adopt flag (IMP-071).
 	res2, _ := s.handlePromoteAgent(ctx, call(map[string]any{
 		"project": "rc", "slug": "rc-database", "content": foreign,
 	}))
 	if !res2.IsError {
 		t.Error("expected error promoting an already-existing canonical agent")
+	}
+	var errText strings.Builder
+	for _, c := range res2.Content {
+		if tc, ok := c.(mcplib.TextContent); ok {
+			errText.WriteString(tc.Text)
+		}
+	}
+	if !strings.Contains(errText.String(), "adopt_into_existing") {
+		t.Errorf("exists error should hint at adopt_into_existing: %q", errText.String())
+	}
+}
+
+func TestPromoteAgent_AdoptIntoExisting(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+
+	foreign := "---\n" +
+		"name: alpha-name\n" +
+		"description: foreign desc\n" +
+		"tools: Read, Bash\n" +
+		"---\n\n" +
+		"Foreign role text with unique nuggets.\n"
+
+	type adoptResp struct {
+		Path                 string `json:"path"`
+		AdoptedIntoExisting  bool   `json:"adopted_into_existing"`
+		ForeignBodyForReview string `json:"foreign_body_for_review"`
+		Review               string `json:"review"`
+		Anchor               *struct {
+			Path      string `json:"path"`
+			Content   string `json:"content"`
+			Canonical string `json:"canonical"`
+		} `json:"anchor"`
+	}
+	adopt := func(slug string) adoptResp {
+		t.Helper()
+		res, _ := s.handlePromoteAgent(ctx, call(map[string]any{
+			"project": "rc", "slug": slug, "content": foreign,
+			"profile": "claude", "adopt_into_existing": true,
+		}))
+		if res.IsError {
+			t.Fatalf("adopt failed: %s", resultText(t, res))
+		}
+		var p adoptResp
+		if err := json.Unmarshal([]byte(resultText(t, res)), &p); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		return p
+	}
+
+	// 1. Canonical without harness block → block inserted, body untouched,
+	// foreign body echoed back for the fold-check.
+	_, _ = s.handleCreate(ctx, call(map[string]any{
+		"path":    "rc/agents/alpha.md",
+		"content": "---\ntitle: Alpha\ndescription: canonical desc\ntags: [rc, type:agent]\ntype: agent\n---\n\nCanonical role text, source of truth.\n",
+	}))
+	p := adopt("alpha")
+	if !p.AdoptedIntoExisting || p.Path != "rc/agents/alpha.md" {
+		t.Errorf("adopted=%v path=%q", p.AdoptedIntoExisting, p.Path)
+	}
+	if !strings.Contains(p.ForeignBodyForReview, "unique nuggets") || p.Review == "" {
+		t.Errorf("missing foreign body / review instruction: %+v", p)
+	}
+	note, err := s.vault.Load("rc/agents/alpha.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(note.Content)
+	for _, want := range []string{
+		"Canonical role text, source of truth.",
+		"harness:",
+		"name: alpha-name",
+		"tools: [Read, Bash]",
+		"description: canonical desc",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("canonical missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "unique nuggets") {
+		t.Errorf("foreign body must NOT be merged server-side:\n%s", body)
+	}
+	if p.Anchor == nil || p.Anchor.Canonical != "rc/agents/alpha.md" {
+		t.Fatalf("anchor = %+v", p.Anchor)
+	}
+	if !strings.Contains(p.Anchor.Content, "name: alpha-name") {
+		t.Errorf("anchor should reflect the inserted harness name:\n%s", p.Anchor.Content)
+	}
+
+	// 2. Canonical WITH harness block → note untouched (existing harness wins).
+	pre := "---\ntitle: Beta\ntags: [rc, type:agent]\ntype: agent\nharness:\n  name: beta-canonical\n---\n\nBeta canonical body.\n"
+	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "rc/agents/beta.md", "content": pre}))
+	p = adopt("beta")
+	note, err = s.vault.Load("rc/agents/beta.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(note.Content) != pre {
+		t.Errorf("canonical with harness must stay byte-identical:\n%s", note.Content)
+	}
+	if p.Anchor == nil || !strings.Contains(p.Anchor.Content, "name: beta-canonical") {
+		t.Fatalf("anchor should come from the existing harness: %+v", p.Anchor)
+	}
+
+	// 3. Flag with NO existing canonical → normal promote (no-op flag, safe retry).
+	p = adopt("gamma")
+	if p.AdoptedIntoExisting {
+		t.Error("fresh canonical: adopted_into_existing should be false")
+	}
+	if _, err := s.vault.Load("rc/agents/gamma.md"); err != nil {
+		t.Errorf("fresh canonical not created: %v", err)
 	}
 }

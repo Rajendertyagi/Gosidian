@@ -19,15 +19,15 @@ import (
 
 // Config is the top-level settings document.
 type Config struct {
-	Git         GitConfig         `toml:"git"`
-	MCP         MCPConfig         `toml:"mcp"`
-	Trash       TrashConfig       `toml:"trash"`
-	Theme       ThemeConfig       `toml:"theme"`
-	Webauth     WebauthConfig     `toml:"webauth"`
-	Vault       VaultConfig       `toml:"vault"`
-	I18n        I18nConfig        `toml:"i18n"`
-	Lint        LintConfig        `toml:"lint"`
-	LDAP        LDAPConfig        `toml:"ldap"`
+	Git          GitConfig          `toml:"git"`
+	MCP          MCPConfig          `toml:"mcp"`
+	Trash        TrashConfig        `toml:"trash"`
+	Theme        ThemeConfig        `toml:"theme"`
+	Webauth      WebauthConfig      `toml:"webauth"`
+	Vault        VaultConfig        `toml:"vault"`
+	I18n         I18nConfig         `toml:"i18n"`
+	Lint         LintConfig         `toml:"lint"`
+	LDAP         LDAPConfig         `toml:"ldap"`
 	SelfImprove  SelfImproveConfig  `toml:"self_improve"`
 	Global       GlobalConfig       `toml:"global"`
 	AgentAnchors AgentAnchorsConfig `toml:"agent_anchors"`
@@ -95,6 +95,9 @@ type LDAPConfig struct {
 // .gosidian/config.toml.
 type LintConfig struct {
 	FrontmatterTagVocabulary FrontmatterTagVocabulary `toml:"frontmatter_tag_vocabulary"`
+	// HotOversizeBytes overrides the hot-oversize rule threshold (bytes).
+	// 0 or absent keeps the built-in default (16 KiB).
+	HotOversizeBytes int64 `toml:"hot_oversize_bytes"`
 }
 
 // FrontmatterTagVocabulary lets a vault add tags to the closed vocabulary
@@ -134,6 +137,7 @@ type VaultConfig struct {
 	CacheSize  int  `toml:"cache_size"`  // LRU entries; 0 disables; default 128
 	HTMLNotes  bool `toml:"html_notes"`  // treat single-file .html as first-class notes; default false (ADR-011)
 	MediaNotes bool `toml:"media_notes"` // resolve image media notes (type: image + media: pointer); default false (ADR-013)
+	TableNotes bool `toml:"table_notes"` // resolve CSV table notes (type: table + media: pointer); default false (ADR-016)
 }
 
 // I18nConfig chooses the default UI language and the list of enabled ones.
@@ -183,6 +187,7 @@ type MCPConfig struct {
 	MaxNoteBytes       int64    `toml:"max_note_bytes"`       // default 1 MiB
 	AllowedUploadRoots []string `toml:"allowed_upload_roots"` // fs roots for source_path uploads
 	BridgeDir          string   `toml:"bridge_dir"`           // staging dir for bridge_filename uploads (auto-allowed root; IMP-059)
+	IngestURLAllowlist []string `toml:"ingest_url_allowlist"` // URL prefixes memory_ingest may fetch from; empty disables the url source (ADR-018)
 }
 
 // GitConfig controls the auto-sync of the vault to a git remote.
@@ -302,6 +307,16 @@ func (c *Config) ApplyEnv() error {
 	if v := os.Getenv("GOSIDIAN_MCP_BRIDGE_DIR"); v != "" {
 		c.MCP.BridgeDir = strings.TrimSpace(v)
 	}
+	if v := os.Getenv("GOSIDIAN_INGEST_URL_ALLOWLIST"); v != "" {
+		var prefixes []string
+		for _, p := range strings.Split(v, ",") {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				prefixes = append(prefixes, p)
+			}
+		}
+		c.MCP.IngestURLAllowlist = prefixes
+	}
 	if v := os.Getenv("GOSIDIAN_TRASH_ENABLED"); v != "" {
 		c.Trash.Enabled = envBool(v)
 	}
@@ -371,6 +386,9 @@ func (c *Config) ApplyEnv() error {
 	}
 	if v := os.Getenv("GOSIDIAN_VAULT_MEDIA_NOTES"); v != "" {
 		c.Vault.MediaNotes = envBool(v)
+	}
+	if v := os.Getenv("GOSIDIAN_VAULT_TABLE_NOTES"); v != "" {
+		c.Vault.TableNotes = envBool(v)
 	}
 	if v := os.Getenv("GOSIDIAN_I18N_DEFAULT_LANG"); v != "" {
 		c.I18n.DefaultLang = v

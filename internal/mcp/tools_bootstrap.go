@@ -10,9 +10,14 @@ import (
 	"errors"
 	"os"
 	"path"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/gosidian/gosidian/internal/attach"
 	"github.com/gosidian/gosidian/internal/initprompt"
+	"github.com/gosidian/gosidian/internal/lint"
+	"github.com/gosidian/gosidian/internal/parser"
 	"github.com/gosidian/gosidian/internal/vault"
 	"github.com/mark3labs/mcp-go/mcp"
 )
@@ -21,9 +26,13 @@ import (
 // registerTools() alongside the other v1.2 tools.
 func (s *Server) registerBootstrapTool() {
 	s.impl.AddTool(mcp.NewTool("memory_bootstrap",
-		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README.md + CLAUDE.md content (when present), active plans (type:plan + status:in-progress), available skills (type:skill), agents (type:agent), 5 most recent notes, and summary stats (note count, top tags). Prefer this over 3-4 separate memory_get + memory_notes_by_tag calls when starting a task. `missing` lists convention files that are absent so the caller knows what scaffold is lacking. When the self-improvement loop is enabled, `pending_insights` lists un-triaged agent-sourced insights (status:pending) awaiting your review. `directives_block` carries the full gosidian operational directives (vault folder map, ingest rules, plan/skill conventions, end-of-task workflow, tag vocabulary) rendered for this project — read and FOLLOW it; it is served fresh every session, so the on-disk instruction file only needs to be a thin stub pointing here. `directives_version` and `stub_version` are the versions of those directives and of the stub template (regenerate your stub via memory_init_agent only when stub_version is ahead of your `<!-- gosidian:stub v=N -->` marker). `agent_md` reports the project's instruction file under any recognised name (AGENTS.md, CLAUDE.md, …) — gosidian does not assume a single filename. In the stub model the instruction file lives in the agent's working dir (outside the vault); when it is not a vault note, `agent_md.expected_external` is true and it is NOT reported in `missing` (which lists only absent vault scaffold such as hot.md / README.md)."),
+		mcp.WithDescription("Aggregate session-start payload for a project: hot.md + README + instruction file (when present), active plans, skills, agents, 5 recent notes, stats. Call this FIRST each session instead of separate gets. `directives_block` carries the full operational directives rendered for this project — read and FOLLOW it (served fresh every session; regenerate your stub via memory_init_agent only when stub_version is ahead of your stub marker). `capabilities` reports the enabled content formats (html/media/table notes) plus attachment limits/extensions and the HTTP /upload endpoint hint. `maintenance` carries cheap grooming signals (hot.md size/age, broken wikilinks, stale-note count): when its `attention` flag is true, propose the relevant grooming at end of task. `missing` lists absent vault scaffold; `agent_md.expected_external` means the instruction file lives in the agent's working dir, not the vault. Repeat calls: pass known_directives_version + known_etags (+ known_anchor_metas on anchor-enabled projects) and use mode lite — see the parameter docs."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to bootstrap. Scoped tokens are forced to their project.")),
-		mcp.WithString("profile", mcp.Description("Optional CLI/agent profile for local agent-anchor materialisation (\"claude\", \"generic\", …). Default \"claude\". When the master switch and the project's use_anchors flag are on and the profile supports native subagents, the response includes an `anchors` block: the set of thin agent-anchor files (each pulls its canonical role from the vault at spawn) to write/reconcile in the agent's cwd, plus a `reconcile` directive. Flags off, or a profile without subagent support, yield no anchors.")),
+		mcp.WithString("profile", mcp.Description("CLI/agent profile for agent-anchor materialisation (default \"claude\"). When the master switch + the project's use_anchors flag are on and the profile supports native subagents, the response carries an `anchors` block: thin agent-anchor files to reconcile in the agent's cwd.")),
+		mcp.WithNumber("known_directives_version", mcp.Description("The directives_version you already hold from a previous bootstrap: on match, directives_block is omitted (directives_version is always present to detect it).")),
+		mcp.WithObject("known_etags", mcp.Description("Map of vault-relative path → etag from a previous bootstrap: files whose etag still matches come back unchanged:true with no body (hot_md, readme, agent_md).")),
+		mcp.WithObject("known_anchor_metas", mcp.Description("Map of canonical vault path → meta_version from a previous bootstrap's anchors.items: anchors whose meta still matches come back as {path, canonical, meta_version, unchanged:true} with no content. If an unchanged anchor file is missing from disk, re-bootstrap without this param to get the content back.")),
+		mcp.WithString("mode", mcp.Description("auto (default) | full | lite. lite serves hot.md as frontmatter + heading outline (fetch sections via memory_get_section); auto switches to lite only when hot.md crosses the oversize threshold (flagged auto_lite:true).")),
 	), s.handleBootstrap)
 }
 
@@ -36,12 +45,49 @@ type bootstrapFile struct {
 	// but expected to live in the agent's working dir (the stub model, ADR-010).
 	// Only ever set on the agent_md payload, never on hot.md/README.md.
 	ExpectedExternal bool `json:"expected_external,omitempty"`
+	// Unchanged marks a file whose etag matched the caller's known_etags —
+	// the body was deliberately omitted (Content empty ≠ empty file).
+	Unchanged bool `json:"unchanged,omitempty"`
+	// Frontmatter+Headings replace Content in lite mode (hot.md only).
+	Frontmatter string           `json:"frontmatter,omitempty"`
+	Headings    []outlineHeading `json:"headings,omitempty"`
+	// AutoLite marks a hot.md served in lite shape because it crossed the
+	// oversize threshold while the caller left mode unset (auto). Pass
+	// mode:"full" to force the body.
+	AutoLite bool `json:"auto_lite,omitempty"`
 }
+
+// autoLiteThreshold: with mode unset (auto), a hot.md larger than this is
+// served in lite shape (frontmatter + outline). Mirrors the lint
+// hot-oversize default — a hot.md past it should be compacted anyway.
+const autoLiteThreshold = lint.DefaultHotOversizeBytes
 
 type bootstrapStats struct {
 	NotesCount int                 `json:"notes_count"`
 	TopTags    []bootstrapTagCount `json:"top_tags"`
 }
+
+// bootstrapMaintenance is the per-project grooming digest (ADR-019): numbers
+// only, computed live from indexed queries and two stats — never a content
+// scan (memory_lint stays on-demand; this block tells the agent WHEN to run
+// it). Attention fires on the two failure modes observed in the wild (hot.md
+// growing unbounded, broken wikilinks accumulating silently); stale_count is
+// informational context, deliberately not a trigger.
+type bootstrapMaintenance struct {
+	HotSize         int64 `json:"hot_size"`
+	HotOversize     bool  `json:"hot_oversize"`
+	HotAgeDays      int   `json:"hot_age_days"`
+	LogSize         int64 `json:"log_size"`
+	BrokenLinks     int   `json:"broken_links"`
+	StaleCount      int   `json:"stale_count"`
+	StaleCutoffDays int   `json:"stale_cutoff_days"`
+	Attention       bool  `json:"attention"`
+}
+
+// maintenanceStaleCutoffDays is the digest's stale threshold. Fixed until the
+// soak says otherwise (ADR-019): notes untouched for longer, and not tagged
+// status:done/status:archived, count as review candidates.
+const maintenanceStaleCutoffDays = 90
 
 type bootstrapTagCount struct {
 	Tag   string `json:"tag"`
@@ -55,6 +101,60 @@ type bootstrapPendingInsights struct {
 	Project string    `json:"project"`
 	Count   int       `json:"count"`
 	Notes   []noteRef `json:"notes"`
+}
+
+// bootstrapCapabilities advertises this instance's content capabilities at
+// session start, so agents learn what note formats and file channels exist
+// without having to open individual tool schemas. Flags mirror the live vault
+// config; static guidance on WHEN to use each format lives in the directives
+// («Formati di nota e allegati»), which cross-reference this block.
+type bootstrapCapabilities struct {
+	HTMLNotes   bool                      `json:"html_notes"`
+	MediaNotes  bool                      `json:"media_notes"`
+	TableNotes  bool                      `json:"table_notes"`
+	Attachments bootstrapAttachCapability `json:"attachments"`
+}
+
+type bootstrapAttachCapability struct {
+	MaxMiB             int      `json:"max_mib"`
+	Extensions         []string `json:"extensions"`
+	UploadEndpointHint string   `json:"upload_endpoint_hint"`
+	Tools              []string `json:"tools"`
+	// BridgeDir is the server-side staging directory for bridge_filename
+	// sources, when configured. Surfacing it here closes the ADR-018
+	// chicken-and-egg: a co-located agent learns the cheap path up front
+	// instead of after a wasteful base64 upload.
+	BridgeDir string `json:"bridge_dir,omitempty"`
+	// AllowedUploadRoots are the extra server-side roots source_path may read
+	// from (the vault root and the bridge dir are always implicitly allowed).
+	AllowedUploadRoots []string `json:"allowed_upload_roots,omitempty"`
+	// IngestURLEnabled reports whether the memory_ingest url source has a
+	// non-empty allowlist on this instance.
+	IngestURLEnabled bool `json:"ingest_url_enabled"`
+}
+
+// buildCapabilities assembles the capabilities block from live config and the
+// attach allowlist. Extensions are sorted (dot-less) for stable output.
+func (s *Server) buildCapabilities() bootstrapCapabilities {
+	exts := make([]string, 0, len(attach.AllowedExt))
+	for ext := range attach.AllowedExt {
+		exts = append(exts, strings.TrimPrefix(ext, "."))
+	}
+	sort.Strings(exts)
+	return bootstrapCapabilities{
+		HTMLNotes:  s.vault.HTMLNotesEnabled(),
+		MediaNotes: s.vault.MediaNotesEnabled(),
+		TableNotes: s.vault.TableNotesEnabled(),
+		Attachments: bootstrapAttachCapability{
+			MaxMiB:             attach.MaxBytes >> 20,
+			Extensions:         exts,
+			UploadEndpointHint: "to save a file use memory_ingest (routes by extension; sources: bridge_filename, source_path, url, or transfer:\"http\" for a single-use upload ticket). Raw bytes can also be POSTed multipart (field 'file', bearer token) to your MCP /sse URL with /sse replaced by /upload — bytes travel over HTTP, not the model context",
+			Tools:              []string{"memory_ingest", "memory_upload_attachment", "memory_upload_resource"},
+			BridgeDir:          s.bridgeDir,
+			AllowedUploadRoots: s.allowedUploadRoots,
+			IngestURLEnabled:   len(s.ingestURLAllow) > 0,
+		},
+	}
 }
 
 // conventionFiles maps the relative-to-project filename to the key we expose
@@ -77,7 +177,7 @@ var agentFileCandidates = []string{"AGENTS.md", "CLAUDE.md", ".cursor/rules.mdc"
 // anchorReconcileDirective tells the agent how to apply the desired anchor set
 // against its cwd. The server is cwd-blind: it only computes the desired files
 // + their meta_version; the agent (which has filesystem access) does the diff.
-const anchorReconcileDirective = "Riconcilia gli agenti referenziati in `target_dir` (file gitignored). Per ogni item: se il file non esiste → scrivilo con `content`; se esiste con un marker `<!-- gosidian:anchor ... meta=X -->` e X≠`meta_version` → riscrivilo; se X=`meta_version` → lascialo. Rimuovi i file con marker `gosidian:anchor` il cui `canonical` non è più fra gli items (orphan). NON toccare file SENZA il marker `gosidian:anchor` (foreign, scritti a mano): segnalali e proponi l'adozione con `memory_promote_agent`."
+const anchorReconcileDirective = "Riconcilia gli agenti referenziati in `target_dir` (file gitignored). Per ogni item: se il file non esiste → scrivilo con `content`; se esiste con un marker `<!-- gosidian:anchor ... meta=X -->` e X≠`meta_version` → riscrivilo; se X=`meta_version` → lascialo. Item con `unchanged:true` (content omesso, meta già tuo): lascialo com'è; se il file manca dal disco, ripeti il bootstrap senza `known_anchor_metas` per riavere il content. Rimuovi i file con marker `gosidian:anchor` il cui `canonical` non è più fra gli items (orphan). NON toccare file SENZA il marker `gosidian:anchor` (foreign, scritti a mano): segnalali e proponi l'adozione con `memory_promote_agent` (con `adopt_into_existing:true` se la nota canonica type:agent esiste già)."
 
 // anchorsEnabledFor reports whether the bootstrap should surface agent anchors
 // for (project, profile): master switch on, the project opted into use_anchors,
@@ -97,6 +197,17 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		return mcp.NewToolResultError(err.Error()), nil
 	}
 
+	// mode: "" (default) = auto — full unless hot.md crosses the oversize
+	// threshold, then lite with auto_lite:true. Explicit "full"/"lite" win.
+	mode := strings.TrimSpace(req.GetString("mode", ""))
+	switch mode {
+	case "", "auto", "full", "lite":
+		// ok
+	default:
+		return mcp.NewToolResultErrorf("unknown mode %q (expected auto, full or lite)", mode), nil
+	}
+	knownEtags := extractStringMap(req.GetArguments()["known_etags"])
+
 	payload := map[string]any{
 		"project": project,
 		// Directives are SERVED here (ADR-010): directives_block is the full
@@ -107,15 +218,41 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		// must be regenerated via memory_init_agent.
 		"directives_version": initprompt.DirectivesVersion,
 		"stub_version":       initprompt.StubVersion,
+		// capabilities: per-instance content-format discovery (plan
+		// 20260706-capability-discovery-bootstrap). Always present — an agent
+		// must see html_notes:false, not silence, to know .html is off here.
+		"capabilities": s.buildCapabilities(),
 	}
-	if block, _, derr := initprompt.RenderDirectives(project); derr == nil {
-		payload["directives_block"] = block
+	// Version negotiation: a caller that already holds the current directives
+	// skips the whole block — directives_version above is the match signal.
+	if req.GetInt("known_directives_version", 0) != initprompt.DirectivesVersion {
+		if block, _, derr := initprompt.RenderDirectives(project); derr == nil {
+			payload["directives_block"] = block
+		}
 	}
 	var missing []string
 
 	for _, f := range conventionFiles {
 		full := path.Join(project, f.rel)
 		file := s.loadBootstrapFile(full)
+		file = applyKnownEtag(file, knownEtags)
+		liteHot := mode == "lite"
+		if (mode == "" || mode == "auto") && f.key == "hot_md" &&
+			int64(len(file.Content)) > autoLiteThreshold {
+			liteHot = true
+			file.AutoLite = true
+		}
+		if liteHot && f.key == "hot_md" && file.Present && !file.Unchanged {
+			// Lite: the session cache tends to be the payload's heaviest part.
+			// Serve its shape (frontmatter + outline), not its body; the agent
+			// pulls the sections it needs via memory_get_section.
+			content := []byte(file.Content)
+			file.Frontmatter = parser.FrontmatterRawForPath(file.Path, content)
+			for _, h := range parser.ExtractHeadings(content) {
+				file.Headings = append(file.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
+			}
+			file.Content = ""
+		}
 		payload[f.key] = file
 		if !file.Present {
 			missing = append(missing, f.rel)
@@ -133,6 +270,7 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	agentFile, agentName := s.detectAgentFile(project)
 	if agentFile.Present {
 		payload["agent_md_name"] = agentName
+		agentFile = applyKnownEtag(agentFile, knownEtags)
 	} else {
 		agentFile.ExpectedExternal = true
 	}
@@ -168,12 +306,30 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 		if aerr != nil {
 			return mcp.NewToolResultErrorFromErr("anchors lookup failed", aerr), nil
 		}
-		payload["anchors"] = map[string]any{
+		// Delta on repeat bootstraps (IMP-068): anchors whose meta_version the
+		// caller already holds ship without content, mirroring known_etags.
+		if knownMetas := extractStringMap(req.GetArguments()["known_anchor_metas"]); len(knownMetas) > 0 {
+			for i := range items {
+				if knownMetas[items[i].Canonical] == items[i].MetaVersion {
+					items[i].Content = ""
+					items[i].Unchanged = true
+				}
+			}
+		}
+		anchors := map[string]any{
 			"profile":    string(profile),
 			"target_dir": initprompt.AnchorDir(profile),
 			"items":      items,
-			"reconcile":  anchorReconcileDirective,
 		}
+		// The reconcile directive is ~500 chars shipped on EVERY bootstrap of
+		// an anchor-enabled project: with an empty desired set there is
+		// nothing to write, so skip it (an agent holding stale anchor files
+		// still sees target_dir + items:[] and the files self-describe via
+		// their gosidian:anchor marker).
+		if len(items) > 0 {
+			anchors["reconcile"] = anchorReconcileDirective
+		}
+		payload["anchors"] = anchors
 	}
 
 	recent, err := s.index.RecentNotes(project, 0, 5)
@@ -207,6 +363,39 @@ func (s *Server) handleBootstrap(ctx context.Context, req mcp.CallToolRequest) (
 	payload["stats"] = bootstrapStats{
 		NotesCount: len(projNotes),
 		TopTags:    top,
+	}
+
+	// maintenance digest (ADR-019): best-effort like pending_insights — a
+	// lookup error degrades to an absent block, never a failed bootstrap.
+	staleBefore := time.Now().AddDate(0, 0, -maintenanceStaleCutoffDays).Unix()
+	attachExts := make([]string, 0, len(attach.AllowedExt))
+	for ext := range attach.AllowedExt {
+		attachExts = append(attachExts, ext)
+	}
+	if broken, stale, merr := s.index.MaintenanceCounts(project, staleBefore, attachExts); merr == nil {
+		m := bootstrapMaintenance{
+			BrokenLinks:     broken,
+			StaleCount:      stale,
+			StaleCutoffDays: maintenanceStaleCutoffDays,
+		}
+		hotThreshold := s.lintHotOversizeBytes
+		if hotThreshold <= 0 {
+			hotThreshold = lint.DefaultHotOversizeBytes
+		}
+		if abs, aerr := s.vault.Abs(project + "/hot.md"); aerr == nil {
+			if fi, serr := os.Stat(abs); serr == nil {
+				m.HotSize = fi.Size()
+				m.HotOversize = fi.Size() > hotThreshold
+				m.HotAgeDays = int(time.Since(fi.ModTime()).Hours() / 24)
+			}
+		}
+		if abs, aerr := s.vault.Abs(project + "/log.md"); aerr == nil {
+			if fi, serr := os.Stat(abs); serr == nil {
+				m.LogSize = fi.Size()
+			}
+		}
+		m.Attention = m.HotOversize || m.BrokenLinks > 0
+		payload["maintenance"] = m
 	}
 
 	// pending_insights surfaces the owner's un-triaged self-improvement
@@ -260,6 +449,21 @@ func (s *Server) loadBootstrapFile(rel string) bootstrapFile {
 		Content: string(note.Content),
 		ETag:    note.ETag(),
 	}
+}
+
+// applyKnownEtag omits the body of a file whose etag matches the caller's
+// known_etags entry, flagging it Unchanged so the client can tell "omitted
+// because you have it" from "empty file". Keys are vault-relative paths as
+// returned by a previous bootstrap.
+func applyKnownEtag(file bootstrapFile, known map[string]string) bootstrapFile {
+	if !file.Present || file.Path == "" || len(known) == 0 {
+		return file
+	}
+	if et, ok := known[file.Path]; ok && et != "" && et == file.ETag {
+		file.Content = ""
+		file.Unchanged = true
+	}
+	return file
 }
 
 // detectAgentFile returns the first existing instruction file (as a vault note)
@@ -369,7 +573,6 @@ func (s *Server) mergeGlobals(local []noteRef, tag, project string, tok tokenSco
 // tokenScoped is a narrow subset of *auth.Token, declared locally so helpers
 // don't depend on the concrete type and tests can stub if needed.
 type tokenScoped interface {
-	ProjectFilter() string
 	AllowsPath(path string) bool
 }
 

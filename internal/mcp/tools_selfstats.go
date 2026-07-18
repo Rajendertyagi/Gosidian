@@ -15,15 +15,17 @@ import (
 // registerSelfStatsTool adds memory_self_stats.
 func (s *Server) registerSelfStatsTool() {
 	s.impl.AddTool(mcp.NewTool("memory_self_stats",
-		mcp.WithDescription("Introspect the calling token's current state: rate-limit budget (max_per_minute, used, remaining), token identity (id, name, project, scopes), and correlation id of the current MCP session when available. Use this before a burst of writes to avoid hitting the rate limit, or to confirm which credentials you're running under."),
+		mcp.WithDescription("Introspect the calling token's current state: rate-limit budget (max_per_minute, used, remaining), token identity (id, name, projects, scopes), and correlation id of the current MCP session when available. Use this before a burst of writes to avoid hitting the rate limit, or to confirm which credentials you're running under."),
 	), s.handleSelfStats)
 }
 
 type selfStatsTokenInfo struct {
-	ID      string   `json:"id"`
-	Name    string   `json:"name,omitempty"`
-	Project string   `json:"project,omitempty"`
-	Scopes  []string `json:"scopes,omitempty"`
+	ID          string   `json:"id"`
+	Name        string   `json:"name,omitempty"`
+	Project     string   `json:"project,omitempty"`  // legacy single-project display (first project)
+	Projects    []string `json:"projects,omitempty"` // full multi-project scope; empty = admin
+	Scopes      []string `json:"scopes,omitempty"`
+	ToolProfile string   `json:"tool_profile,omitempty"` // "core" when restricted; empty = full
 }
 
 func (s *Server) handleSelfStats(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -32,10 +34,12 @@ func (s *Server) handleSelfStats(ctx context.Context, req mcp.CallToolRequest) (
 		return errRes, nil
 	}
 	info := selfStatsTokenInfo{
-		ID:      tok.ID,
-		Name:    tok.Name,
-		Project: tok.Project,
-		Scopes:  append([]string(nil), tok.Scopes...),
+		ID:          tok.ID,
+		Name:        tok.Name,
+		Project:     tok.Project,
+		Projects:    tok.ProjectList(),
+		Scopes:      append([]string(nil), tok.Scopes...),
+		ToolProfile: tok.ToolProfile,
 	}
 	stats := s.limiter.Stats(tok.ID)
 	payload := map[string]any{

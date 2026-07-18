@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/rand"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gosidian/gosidian/internal/audit"
@@ -23,7 +24,20 @@ const (
 	tokenCtxKey       ctxKey = 1
 	correlationCtxKey ctxKey = 2
 	langCtxKey        ctxKey = 3
+	basePathCtxKey    ctxKey = 4
 )
+
+// basePathFromContext returns the mount prefix of the transport the current
+// MCP session arrived on ("/mcp" on the single-port mux, "" on the legacy
+// listener). Per-session in ctx rather than a Server field because Handler()
+// is called once per transport and a shared field would let the last mount
+// win — tickets minted over /mcp/sse would advertise the wrong endpoint.
+func basePathFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(basePathCtxKey).(string); ok {
+		return v
+	}
+	return ""
+}
 
 // LangFromContext returns the Accept-Language value (first tag) extracted
 // from the SSE handshake headers, or empty when the caller did not supply
@@ -77,6 +91,10 @@ type Server struct {
 	// change for vaults that do not configure it. Wired by main at
 	// startup via SetLintExtraAllowedTags.
 	lintExtraAllowedTags []string
+	// lintHotOversizeBytes overrides the hot-oversize rule threshold;
+	// <= 0 keeps the lint package default (16 KiB). Wired by main from
+	// [lint] hot_oversize_bytes.
+	lintHotOversizeBytes int64
 	// selfImprove* gate, target and tune the self-improvement loop, wired
 	// by main from config. With enabled=false (default) the
 	// memory_self_improve tool rejects every call and the nudge middleware
@@ -99,6 +117,21 @@ type Server struct {
 	// bootstrap never surfaces an anchors payload — behaviour unchanged.
 	// Per-project opt-in is projects.Flags.UseAnchors.
 	anchorsEnabled bool
+	// waiters tracks in-flight memory_wait_changes calls (one per MCP
+	// session, keyed by correlation id — token id as fallback) so a client
+	// cannot pile up blocking long-polls and exhaust connections.
+	waiters sync.Map
+	// ingestURLAllow is the URL-prefix allowlist for the memory_ingest `url`
+	// source (ADR-018). Empty (default) keeps the channel disabled — the
+	// allowlist is the SSRF boundary, so there is no implicit default.
+	ingestURLAllow []string
+	// ingestTickets holds the pending single-use upload tickets minted by
+	// memory_ingest transfer:http. In-memory only: a restart voids pending
+	// tickets, which is fine at their TTL. Guarded by ingestTicketsMu.
+	ingestTickets   map[string]*ingestTicket
+	ingestTicketsMu sync.Mutex
+	// ingestTicketTTL overrides the ticket lifetime; <= 0 uses the default.
+	ingestTicketTTL time.Duration
 }
 
 // SetEvents wires the SSE hub used to broadcast note/tree changes
@@ -115,6 +148,12 @@ func (s *Server) SetEvents(h *events.Hub) {
 // validates and dedupes them. Pass nil to revert to built-in only.
 func (s *Server) SetLintExtraAllowedTags(extra []string) {
 	s.lintExtraAllowedTags = extra
+}
+
+// SetLintHotOversizeLimit overrides the hot-oversize lint threshold in
+// bytes. Values <= 0 keep the lint package default.
+func (s *Server) SetLintHotOversizeLimit(bytes int64) {
+	s.lintHotOversizeBytes = bytes
 }
 
 // SetSelfImprove configures the agent-sourced self-improvement loop: the
@@ -210,6 +249,14 @@ func (s *Server) SetAllowedUploadRoots(roots []string) {
 // disables the feature. The dir is automatically an allowed source_path root.
 func (s *Server) SetBridgeDir(dir string) { s.bridgeDir = dir }
 
+// SetIngestURLAllowlist configures the URL prefixes the memory_ingest `url`
+// source may fetch from (ADR-018). Empty keeps the channel disabled: the
+// allowlist is the SSRF boundary, so every prefix — including private-network
+// ones like an internal screenshot service — must be an explicit choice.
+func (s *Server) SetIngestURLAllowlist(prefixes []string) {
+	s.ingestURLAllow = prefixes
+}
+
 // BridgeDir returns the configured staging directory (empty when unset).
 func (s *Server) BridgeDir() string { return s.bridgeDir }
 
@@ -289,6 +336,9 @@ func New(v *vault.Vault, idx *index.Index, tokens *auth.Store) *Server {
 		server.WithToolCapabilities(true),
 		server.WithToolHandlerMiddleware(instrumentMiddleware),
 		server.WithToolHandlerMiddleware(s.selfImproveNudgeMiddleware),
+		// Per-token tool profile: applied to tools/list and enforced on
+		// tools/call by mcp-go (access-control boundary, not cosmetic).
+		server.WithToolFilter(s.filterToolsByProfile),
 	)
 	s.registerTools()
 	s.registerResourcesAndPrompts()
@@ -322,6 +372,7 @@ func (s *Server) Handler(basePath string) http.Handler {
 	opts := []server.SSEOption{
 		server.WithSSEContextFunc(func(ctx context.Context, r *http.Request) context.Context {
 			ctx = context.WithValue(ctx, correlationCtxKey, generateCorrelationID())
+			ctx = context.WithValue(ctx, basePathCtxKey, basePath)
 			if lang := r.Header.Get("Accept-Language"); lang != "" {
 				ctx = context.WithValue(ctx, langCtxKey, lang)
 			}
@@ -349,6 +400,10 @@ func (s *Server) Handler(basePath string) http.Handler {
 	// <basePath>/sse and /message under the catch-all.
 	mux := http.NewServeMux()
 	mux.HandleFunc(basePath+"/upload", s.handleHTTPUpload)
+	// Single-use ticket redemption for memory_ingest transfer:http (ADR-018).
+	// No bearer here: the unguessable ticket id, bound to the minting token,
+	// is the credential.
+	mux.HandleFunc(basePath+"/ingest/", s.handleIngestTicketRedeem)
 	mux.Handle("/", handler)
 	return mux
 }

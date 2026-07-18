@@ -52,9 +52,12 @@ const (
 
 // Event is the wire shape. ID is a monotonic ULID-like sequence that
 // Last-Event-ID can carry; today it's just a hub-local sequence number
-// so reconnect resync is best-effort, not authoritative.
+// so reconnect resync is best-effort, not authoritative. Seq is the same
+// sequence in numeric form — the cursor for ReplaySince (long-poll
+// consumers such as memory_wait_changes).
 type Event struct {
 	ID    string          `json:"id"`
+	Seq   uint64          `json:"seq"`
 	Topic Topic           `json:"topic"`
 	Time  time.Time       `json:"time"`
 	Data  json.RawMessage `json:"data"`
@@ -86,13 +89,22 @@ type Hub struct {
 	bufLen int
 	seq    atomic.Uint64
 	logger *slog.Logger
+	// ring retains the last ringCap published events (oldest first) so a
+	// long-poll consumer can replay the short gap between two calls via
+	// ReplaySince. Guarded by its own mutex — the subscriber path stays on
+	// the RWMutex untouched.
+	ringMu  sync.Mutex
+	ring    []Event
+	ringCap int
 }
 
 // HubOptions configure a hub. BufLen is the per-subscriber channel
-// capacity; defaults to 32 if zero.
+// capacity; defaults to 32 if zero. RingLen is the replay-buffer size
+// for ReplaySince; defaults to 256 if zero.
 type HubOptions struct {
-	BufLen int
-	Logger *slog.Logger
+	BufLen  int
+	RingLen int
+	Logger  *slog.Logger
 }
 
 // New constructs a Hub. Pass an HTTP server's BaseContext-derived
@@ -102,14 +114,19 @@ func New(opts HubOptions) *Hub {
 	if bl <= 0 {
 		bl = 32
 	}
+	rl := opts.RingLen
+	if rl <= 0 {
+		rl = 256
+	}
 	lg := opts.Logger
 	if lg == nil {
 		lg = slog.Default()
 	}
 	return &Hub{
-		subs:   make(map[*Subscription]struct{}),
-		bufLen: bl,
-		logger: lg,
+		subs:    make(map[*Subscription]struct{}),
+		bufLen:  bl,
+		ringCap: rl,
+		logger:  lg,
 	}
 }
 
@@ -148,12 +165,22 @@ func (h *Hub) Publish(topic Topic, data any) {
 		h.logger.Warn("events: marshal failed", "topic", topic, "err", err)
 		return
 	}
+	n := h.seq.Add(1)
 	ev := Event{
-		ID:    fmt.Sprintf("%d", h.seq.Add(1)),
+		ID:    fmt.Sprintf("%d", n),
+		Seq:   n,
 		Topic: topic,
 		Time:  time.Now().UTC(),
 		Data:  payload,
 	}
+	h.ringMu.Lock()
+	if len(h.ring) >= h.ringCap {
+		copy(h.ring, h.ring[1:])
+		h.ring[len(h.ring)-1] = ev
+	} else {
+		h.ring = append(h.ring, ev)
+	}
+	h.ringMu.Unlock()
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	for sub := range h.subs {
@@ -183,6 +210,55 @@ func subscriptionMatches(sub *Subscription, topic Topic) bool {
 	}
 	for _, t := range sub.Topics {
 		if t == topic {
+			return true
+		}
+	}
+	return false
+}
+
+// Seq returns the sequence number of the last published event (0 when
+// nothing was published yet). A long-poll consumer uses it as the
+// starting cursor for ReplaySince.
+func (h *Hub) Seq() uint64 {
+	return h.seq.Load()
+}
+
+// ReplaySince returns the retained events with Seq > cursor whose topic is
+// in topics (empty topics = all), oldest first. resync reports that the
+// cursor predates the retention window — or comes from another hub
+// incarnation — so events were lost and the caller must reconcile with a
+// full re-read (e.g. memory_recent) instead of trusting the replay.
+func (h *Hub) ReplaySince(cursor uint64, topics ...Topic) (out []Event, resync bool) {
+	h.ringMu.Lock()
+	defer h.ringMu.Unlock()
+	seq := h.seq.Load()
+	if cursor > seq {
+		return nil, true // cursor from a previous process run
+	}
+	if cursor < seq {
+		oldest := seq + 1 // nothing retained → any gap is a loss
+		if len(h.ring) > 0 {
+			oldest = h.ring[0].Seq
+		}
+		if cursor+1 < oldest {
+			resync = true
+		}
+	}
+	for _, ev := range h.ring {
+		if ev.Seq <= cursor {
+			continue
+		}
+		if len(topics) > 0 && !topicIn(ev.Topic, topics) {
+			continue
+		}
+		out = append(out, ev)
+	}
+	return out, resync
+}
+
+func topicIn(t Topic, topics []Topic) bool {
+	for _, x := range topics {
+		if x == t {
 			return true
 		}
 	}

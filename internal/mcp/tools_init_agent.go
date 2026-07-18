@@ -32,7 +32,7 @@ import (
 
 func (s *Server) registerInitAgentTool() {
 	s.impl.AddTool(mcp.NewTool("memory_init_agent",
-		mcp.WithDescription("Produce an init-prompt payload for adopting gosidian as the memory layer in a new project. Returns a multi-section `prompt` that instructs the caller to create or update the agent-native instruction file (CLAUDE.md / AGENTS.md / .cursor/rules.mdc / CONVENTIONS.md / …), plus a parametric thin `gosidian_block` STUB to innest into it (Regola Zero pointing at memory_bootstrap + local-specifics placeholders; the full operational directives are served separately by memory_bootstrap's `directives_block`, NOT embedded in the file — ADR-010). Two modes, selected automatically by the presence of `existing_content`: **augment** (preferred — the caller already ran the agent's native /init and passes its output; the prompt instructs a merge preserving existing sections) and **from-scratch** (fallback — no existing content; the prompt includes cwd-scan instructions). The server does NOT read the caller's filesystem: all scanning and writing happen on the agent side. The tool does NOT choose the filename — the agent determines it (optional `filename_hint` is surfaced but not validated). If the project doesn't exist in the vault yet, `needs_scaffold=true` in the response tells the agent to call `memory_project_scaffold` first."),
+		mcp.WithDescription("Produce an init-prompt payload for adopting gosidian as the memory layer in a project. Returns a `prompt` instructing the caller to create/update its agent-native instruction file plus a thin parametric `gosidian_block` stub to innest (Regola Zero pointing at memory_bootstrap; the operational directives are served by bootstrap, NOT embedded — ADR-010). Mode is picked by `existing_content`: augment (merge preserving existing sections) or from-scratch. All filesystem scanning/writing happens agent-side; `needs_scaffold=true` means call memory_project_scaffold first."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Project (top-level folder) to initialise. May not exist yet; check `needs_scaffold` in the response to know whether to call `memory_project_scaffold` first. Scoped tokens are forced to their project.")),
 		mcp.WithString("agent_profile", mcp.Description("Target agent identifier. Known values: \"claude\", \"cursor\", \"codex\", \"aider\", \"generic\". Default \"generic\". Influences only the prompt tone and tool references — the gosidian_block is identical across profiles.")),
 		mcp.WithString("existing_content", mcp.Description("Content of the agent's native instruction file when it already exists (the output of /init). If non-empty the tool switches to augment mode and the prompt will instruct a merge that preserves every existing section.")),
@@ -60,9 +60,13 @@ type initAgentResponse struct {
 // the canonical vault note it pulls from.
 type anchorRef struct {
 	Path        string `json:"path"`
-	Content     string `json:"content"`
+	Content     string `json:"content,omitempty"`
 	MetaVersion string `json:"meta_version"`
 	Canonical   string `json:"canonical"`
+	// Unchanged marks an anchor whose meta_version matched the caller's
+	// known_anchor_metas — the content was deliberately omitted (bootstrap
+	// delta, IMP-068). Content empty ≠ empty anchor.
+	Unchanged bool `json:"unchanged,omitempty"`
 }
 
 func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -78,8 +82,8 @@ func (s *Server) handleInitAgent(ctx context.Context, req mcp.CallToolRequest) (
 	if project == "" {
 		return mcp.NewToolResultError("project must not be empty"), nil
 	}
-	if scope := tok.ProjectFilter(); scope != "" && project != scope {
-		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
+	if !tok.AllowsProject(project) {
+		return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ScopeLabel()), nil
 	}
 	if res := s.rejectIfHidden(project); res != nil {
 		return res, nil
@@ -164,7 +168,11 @@ func (s *Server) buildAgentAnchors(project string, profile initprompt.Profile, t
 		if err != nil {
 			continue
 		}
-		ar, err := initprompt.RenderAgentAnchor(profile, anchorInputFromNote(a.Path, note.Content))
+		in := anchorInputFromNote(a.Path, note.Content)
+		if !in.Materialize {
+			continue
+		}
+		ar, err := initprompt.RenderAgentAnchor(profile, in)
 		if err != nil {
 			continue
 		}
@@ -180,12 +188,12 @@ func (s *Server) buildAgentAnchors(project string, profile initprompt.Profile, t
 
 // anchorInputFromNote builds the anchor metadata from a type:agent note,
 // applying defaults (name/description) and the optional `harness:` frontmatter
-// overrides (name, description, model, tools).
+// overrides (name, description, model, tools, materialize).
 func anchorInputFromNote(path string, content []byte) initprompt.AnchorInput {
 	raw := parser.FrontmatterRawForPath(path, content)
 	fields := parser.ParseFrontmatterFields(raw)
 	slug := anchorSlug(path)
-	in := initprompt.AnchorInput{CanonicalPath: path, Slug: slug, Name: slug}
+	in := initprompt.AnchorInput{CanonicalPath: path, Slug: slug, Name: slug, Materialize: true}
 	if d, ok := fields["description"].(string); ok {
 		in.Description = d
 	}
@@ -199,11 +207,33 @@ func anchorInputFromNote(path string, content []byte) initprompt.AnchorInput {
 		if v, ok := h["model"].(string); ok && strings.TrimSpace(v) != "" {
 			in.Model = v
 		}
-		if v, ok := h["tools"].([]string); ok && len(v) > 0 {
-			in.Tools = v
+		switch v := h["tools"].(type) {
+		case []string:
+			if len(v) > 0 {
+				in.Tools = v
+			}
+		case string:
+			// Scalar form: `tools: all` inherits the CLI's full toolset.
+			if strings.EqualFold(strings.TrimSpace(v), "all") {
+				in.ToolsAll = true
+			}
+		}
+		// The block parser is untyped: booleans arrive as strings.
+		if v, ok := h["materialize"].(string); ok && isFrontmatterFalse(v) {
+			in.Materialize = false
 		}
 	}
 	return in
+}
+
+// isFrontmatterFalse reports whether an untyped harness scalar spells a
+// negative boolean.
+func isFrontmatterFalse(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "false", "no", "off":
+		return true
+	}
+	return false
 }
 
 // anchorSlug derives the anchor file basename (without extension) from the

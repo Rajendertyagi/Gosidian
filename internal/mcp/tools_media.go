@@ -16,7 +16,7 @@ import (
 // registerTools() alongside registerAttachmentTools().
 func (s *Server) registerMediaTools() {
 	s.impl.AddTool(mcp.NewTool("memory_create_media_note",
-		mcp.WithDescription("Create an image media note (ADR-013): reference (or upload) an image AND create the markdown note that points to it, in one call. The note is a normal .md whose frontmatter declares `type: image` + `media: <attachment>`, so it participates in tags/links/backlinks/graph/FTS like any note. The body is the caption/transcript — WRITE A DESCRIPTIVE CAPTION: it is the searchable text an agent later retrieves (the image bytes are NOT indexed). Images only (png/jpg/jpeg/gif/webp/svg); video is not supported. Requires the media_notes feature enabled (GOSIDIAN_VAULT_MEDIA_NOTES). Provide the image ONE way (cheapest first): `attachment` = path of an image already uploaded via the HTTP upload endpoint (POST to your MCP /sse URL with /sse replaced by /upload, e.g. :8765/sse -> :8765/upload; bytes over HTTP, no token cost); `bridge_filename` (staged file, co-located); `source_path`; or base64 `data` (~1 token/char, last resort)."),
+		mcp.WithDescription("Create an image media note: upload (or reference) an image AND create the markdown note that points to it, in one call. The note is a normal .md (frontmatter `type: image` + `media:`), indexed/linked like any note. The body is the caption — WRITE A DESCRIPTIVE ONE: it is the only searchable text (image bytes are not indexed). Images only (png/jpg/jpeg/gif/webp/svg). Requires media_notes (see bootstrap `capabilities`). Provide the image ONE way, cheapest first: `attachment` (already-uploaded path), `bridge_filename`, `source_path`, or base64 `data` (last resort)."),
 		mcp.WithString("project", mcp.Required(), mcp.Description("Vault project for both the note and the image attachment.")),
 		mcp.WithString("caption", mcp.Description("Markdown body describing the image — the searchable transcript that lands in FTS. Strongly recommended: an empty caption yields a media note with no retrievable text.")),
 		mcp.WithString("title", mcp.Description("Note title. Defaults to the image filename (without extension) when omitted.")),
@@ -31,7 +31,7 @@ func (s *Server) registerMediaTools() {
 
 func (s *Server) handleCreateMediaNote(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	if !s.vault.MediaNotesEnabled() {
-		return mcp.NewToolResultError("media notes are disabled; enable [vault] media_notes (GOSIDIAN_VAULT_MEDIA_NOTES) to create image media notes"), nil
+		return mcp.NewToolResultError("media notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] media_notes / GOSIDIAN_VAULT_MEDIA_NOTES). Meanwhile the image can still be stored as a plain attachment (memory_ingest or memory_upload_attachment)"), nil
 	}
 	project, err := req.RequireString("project")
 	if err != nil {

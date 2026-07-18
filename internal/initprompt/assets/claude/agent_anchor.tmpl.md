@@ -1,8 +1,7 @@
 ---
 name: {{NAME}}
 description: {{DESCRIPTION}}
-tools: {{TOOLS}}
-{{MODEL_LINE}}---
+{{TOOLS_LINE}}{{MODEL_LINE}}---
 <!-- gosidian:anchor v={{ANCHOR_VERSION}} canonical={{CANONICAL}} profile={{PROFILE}} meta={{META_VERSION}} -->
 
 Sei l'agent **{{NAME}}**.

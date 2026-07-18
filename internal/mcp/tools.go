@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -42,7 +43,7 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 		return nil, mcp.NewToolResultError("token lacks write scope")
 	}
 	if !tok.AllowsPath(path) {
-		return nil, mcp.NewToolResultErrorf("path %q is outside the token's project scope %q", path, tok.ProjectFilter())
+		return nil, mcp.NewToolResultErrorf("path %q is outside the token's project scope %q", path, tok.ScopeLabel())
 	}
 	return tok, nil
 }
@@ -53,7 +54,7 @@ func (s *Server) authorizeWrite(ctx context.Context, path string) (*auth.Token, 
 func (s *Server) checkWriteLimits(tok *auth.Token, contentSize int) *mcp.CallToolResult {
 	if s.maxNoteBytes > 0 && int64(contentSize) > s.maxNoteBytes {
 		metrics.MCPRateLimitHits.Inc()
-		return mcp.NewToolResultErrorf("note size %d exceeds limit of %d bytes", contentSize, s.maxNoteBytes)
+		return mcp.NewToolResultErrorf("note size %d exceeds limit of %d bytes. A body this large usually belongs elsewhere: long tabular data → a table note, an image → a media note, a big generated file already on disk → memory_ingest (bridge_filename/source_path, or transfer:\"http\" for a single-use upload URL)", contentSize, s.maxNoteBytes)
 	}
 	id := ""
 	if tok != nil {
@@ -97,8 +98,10 @@ func (s *Server) registerTools() {
 	), s.handleNotesByTag)
 
 	s.impl.AddTool(mcp.NewTool("memory_get",
-		mcp.WithDescription("Read the full content of a note by its vault-relative path (e.g. 'project/note.md')."),
+		mcp.WithDescription("Read a note by its vault-relative path (e.g. 'project/note.md'). Oversize guard: when the body exceeds 24 KiB (and raw is not set) the response is truncated — frontmatter + heading outline + the first chunk, with truncated:true, the full size, and the note's real etag (if_match still works). Fetch just the section you need via memory_get_section, or pass raw:true only when you really need the whole body."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path to the .md file.")),
+		mcp.WithBoolean("raw", mcp.Description("Bypass the oversize guard and return the full body regardless of size.")),
+		mcp.WithNumber("max_bytes", mcp.Description("Explicit body cap in bytes — truncates even below the default threshold. Ignored when raw:true.")),
 	), s.handleGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_get_section",
@@ -108,8 +111,10 @@ func (s *Server) registerTools() {
 	), s.handleGetSection)
 
 	s.impl.AddTool(mcp.NewTool("memory_batch_get",
-		mcp.WithDescription("Read multiple notes in a single call. Use this instead of N sequential memory_get calls when reconstructing context at session start. Each entry in the result has either content (success) or error (path not found / outside scope). The call itself does not fail because one path is missing."),
+		mcp.WithDescription("Read multiple notes in a single call. Use this instead of N sequential memory_get calls when reconstructing context at session start. Each entry in the result has either content (success) or error (path not found / outside scope). The call itself does not fail because one path is missing. Result size is controllable: mode=outline|frontmatter skips bodies entirely, max_bytes_per_note truncates long bodies (entry gets truncated:true) — use them to keep bulk reads inside your context budget and fetch the few notes you actually need in full afterwards."),
 		mcp.WithArray("paths", mcp.Required(), mcp.Description("Array of vault-relative paths to read (max 50).")),
+		mcp.WithString("mode", mcp.Description("What to return per note: content (default, full body), outline (headings only), frontmatter (raw frontmatter block only). outline/frontmatter cost a fraction of the tokens.")),
+		mcp.WithNumber("max_bytes_per_note", mcp.Description("Optional cap on the returned content bytes per note (content mode only). Longer bodies are cut at the cap and flagged truncated:true; the etag still stamps the full note.")),
 	), s.handleBatchGet)
 
 	s.impl.AddTool(mcp.NewTool("memory_recent",
@@ -130,20 +135,20 @@ func (s *Server) registerTools() {
 	), s.handleGetOutline)
 
 	s.impl.AddTool(mcp.NewTool("memory_create",
-		mcp.WithDescription("Create a new note at the given path. Fails if the note already exists."),
+		mcp.WithDescription("Create a new note at the given path. Fails if the note already exists. Markdown (.md) is the default note format; a path ending in .html creates a native single-file HTML note (frontmatter in a leading HTML comment, indexed/linked like a .md, rendered sandboxed in the web UI) when the instance has html_notes enabled — see `capabilities` in memory_bootstrap. Reserve .html for intrinsically-HTML content (generated reports, self-contained dashboards); prefer .md otherwise. Size guard: content is capped (default 1 MiB) and costs ~1 token/char through the context — for a large body already on disk use memory_ingest instead."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path, e.g. 'project/new-note.md'.")),
-		mcp.WithString("content", mcp.Required(), mcp.Description("Full markdown content of the note.")),
+		mcp.WithString("content", mcp.Required(), mcp.Description("Full content of the note: markdown for .md paths, a self-contained HTML document for .html paths.")),
 	), s.handleCreate)
 
 	s.impl.AddTool(mcp.NewTool("memory_update",
-		mcp.WithDescription("Overwrite an existing note's content. Fails if the note does not exist. Pass if_match (the etag returned by a previous memory_get) for optimistic locking: the call is rejected if the note has changed since you last read it."),
+		mcp.WithDescription("Overwrite an existing note's content. Fails if the note does not exist. Pass if_match (the etag returned by a previous memory_get) for optimistic locking: the call is rejected if the note has changed since you last read it. Size guard: content is capped (default 1 MiB) — for a large body already on disk use memory_ingest with overwrite:true instead."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note to update.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("New full markdown content.")),
 		mcp.WithString("if_match", mcp.Description("Optional etag from a previous memory_get. When provided, the call fails if the note's current etag differs — reload and retry.")),
 	), s.handleUpdate)
 
 	s.impl.AddTool(mcp.NewTool("memory_append",
-		mcp.WithDescription("Append content to a note. Creates the note if it does not exist. Use this to log observations incrementally. Pass if_match for optimistic locking against concurrent writes (only checked when the note already exists)."),
+		mcp.WithDescription("Append content to a note. Creates the note if it does not exist. Use this to log observations incrementally. Pass if_match for optimistic locking against concurrent writes (only checked when the note already exists). Size guard: the merged note is capped (default 1 MiB)."),
 		mcp.WithString("path", mcp.Required(), mcp.Description("Vault-relative path of the note.")),
 		mcp.WithString("content", mcp.Required(), mcp.Description("Markdown to append. A blank line is inserted before the new content if the file is non-empty.")),
 		mcp.WithString("if_match", mcp.Description("Optional etag from a previous memory_get. When provided and the note exists, the call fails if the note's current etag differs.")),
@@ -204,6 +209,8 @@ func (s *Server) registerTools() {
 
 	s.registerAttachmentTools()
 	s.registerMediaTools()
+	s.registerTableTools()
+	s.registerIngestTool()
 	s.registerAuditTools()
 	s.registerBootstrapTool()
 	s.registerDiscoveryTools()
@@ -222,6 +229,7 @@ func (s *Server) registerTools() {
 	s.registerAskTool()
 	s.registerSelfImproveTool()
 	s.registerGlobalCheckTool()
+	s.registerWaitTool()
 }
 
 // ---- handlers ----
@@ -263,7 +271,7 @@ func (s *Server) handleSearch(ctx context.Context, req mcp.CallToolRequest) (*mc
 			return res, nil
 		}
 	}
-	filter := buildProjectsFilter(requestedProjects, tok.ProjectFilter())
+	filter := buildProjectsFilter(requestedProjects, tok.ProjectList())
 	fetchLimit := limit
 	if filter.active {
 		fetchLimit = limit * 4
@@ -336,14 +344,11 @@ func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (
 	if errRes != nil {
 		return errRes, nil
 	}
-	project := req.GetString("project", "")
-	// If the token is scoped, force the filter to its project and reject any
-	// attempt to list a different one.
-	if tok.ProjectFilter() != "" {
-		if project != "" && project != tok.ProjectFilter() {
-			return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ProjectFilter()), nil
-		}
-		project = tok.ProjectFilter()
+	// If the token is scoped, force the filter to its project(s) and reject
+	// any attempt to list a different one.
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	// Per-project visibility: an explicit hidden project is rejected; an
 	// implicit vault-wide listing silently drops notes from hidden projects
@@ -355,7 +360,6 @@ func (s *Server) handleListNotes(ctx context.Context, req mcp.CallToolRequest) (
 	}
 
 	var notes []index.NoteRow
-	var err error
 	if project == "" {
 		notes, err = s.index.AllNotes()
 	} else {
@@ -393,7 +397,7 @@ func (s *Server) handleListProjects(ctx context.Context, req mcp.CallToolRequest
 	}
 	out := make([]projectEntry, 0, len(projs))
 	for _, p := range projs {
-		if tok.ProjectFilter() != "" && p.Name != tok.ProjectFilter() {
+		if !tok.AllowsProject(p.Name) {
 			continue
 		}
 		if s.projectHidden(p.Name) {
@@ -414,13 +418,10 @@ func (s *Server) handleListTags(ctx context.Context, req mcp.CallToolRequest) (*
 	if errRes != nil {
 		return errRes, nil
 	}
-	project := strings.TrimSpace(req.GetString("project", ""))
-	// Scoped tokens are forced to their project (parity with memory_list_notes).
-	if scope := tok.ProjectFilter(); scope != "" {
-		if project != "" && project != scope {
-			return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
-		}
-		project = scope
+	// Scoped tokens are forced to their project(s) (parity with memory_list_notes).
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if project != "" {
 		if res := s.rejectIfHidden(project); res != nil {
@@ -428,10 +429,7 @@ func (s *Server) handleListTags(ctx context.Context, req mcp.CallToolRequest) (*
 		}
 	}
 
-	var (
-		tags []index.TagCount
-		err  error
-	)
+	var tags []index.TagCount
 	if project == "" {
 		tags, err = s.index.Tags()
 	} else {
@@ -460,12 +458,9 @@ func (s *Server) handleNotesByTag(ctx context.Context, req mcp.CallToolRequest) 
 	if err != nil {
 		return mcp.NewToolResultError(err.Error()), nil
 	}
-	project := strings.TrimSpace(req.GetString("project", ""))
-	if scope := tok.ProjectFilter(); scope != "" {
-		if project != "" && project != scope {
-			return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
-		}
-		project = scope
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if project != "" {
 		if res := s.rejectIfHidden(project); res != nil {
@@ -504,7 +499,36 @@ type noteContent struct {
 	ETag    string          `json:"etag"`
 	Kind    string          `json:"kind,omitempty"`  // "image" for a resolved media note (ADR-013); empty otherwise
 	Media   *vault.MediaRef `json:"media,omitempty"` // resolved image payload when Kind=="image"
+	// Oversize-guard fields (plan 20260706-token-economy-round2): set only
+	// when the body was truncated. ETag always stamps the FULL note, so
+	// optimistic locking works unchanged on a truncated read.
+	Truncated   bool             `json:"truncated,omitempty"`
+	Size        int64            `json:"size,omitempty"` // full body size in bytes
+	Frontmatter string           `json:"frontmatter,omitempty"`
+	Headings    []outlineHeading `json:"headings,omitempty"`
+	// OutlineTotal is the real heading count; Headings is capped (see
+	// getTruncMaxHeadings) so a 300-section log can't flood via its outline.
+	OutlineTotal int    `json:"outline_total,omitempty"`
+	Hint         string `json:"hint,omitempty"`
 }
+
+// getBodySoftCap is the memory_get oversize threshold: a larger body comes
+// back truncated (outline + first chunk) unless raw:true. Append-only files
+// like log.md grow to hundreds of KiB — one unguarded read would flood the
+// caller's context.
+const getBodySoftCap = 24 << 10
+
+// getTruncChunk is the body prefix served with a truncated response.
+const getTruncChunk = 4 << 10
+
+// getTruncMaxHeadings caps the outline of a truncated response: an append-only
+// log can carry 300+ sections and its outline alone would dwarf the body chunk
+// (observed: 334 headings ≈ 50 KiB). We keep the first headings for structure
+// and the tail for recency.
+const (
+	getTruncMaxHeadings  = 80
+	getTruncHeadHeadings = 20
+)
 
 func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	tok, errRes := s.authorizeRead(ctx)
@@ -528,9 +552,46 @@ func (s *Server) handleGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.C
 		Content: string(note.Content),
 		ETag:    note.ETag(),
 	}
-	if ref, ok := s.vault.MediaRefForNote(note.Path, note.Content); ok {
-		nc.Kind = "image"
+	if ref, kind := s.vault.MediaRefForNote(note.Path, note.Content); kind != "" {
+		nc.Kind = kind
 		nc.Media = ref
+	}
+
+	// Oversize guard: truncate the body (default threshold, or the caller's
+	// explicit max_bytes) unless raw:true. The truncated response carries the
+	// frontmatter + outline so the caller can target a section next.
+	limit := 0
+	if !req.GetBool("raw", false) {
+		if mb := req.GetInt("max_bytes", 0); mb > 0 && len(note.Content) > mb {
+			limit = mb
+		} else if mb == 0 && len(note.Content) > getBodySoftCap {
+			limit = getTruncChunk
+		}
+	}
+	if limit > 0 {
+		cut := note.Content[:limit]
+		if i := bytes.LastIndexByte(cut, '\n'); i > 0 {
+			cut = cut[:i+1]
+		}
+		nc.Content = string(cut)
+		nc.Truncated = true
+		nc.Size = note.Size
+		nc.Frontmatter = parser.FrontmatterRawForPath(note.Path, note.Content)
+		hs := parser.ExtractHeadings(note.Content)
+		nc.OutlineTotal = len(hs)
+		if len(hs) > getTruncMaxHeadings {
+			capped := make([]parser.Heading, 0, getTruncMaxHeadings)
+			capped = append(capped, hs[:getTruncHeadHeadings]...)
+			capped = append(capped, hs[len(hs)-(getTruncMaxHeadings-getTruncHeadHeadings):]...)
+			hs = capped
+		}
+		for _, h := range hs {
+			nc.Headings = append(nc.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
+		}
+		nc.Hint = fmt.Sprintf("body truncated (%d of %d bytes): fetch one section with memory_get_section, or pass raw:true for the full body", len(nc.Content), note.Size)
+		if nc.OutlineTotal > len(nc.Headings) {
+			nc.Hint += fmt.Sprintf("; outline capped to %d of %d headings (first %d + most recent)", len(nc.Headings), nc.OutlineTotal, getTruncHeadHeadings)
+		}
 	}
 	return mcp.NewToolResultJSON(nc)
 }
@@ -602,7 +663,7 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 		return mcp.NewToolResultErrorFromErr("invalid path", err), nil
 	}
 	if strings.HasSuffix(strings.ToLower(rel), ".html") && !s.vault.HTMLNotesEnabled() {
-		return mcp.NewToolResultError("html notes are disabled; enable [vault] html_notes (GOSIDIAN_VAULT_HTML_NOTES) to create .html notes"), nil
+		return mcp.NewToolResultError("html notes are disabled on this instance — a per-project flag an admin can flip live from the web UI project toggles (or [vault] html_notes / GOSIDIAN_VAULT_HTML_NOTES)"), nil
 	}
 	tok, errRes := s.authorizeWrite(ctx, rel)
 	if errRes != nil {
@@ -611,6 +672,8 @@ func (s *Server) handleCreate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	if _, err := s.vault.Load(rel); err == nil {
 		return mcp.NewToolResultErrorf("note %q already exists", rel), nil
 	}
@@ -646,6 +709,8 @@ func (s *Server) handleUpdate(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes := s.checkWriteLimits(tok, len(content)); errRes != nil {
 		return errRes, nil
 	}
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	existing, err := s.vault.Load(rel)
 	if err != nil {
 		return mcp.NewToolResultErrorf("note %q does not exist", rel), nil
@@ -689,6 +754,8 @@ func (s *Server) handleAppend(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	var existing []byte
 	ifMatch := req.GetString("if_match", "")
 	if note, err := s.vault.Load(rel); err == nil {
@@ -725,9 +792,13 @@ func (s *Server) handleAppend(ctx context.Context, req mcp.CallToolRequest) (*mc
 	}
 	s.auditWrite(ctx, audit.ActionAppend, rel, "", int64(len(merged)))
 	out := map[string]any{"path": rel}
+	freshETag := ""
 	if fresh, err := s.vault.Load(rel); err == nil {
-		out["etag"] = fresh.ETag()
+		freshETag = fresh.ETag()
+		out["etag"] = freshETag
 	}
+	// Tree affected only when the append created the note.
+	s.publishNoteChange("update", rel, freshETag, len(existing) == 0)
 	return mcp.NewToolResultJSON(out)
 }
 
@@ -760,6 +831,8 @@ func (s *Server) handleEdit(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	if errRes != nil {
 		return errRes, nil
 	}
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	note, err := s.vault.Load(rel)
 	if err != nil {
 		return mcp.NewToolResultErrorf("note %q does not exist", rel), nil
@@ -814,6 +887,8 @@ func (s *Server) handleDelete(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if _, errRes := s.authorizeWrite(ctx, rel); errRes != nil {
 		return errRes, nil
 	}
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	if err := s.vault.Delete(rel); err != nil {
 		return mcp.NewToolResultErrorFromErr("delete failed", err), nil
 	}
@@ -834,8 +909,8 @@ func (s *Server) handleCreateProject(ctx context.Context, req mcp.CallToolReques
 		return mcp.NewToolResultError("token lacks write scope"), nil
 	}
 	// Only admin tokens may create projects — scoped tokens are confined to
-	// their existing project.
-	if tok.ProjectFilter() != "" {
+	// their existing project(s).
+	if !tok.IsAdmin() {
 		return mcp.NewToolResultError("project-scoped tokens cannot create projects"), nil
 	}
 	name, err := req.RequireString("name")
@@ -874,7 +949,13 @@ func (s *Server) handleRenameNote(ctx context.Context, req mcp.CallToolRequest) 
 	if _, errRes := s.authorizeWrite(ctx, toRel); errRes != nil {
 		return errRes, nil
 	}
+	// Lock the source path only: it serializes rename-vs-update on the note
+	// being moved. The target-exists probe inside RenameNote keeps its own
+	// (benign) race window; locking both endpoints would need deadlock-safe
+	// ordering for little gain.
+	unlock := s.vault.LockPath(fromRel)
 	rewritten, err := s.vault.RenameNote(s.index, fromRel, toRel)
+	unlock()
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("rename failed", err), nil
 	}
@@ -917,7 +998,9 @@ func (s *Server) handleMoveNote(ctx context.Context, req mcp.CallToolRequest) (*
 	if _, errRes := s.authorizeWrite(ctx, dest); errRes != nil {
 		return errRes, nil
 	}
+	unlock := s.vault.LockPath(fromRel)
 	rewritten, err := s.vault.MoveNote(s.index, fromRel, project)
+	unlock()
 	if err != nil {
 		return mcp.NewToolResultErrorFromErr("move failed", err), nil
 	}
@@ -937,7 +1020,7 @@ func (s *Server) handleRenameProject(ctx context.Context, req mcp.CallToolReques
 	if !tok.HasScope(auth.ScopeWrite) {
 		return mcp.NewToolResultError("token lacks write scope"), nil
 	}
-	if tok.ProjectFilter() != "" {
+	if !tok.IsAdmin() {
 		return mcp.NewToolResultError("project-scoped tokens cannot rename projects"), nil
 	}
 	from, err := req.RequireString("from")
@@ -963,7 +1046,7 @@ func (s *Server) handleDeleteProject(ctx context.Context, req mcp.CallToolReques
 	if !tok.HasScope(auth.ScopeWrite) {
 		return mcp.NewToolResultError("token lacks write scope"), nil
 	}
-	if tok.ProjectFilter() != "" {
+	if !tok.IsAdmin() {
 		return mcp.NewToolResultError("project-scoped tokens cannot delete projects"), nil
 	}
 	name, err := req.RequireString("name")
@@ -1032,7 +1115,7 @@ func (s *Server) handleOutlinks(ctx context.Context, req mcp.CallToolRequest) (*
 	}
 	// Scoped tokens never see cross-project info (they cannot access other
 	// projects anyway), so ignore the flag.
-	crossProject := req.GetBool("include_cross_project", false) && tok.ProjectFilter() == ""
+	crossProject := req.GetBool("include_cross_project", false) && tok.IsAdmin()
 	srcProject := topLevelProject(path)
 
 	outs, err := s.index.Outlinks(path)
@@ -1068,10 +1151,14 @@ func topLevelProject(p string) string {
 // ---- batch & triage reads ----
 
 type batchGetEntry struct {
-	Path    string `json:"path"`
-	Title   string `json:"title,omitempty"`
-	Content string `json:"content,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Path        string           `json:"path"`
+	Title       string           `json:"title,omitempty"`
+	Content     string           `json:"content,omitempty"`
+	Frontmatter string           `json:"frontmatter,omitempty"`
+	Headings    []outlineHeading `json:"headings,omitempty"`
+	ETag        string           `json:"etag,omitempty"`
+	Truncated   bool             `json:"truncated,omitempty"`
+	Error       string           `json:"error,omitempty"`
 }
 
 func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -1086,6 +1173,14 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 	if len(paths) > 50 {
 		return mcp.NewToolResultErrorf("too many paths: %d (max 50)", len(paths)), nil
 	}
+	mode := strings.TrimSpace(req.GetString("mode", "content"))
+	switch mode {
+	case "content", "outline", "frontmatter":
+		// ok
+	default:
+		return mcp.NewToolResultErrorf("unknown mode %q (expected content, outline, frontmatter)", mode), nil
+	}
+	maxBytes := req.GetInt("max_bytes_per_note", 0)
 	out := make([]batchGetEntry, 0, len(paths))
 	for _, p := range paths {
 		entry := batchGetEntry{Path: p}
@@ -1101,7 +1196,22 @@ func (s *Server) handleBatchGet(ctx context.Context, req mcp.CallToolRequest) (*
 			continue
 		}
 		entry.Title = note.Title
-		entry.Content = string(note.Content)
+		entry.ETag = note.ETag()
+		switch mode {
+		case "outline":
+			for _, h := range parser.ExtractHeadings(note.Content) {
+				entry.Headings = append(entry.Headings, outlineHeading{Level: h.Level, Text: h.Text, ID: h.ID})
+			}
+		case "frontmatter":
+			entry.Frontmatter = parser.FrontmatterRawForPath(p, note.Content)
+		default:
+			body := string(note.Content)
+			if maxBytes > 0 && len(body) > maxBytes {
+				body = body[:maxBytes]
+				entry.Truncated = true
+			}
+			entry.Content = body
+		}
 		out = append(out, entry)
 	}
 	return mcp.NewToolResultJSON(map[string]any{"results": out})
@@ -1118,12 +1228,9 @@ func (s *Server) handleRecent(ctx context.Context, req mcp.CallToolRequest) (*mc
 	if errRes != nil {
 		return errRes, nil
 	}
-	project := req.GetString("project", "")
-	if tok.ProjectFilter() != "" {
-		if project != "" && project != tok.ProjectFilter() {
-			return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, tok.ProjectFilter()), nil
-		}
-		project = tok.ProjectFilter()
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	limit := req.GetInt("limit", 20)
 	if limit <= 0 || limit > 500 {
@@ -1282,7 +1389,7 @@ func (f projectsFilter) matches(path string) bool {
 //   - Scoped token, non-empty request → strict intersection. If the
 //     scope is outside the request, the effective filter matches no
 //     path (silent "no hits" — never an error).
-func buildProjectsFilter(requested []string, scope string) projectsFilter {
+func buildProjectsFilter(requested []string, scope []string) projectsFilter {
 	seen := map[string]struct{}{}
 	clean := make([]string, 0, len(requested))
 	for _, p := range requested {
@@ -1296,15 +1403,23 @@ func buildProjectsFilter(requested []string, scope string) projectsFilter {
 		seen[p] = struct{}{}
 		clean = append(clean, p)
 	}
-	if scope == "" {
+	if len(scope) == 0 {
 		return projectsFilter{active: len(clean) > 0, allowed: clean}
 	}
 	if len(clean) == 0 {
-		return projectsFilter{active: true, allowed: []string{scope}}
+		return projectsFilter{active: true, allowed: scope}
 	}
-	if _, ok := seen[scope]; ok {
-		return projectsFilter{active: true, allowed: []string{scope}}
+	// Scoped token with an explicit request: intersect. Projects outside the
+	// scope silently drop out (empty intersection → zero hits).
+	allowed := make([]string, 0, len(clean))
+	inScope := map[string]struct{}{}
+	for _, p := range scope {
+		inScope[p] = struct{}{}
 	}
-	// Scoped token asked for projects outside its scope — silent empty.
-	return projectsFilter{active: true, allowed: nil}
+	for _, p := range clean {
+		if _, ok := inScope[p]; ok {
+			allowed = append(allowed, p)
+		}
+	}
+	return projectsFilter{active: true, allowed: allowed}
 }

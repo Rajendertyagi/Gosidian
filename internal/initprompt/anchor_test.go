@@ -72,6 +72,48 @@ func TestRenderAgentAnchor_MetaVersionStableAndSensitive(t *testing.T) {
 	}
 }
 
+func TestRenderAgentAnchor_ToolsAll(t *testing.T) {
+	got, err := RenderAgentAnchor(ProfileClaude, AnchorInput{
+		CanonicalPath: "p/agents/x.md",
+		Slug:          "x",
+		Description:   "d",
+		ToolsAll:      true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Content, "tools:") {
+		t.Errorf("tools line should be omitted for ToolsAll:\n%s", got.Content)
+	}
+	// The frontmatter must stay well-formed: description directly followed
+	// by the closing fence when both tools and model are absent.
+	if !strings.Contains(got.Content, "description: \"d\"\n---\n") {
+		t.Errorf("frontmatter malformed:\n%s", got.Content)
+	}
+
+	deflt, _ := RenderAgentAnchor(ProfileClaude, AnchorInput{CanonicalPath: "p/agents/x.md", Slug: "x", Description: "d"})
+	enum, _ := RenderAgentAnchor(ProfileClaude, AnchorInput{CanonicalPath: "p/agents/x.md", Slug: "x", Description: "d", Tools: []string{"Read"}})
+	if got.MetaVersion == deflt.MetaVersion || got.MetaVersion == enum.MetaVersion || deflt.MetaVersion == enum.MetaVersion {
+		t.Errorf("meta versions must differ across default/enumerated/all: %q %q %q",
+			deflt.MetaVersion, enum.MetaVersion, got.MetaVersion)
+	}
+}
+
+// TestRenderAgentAnchor_MetaVersionGolden pins the meta_version of a
+// default-tools anchor. A change here means EVERY existing anchor file in
+// every project gets rewritten on its first post-upgrade bootstrap (the
+// reconcile flow rewrites on meta mismatch) — change the pinned value only
+// with that consequence in mind.
+func TestRenderAgentAnchor_MetaVersionGolden(t *testing.T) {
+	got, err := RenderAgentAnchor(ProfileClaude, AnchorInput{CanonicalPath: "p/agents/x.md", Slug: "x", Description: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MetaVersion != "f115e5118bbf" {
+		t.Errorf("meta_version = %q, want f115e5118bbf (mass-rewrite guard)", got.MetaVersion)
+	}
+}
+
 func TestSupportsAnchorsAndUnsupportedProfile(t *testing.T) {
 	if !SupportsAnchors(ProfileClaude) {
 		t.Error("claude should support anchors")

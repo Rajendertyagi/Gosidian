@@ -35,15 +35,15 @@ func (s *Server) registerCompactTool() {
 }
 
 type compactResult struct {
-	Path             string `json:"path"`
-	OriginalEntries  int    `json:"original_entries"`
-	KeptEntries      int    `json:"kept_entries"`
-	ArchivedEntries  int    `json:"archived_entries"`
-	OriginalBytes    int    `json:"original_bytes"`
-	NewBytes         int    `json:"new_bytes"`
-	DryRun           bool   `json:"dry_run"`
-	ETag             string `json:"etag,omitempty"`
-	Noop             bool   `json:"noop,omitempty"`
+	Path            string `json:"path"`
+	OriginalEntries int    `json:"original_entries"`
+	KeptEntries     int    `json:"kept_entries"`
+	ArchivedEntries int    `json:"archived_entries"`
+	OriginalBytes   int    `json:"original_bytes"`
+	NewBytes        int    `json:"new_bytes"`
+	DryRun          bool   `json:"dry_run"`
+	ETag            string `json:"etag,omitempty"`
+	Noop            bool   `json:"noop,omitempty"`
 }
 
 func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -69,6 +69,8 @@ func (s *Server) handleCompact(ctx context.Context, req mcp.CallToolRequest) (*m
 	}
 	dryRun := req.GetBool("dry_run", false)
 
+	unlock := s.vault.LockPath(rel)
+	defer unlock()
 	note, err := s.vault.Load(rel)
 	if err != nil {
 		return mcp.NewToolResultErrorf("cannot read %q: %v", rel, err), nil

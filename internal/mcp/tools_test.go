@@ -601,9 +601,9 @@ func TestMCP_CollectionResultsAreWrapped(t *testing.T) {
 	_, _ = s.handleCreate(ctx, call(map[string]any{"path": "b.md", "content": "[[a]] bravo #demo"}))
 
 	cases := []struct {
-		name    string
-		fn      func() (*mcplib.CallToolResult, error)
-		key     string
+		name string
+		fn   func() (*mcplib.CallToolResult, error)
+		key  string
 	}{
 		{"search", func() (*mcplib.CallToolResult, error) {
 			return s.handleSearch(ctx, call(map[string]any{"query": "alpha"}))

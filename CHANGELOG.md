@@ -8,6 +8,374 @@ This file is the single source for per-release notes — each GitHub Release
 pulls its body from the matching section below. There are no separate
 `RELEASE_NOTES_*` files.
 
+## [2.20.1] — 2026-07-15 — "hygiene"
+
+### Security
+- **Log injection hardening** (CodeQL `go/log-injection`): the api/v1
+  slow-handler warning now logs `r.URL.EscapedPath()` instead of the
+  decoded path — a client-chosen `%0A` stays percent-encoded instead of
+  forging log lines in the text log format. The JSON production format
+  was already escaping; this closes the text-format gap flagged by code
+  scanning.
+
+### Changed
+- Dependency maintenance: `mark3labs/mcp-go` 0.55→0.56 (avoids full
+  tool-filter scans on call hot paths — the API behind the core/full
+  token profiles), `yuin/goldmark` 1.7.4→1.8.4, `golang.org/x/crypto`
+  0.53→0.54, `golang.org/x/term` 0.44→0.45, `boombuler/barcode`
+  →1.1.0, plus transitive `x/sys` 0.47 and `x/text` 0.40.
+
+### Notes
+- No functional changes and no migration. This release supersedes the
+  open Dependabot PRs, which auto-close on the next dependency rescan.
+
+## [2.20.0] — 2026-07-13 — "maintenance digest"
+
+### Added
+- **Maintenance digest at bootstrap**: `memory_bootstrap` now serves a
+  per-project `maintenance` block — `hot_size` / `hot_oversize` (vs the
+  lint hot-oversize threshold) / `hot_age_days`, `log_size`,
+  `broken_links` (unresolved wikilinks leaving the project's notes) and
+  `stale_count` (notes untouched for 90+ days, excluding
+  `status:done` / `status:archived`), plus an `attention` flag that
+  fires on the two failure modes that actually happen in the wild: a
+  hot file growing unbounded and broken wikilinks accumulating
+  silently. Numbers only, computed live from indexed queries and two
+  file stats — never a content scan; `memory_lint` stays on-demand and
+  the digest tells the agent *when* to run it. Best-effort: a lookup
+  error degrades to an absent block, never a failed bootstrap.
+- Operational directives bumped to **v9**: the end-of-task workflow
+  gains step 0 — when the bootstrap served `maintenance.attention:
+  true`, propose the relevant grooming (compact the hot file, repair
+  the reported links) before closing. `stale_count` is context, not an
+  obligation.
+
+### Fixed
+- **Attachment embeds are no longer "broken wikilinks"**: the
+  broken-wikilink lint rule now resolves `![[<file>.<ext>]]` targets
+  through the same attachment resolution the renderer uses, so working
+  image embeds stop being flagged (a real vault reported ~138 phantom
+  entries); a genuinely missing embed is still reported, with
+  attachment-specific wording. The maintenance digest's `broken_links`
+  counter excludes attachment-extension targets for the same reason.
+
+### Notes
+- No migration required and nothing to configure: the digest reuses the
+  existing lint hot-oversize threshold (default 16 KiB,
+  `[lint] hot_oversize_bytes` to override); the 90-day stale cutoff is
+  fixed until real-world soak says otherwise.
+
+## [2.19.0] — 2026-07-12 — "one-door ingestion"
+
+### Added
+- **`memory_ingest` — the single front door for saving files** (57th MCP
+  tool). One call routes any file by extension: `.csv` → table note,
+  image → media note, `.md`/`.html` → the note itself (body read
+  server-side, no tokens through the model context), anything else →
+  plain attachment. Sources, cheapest first: `bridge_filename` (staged in
+  the bridge dir), `source_path` (inside an allowed upload root), `url`,
+  an already-uploaded `attachment`, or base64 `data` as the last resort.
+  Force a kind with `as`; note ingestion supports `overwrite:true` with
+  `if_match` CAS. In auto mode a table/media route whose vault flag is
+  off degrades to a plain attachment with a teaching warning.
+- **Single-use upload tickets** (`transfer: "http"`): the tool response
+  carries a one-time upload URL (TTL 5 min, no bearer needed — the
+  unguessable ticket is the credential, bound to the minting token so
+  scope, audit and limits apply unchanged). POST the file there
+  (multipart, field `file`) and the server executes the parked intent
+  and answers like the tool would. Any redemption attempt consumes the
+  ticket. Remote agents save a file with one tool call plus one `curl`.
+- **Fetch-by-URL ingestion**: `memory_ingest` can download the file
+  itself (CI artifacts, internal services). Gated by the new
+  `mcp.ingest_url_allowlist` / `GOSIDIAN_INGEST_URL_ALLOWLIST` prefix
+  allowlist — the SSRF boundary: it gates the initial URL and every
+  redirect hop, empty means disabled. 10 MiB cap, 20 s timeout.
+- Bootstrap `capabilities.attachments` now surfaces `bridge_dir`,
+  `allowed_upload_roots` and `ingest_url_enabled`, so a co-located agent
+  learns the cheap staging path up front instead of after a wasteful
+  base64 upload.
+
+### Changed
+- **`core` tool profile**: `memory_ingest` replaces the legacy upload
+  matrix (`memory_upload_attachment`, `memory_upload_resource` and the
+  dynamic media/table-creator admissions) — workers see one file door;
+  the dedicated tools remain in the `full` profile for explicit
+  stage-then-attach workflows.
+- **Errors now teach the way out**: the `source_path` rejection explains
+  the allowed-roots model and the full channel hierarchy (a rejection
+  never meant "filesystem not shared"); the no-source error mentions the
+  HTTP and ticket channels; "… notes are disabled" points at the live
+  per-project toggle UI; the note-size cap error routes to table/media
+  notes and `memory_ingest`. `memory_create`/`update`/`append` declare
+  the 1 MiB cap in their descriptions.
+- Operational directives bumped to **v8**: file-saving guidance now
+  leads with `memory_ingest` (sources cheapest-first, bridge dir from
+  capabilities, url + ticket channels).
+- Docs: `docs/mcp/upload.md` rewritten around the one-line decision tree
+  ("to save a file, call `memory_ingest`"), with the ticket flow and
+  redemption status codes documented.
+
+### Notes
+- No migration required. Existing tokens keep their profile; `full`
+  tokens see the legacy tools unchanged. The `url` source ships disabled
+  until an allowlist is configured.
+
+## [2.18.0] — 2026-07-07 — "Anchors round 2: harness overrides + bootstrap delta"
+
+MINOR release rounding off the agent-anchors feature (v2.13.0) with the
+four sharp edges found while adopting it at scale. All changes are additive
+and backward compatible: existing anchors keep their `meta_version`
+byte-for-byte (guarded by a pinned golden test), so **no anchor file is
+rewritten** after upgrading. No migration required.
+
+### Added
+- **`harness.tools: all`** on a `type:agent` note renders its anchor
+  *without* a `tools:` line, which the CLI interprets as "inherit the full
+  default toolset" — no more enumerating (and drifting) 15+ tool names per
+  role. The explicit list form and the least-privilege default preset are
+  unchanged.
+- **`harness.materialize: false`** keeps a role vault-only: the note stays
+  canonical and listable (e.g. an orchestrator that must not be spawnable
+  as a subagent) but is excluded from the bootstrap anchors set; an
+  already-materialised anchor becomes an orphan and the normal reconcile
+  flow removes it.
+- **`known_anchor_metas` on `memory_bootstrap`.** Repeat bootstraps of an
+  anchor-enabled project no longer pay the full anchors block: pass the
+  `canonical → meta_version` map from the previous round and matching items
+  come back as `{path, canonical, meta_version, unchanged: true}` with no
+  content — the anchors counterpart of `known_etags`. Operational
+  directives bumped to **v7** to document it.
+- **`adopt_into_existing` on `memory_promote_agent`.** Promoting a foreign
+  local agent file whose canonical `type:agent` note already exists (a role
+  created before anchors) no longer dead-ends: the existing body is never
+  touched, a `harness:` block is inserted only if missing, and the foreign
+  body comes back in `foreign_body_for_review` with a fold-check
+  instruction. Without the flag, the exists-error now explains exactly
+  this.
+
+### Changed
+- The anchors reconcile directive covers the two new cases: `unchanged`
+  items ("leave the file as is; re-bootstrap without the param if it went
+  missing") and foreign files whose canonical already exists (suggesting
+  `adopt_into_existing`).
+- `docs/mcp/agent-anchors.md` documents the `harness:` frontmatter block,
+  the bootstrap delta and the adopt flow.
+
+## [2.17.1] — 2026-07-06 — "Fragment wikilinks join the graph"
+
+PATCH release. One index-level fix with a visible payoff on any vault that
+uses `[[note#heading]]` cross-references. No migration required — the
+startup rescan re-resolves existing links automatically.
+
+### Fixed
+- **`[[note#heading]]` wikilinks now resolve in the index.** The link
+  resolver never stripped the `#fragment`, so every fragment link stayed
+  unresolved: invisible to **backlinks, graph, hubs and path** queries, and
+  flagged as a broken wikilink by `memory_lint` (in the reference vault,
+  230 of 249 "broken" warnings were this false positive). The web UI
+  renderer was unaffected — it strips the fragment independently — which is
+  why the links worked in preview and the bug stayed latent. Fragments are
+  presentation-level (Obsidian semantics): the path part resolves to the
+  note, and a pure `[[#heading]]` self-link records no cross-note edge.
+  After upgrading, the first startup scan repairs the index and the graph
+  gains the previously-missing edges.
+
+## [2.17.0] — 2026-07-06 — "Token economy: read guard + tool profiles"
+
+MINOR release focused on the token cost of agent sessions: an oversize guard
+on the most-called read tool, an opt-in worker tool profile that cuts the
+per-session schema surface by ~60%, slimmer tool descriptions and a
+lighter bootstrap. All changes are additive and backward compatible; every
+existing token and client keeps its current behaviour.
+
+### Added
+- **Per-token tool profiles.** A token created with `--tool-profile core`
+  (CLI) or `tool_profile: "core"` (`POST /api/v1/admin/tokens`) sees only
+  the worker subset of the MCP catalogue — session start, note CRUD,
+  targeted reads, search/list basics, both upload tools, the full handoff
+  lifecycle and `memory_wait_changes` (~21 tools instead of 56, cutting a
+  sub-agent's per-session schema cost by ~60%). The media/table note
+  creators are admitted dynamically only when their vault flag is on, and
+  `memory_self_improve` only for opted-in tokens. The profile is an
+  **access-control boundary**: a tool outside it is absent from
+  `tools/list` *and* answers `tool not found` when called by name.
+  Default is `full` — existing tokens are untouched. Profile shown in
+  `gosidian token list` and `memory_self_stats`.
+- **`memory_get` oversize guard.** A note body over 24 KiB now comes back
+  truncated — frontmatter + heading outline (capped at 80 headings:
+  first 20 + the most recent) + the first 4 KiB chunk, with
+  `truncated: true`, the full `size` and a hint pointing at
+  `memory_get_section`. `raw: true` bypasses the guard; `max_bytes` caps
+  explicitly even below the threshold. The `etag` always stamps the full
+  note, so `if_match` optimistic locking is unchanged. Rationale: an
+  append-only log can reach hundreds of KiB — one unguarded read of a
+  431 KiB file used to cost ~110k tokens; it now returns ~12 KiB.
+
+### Changed
+- **Bootstrap `mode` defaults to auto**: an oversize `hot.md` is served in
+  lite shape (frontmatter + outline, flagged `auto_lite: true`); explicit
+  `full`/`lite` behave as before. The `anchors` block no longer ships its
+  reconcile directive when the desired set is empty.
+- **Operational directives v6**: full prose tightening (−24%, same rules);
+  the token-economy section documents the read guard and auto-lite.
+- **Slimmer tool descriptions** on the six heaviest schemas (bootstrap,
+  media/table note creators, init_agent, both upload tools) — 40-50%
+  shorter, with details moved to the docs.
+
+### Notes
+- No migration required. `tool_profile` is empty (= `full`) on every
+  existing token; assign `core` deliberately to sub-agent tokens.
+- Agents that read large notes through `memory_get` should follow the
+  truncated response's hint (`memory_get_section`, or `raw: true` when the
+  whole body is really needed).
+
+## [2.16.0] — 2026-07-06 — "CSV table notes + capability discovery"
+
+MINOR release. Two discoverability-first features: long tabular data (audit
+reports, exports) becomes a first-class **CSV table note** rendered as a
+paginated table in the web UI, and agents now learn the instance's content
+formats at session start from a new **`capabilities` block** served by
+`memory_bootstrap`. Everything stays a plain markdown note; all changes are
+additive and backward compatible, new features are off by default with no
+migration required. 56 MCP tools total.
+
+### Added
+- **CSV table notes** (ADR-016, opt-in via `[vault] table_notes` /
+  `GOSIDIAN_VAULT_TABLE_NOTES`, default off). A table note is a normal `.md`
+  whose frontmatter declares `type: table` + a `media:` pointer to a `.csv`
+  attachment — it participates in tags, links, backlinks, graph and full-text
+  search like any note, and the SPA renders the CSV as a **paginated table**
+  (500 rows/page, text-only cells, download link, comma/semicolon/tab
+  delimiter auto-detection). Column headers and the row count are inlined
+  into the body so they land in search; cell values are intentionally not
+  indexed — the caption is the retrievable text. A broken pointer degrades to
+  a placeholder, never an error.
+- **`memory_create_table_note`** MCP tool (56th): uploads (or references) the
+  CSV and creates the pointing note in one atomic call; rejects unparsable
+  CSV before writing the note; accepts `attachment` (already-uploaded path,
+  cheapest), `bridge_filename`, `source_path` or base64 `data`.
+- **`capabilities` block in `memory_bootstrap`**: reports whether
+  `html_notes`, `media_notes` and `table_notes` are enabled on this instance,
+  plus the attachment surface (size cap, allowed extensions, the HTTP
+  `/upload` endpoint hint and the upload tool names) — so agents discover
+  content formats at session start instead of inside individual tool schemas.
+- **Per-project flag toggles in the projects admin UI**: `use_anchors` and
+  `use_globals` can now be flipped from the web UI (owner/admin only)
+  instead of editing `.gosidian/projects.json`.
+
+### Changed
+- **Operational directives v5** (served by `memory_bootstrap`): new «note
+  formats & attachments» section — markdown stays the declared default,
+  `.html` is reserved for intrinsically-HTML content, binaries go through
+  the upload tools (never base64 for large files), long tabular data goes to
+  a linked table note; the ingest table routes each artifact type
+  accordingly, cross-referencing the live `capabilities` block.
+- `memory_create` now documents native `.html` notes in its description
+  (gated by `html_notes`); `memory_bootstrap`'s description documents the
+  `capabilities` block.
+- Lint frontmatter vocabulary gains `type:table`.
+
+### Fixed
+- Trashing a project now collects notes of **every** recognised extension
+  for index cleanup — previously `.html` notes in a trashed project left
+  stale entries in search/graph/backlinks.
+- The markdown-preview wikilink resolver now resolves extension-less links
+  against every note extension, so `[[links]]` to `.html` notes render as
+  live links instead of dangling ones.
+
+### Notes
+- `table_notes` is **off by default**; enabling it requires no migration.
+  With the flag off, a `.md` carrying `type: table` renders as ordinary
+  markdown and API responses carry no `kind`/`media` overlay.
+- Clients connected via MCP must **reconnect** to see the new
+  `memory_create_table_note` tool (tool lists are snapshotted at session
+  start).
+
+## [2.15.0] — 2026-07-06 — "Agent orchestration bus"
+
+MINOR release. gosidian can now serve as the coordination bus between an
+orchestrator agent and its sub-agents: handoffs gained a real lifecycle with an
+atomic claim, tokens can span multiple projects, and a long-poll change feed
+replaces poll loops. Everything stays a plain markdown note — no queues, no
+message tables — and every change is additive and backward compatible.
+55 MCP tools total.
+
+### Added
+- **Handoff lifecycle** (`pending → claimed → done | rejected`).
+  `memory_claim_handoff` atomically takes a pending handoff in charge under a
+  per-note lock — when several agents race for the same handoff exactly one
+  wins, the others get an "already claimed by …" error, so work is never done
+  twice. `memory_complete_handoff` closes it as `done` or `rejected` (claiming
+  token or an admin only) with an optional `## Outcome` section.
+  `memory_pending_handoffs` gains a `status` filter (`pending` default,
+  `claimed`/`done`/`rejected`/`all`), an optional `for_agent`, and exposes the
+  lifecycle fields per entry.
+- **Server-stamped identity on handoffs.** `created_by`, `claimed_by` and
+  `completed_by` carry the calling token's identity (`name@id`), stamped
+  server-side — they are not tool parameters and cannot be forged.
+  `from_agent`/`to_agent` stay declarative role slugs: declaration and identity
+  live side by side.
+- **Multi-project tokens.** `gosidian token create --project a,b` scopes one
+  token to several projects — the natural shape for an orchestrator
+  coordinating N agent projects without an over-privileged admin token. The
+  REST API accepts `projects: [...]` on `POST /api/v1/admin/tokens`;
+  `memory_self_stats` reports the list. Where a single-project token is
+  silently defaulted, a multi-project token must name the project explicitly —
+  an omitted argument never widens a query.
+- **`memory_wait_changes` long-poll change feed.** Park one call (up to 55s)
+  and wake as soon as a note changes inside the token's scope, instead of
+  burning tokens polling `memory_recent`/`memory_pending_handoffs`. A short
+  replay ring bridges the gap between two consecutive calls via the returned
+  `cursor`; `resync: true` signals the cursor fell out of the window (reconcile
+  with `memory_recent`). One wait per MCP session.
+- **Slim repeat bootstraps.** `memory_bootstrap` accepts
+  `known_directives_version` (matching version omits the directives block),
+  `known_etags` (unchanged hot/README/instruction files come back
+  `unchanged: true` with no body) and `mode: "lite"` (hot.md body replaced by
+  frontmatter + heading outline). A respawned sub-agent pays a few hundred
+  bytes instead of the full payload when nothing changed.
+- **Bounded bulk reads.** `memory_batch_get` gains `mode=outline|frontmatter`
+  (skip bodies entirely) and `max_bytes_per_note` (truncate long ones, flagged
+  `truncated: true`); every entry now carries its `etag`.
+- **`hot-oversize` lint rule** (default on, warning): a `hot.md` past 16 KiB is
+  inlined into every bootstrap payload and dominates session-start cost.
+  Threshold configurable via `[lint] hot_oversize_bytes`.
+- **Agent anchors documentation.** The v2.13.0 anchors feature gets a real page
+  ([docs/mcp/agent-anchors.md](docs/mcp/agent-anchors.md)): the model, the
+  three gating switches, the reconcile flow and `memory_promote_agent` — it was
+  previously only mentioned in this changelog.
+
+### Fixed
+- **`if_match` is now a true compare-and-swap.** The load → check → write
+  sequence in every MCP and HTTP note handler runs under a per-note lock; two
+  concurrent writers passing the etag check in the same window can no longer
+  clobber each other (TOCTOU). Also serializes concurrent `memory_ask` calls
+  (no duplicate OQ ids) and same-second handoff creations (suffix probing
+  instead of overwriting).
+- **Project-scoped tokens can create handoffs.** `memory_create_handoff`
+  authorized against an empty path, which always rejected scoped tokens — only
+  admin tokens could ever hand off. Latent since the tool shipped.
+- **`memory_append` and the handoff tools now publish change events** on the
+  internal hub (note/tree topics), so SPA subscribers and `memory_wait_changes`
+  waiters wake on them like they already did for create/update/delete.
+
+### Changed
+- Operational directives bumped to **v3**: handoff vocabulary and the
+  claim-before-work rule, plus the token-economy guidance (slim bootstraps,
+  bounded bulk reads, hot-oversize grooming). Served fresh by
+  `memory_bootstrap` — projects pick it up automatically.
+- Docs refreshed throughout: orchestration tool group, handoff + change-feed
+  patterns, multi-project token semantics, configuration reference
+  (`GOSIDIAN_ANCHORS_ENABLED`, `lint.hot_oversize_bytes`).
+
+### Notes
+- Fully backward compatible: existing `tokens.json` files load unchanged
+  (legacy single-project records keep working; new multi-project tokens store
+  the first project in the legacy field, so older binaries see a narrower —
+  never wider — scope). Single-project tokens behave exactly as before.
+- After upgrading, MCP clients connected during the restart should reconnect
+  to refresh their tool catalog (3 new tools).
+
 ## [2.14.0] — 2026-07-01 — "Plancia view mode: strip ↔ tabs"
 
 MINOR release. The window manager (plancia) can now switch, at runtime, between

@@ -21,7 +21,7 @@ func TestStore_EmptyThenCreate(t *testing.T) {
 	if !s.Empty() {
 		t.Errorf("expected empty store")
 	}
-	plain, tok, err := s.Create("demo", "", []string{ScopeRead, ScopeWrite}, 0, "")
+	plain, tok, err := s.Create("demo", nil, []string{ScopeRead, ScopeWrite}, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func TestStore_EmptyThenCreate(t *testing.T) {
 
 func TestStore_Validate(t *testing.T) {
 	s := newStore(t)
-	plain, _, _ := s.Create("demo", "", []string{ScopeRead}, 0, "")
+	plain, _, _ := s.Create("demo", nil, []string{ScopeRead}, 0, "")
 
 	got, err := s.Validate(plain)
 	if err != nil {
@@ -62,7 +62,7 @@ func TestStore_Validate(t *testing.T) {
 func TestStore_Persistence(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tokens.json")
 	s1, _ := Open(path)
-	plain, _, _ := s1.Create("first", "lavoro", []string{ScopeRead, ScopeWrite}, 0, "")
+	plain, _, _ := s1.Create("first", []string{"lavoro"}, []string{ScopeRead, ScopeWrite}, 0, "")
 
 	s2, err := Open(path)
 	if err != nil {
@@ -79,7 +79,7 @@ func TestStore_Persistence(t *testing.T) {
 
 func TestStore_Revoke(t *testing.T) {
 	s := newStore(t)
-	plain, tok, _ := s.Create("to-delete", "", []string{ScopeRead}, 0, "")
+	plain, tok, _ := s.Create("to-delete", nil, []string{ScopeRead}, 0, "")
 	if err := s.Revoke(tok.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestStore_Revoke(t *testing.T) {
 
 func TestStore_Expired(t *testing.T) {
 	s := newStore(t)
-	plain, _, _ := s.Create("ephemeral", "", []string{ScopeRead}, -time.Second, "")
+	plain, _, _ := s.Create("ephemeral", nil, []string{ScopeRead}, -time.Second, "")
 	if _, err := s.Validate(plain); err == nil {
 		t.Errorf("expired token should fail")
 	}
@@ -137,7 +137,7 @@ func TestStore_HotReload(t *testing.T) {
 
 	// Simulate a second process (the CLI) writing a token to the same file.
 	s2, _ := Open(path)
-	plain, _, err := s2.Create("via-cli", "", []string{ScopeRead}, 0, "")
+	plain, _, err := s2.Create("via-cli", nil, []string{ScopeRead}, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +164,7 @@ func TestStore_HotReload(t *testing.T) {
 func TestStore_HotReload_FileDeleted(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tokens.json")
 	s, _ := Open(path)
-	plain, _, _ := s.Create("x", "", []string{ScopeRead}, 0, "")
+	plain, _, _ := s.Create("x", nil, []string{ScopeRead}, 0, "")
 	if s.Empty() {
 		t.Fatal("store should have 1 token")
 	}
@@ -197,7 +197,7 @@ func TestExtractBearer(t *testing.T) {
 func TestStore_SelfImproveOptIn(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "tokens.json")
 	s, _ := Open(path)
-	_, tok, err := s.Create("dogfood", "", []string{ScopeRead}, 0, "")
+	_, tok, err := s.Create("dogfood", nil, []string{ScopeRead}, 0, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,5 +230,34 @@ func TestStore_SelfImproveOptIn(t *testing.T) {
 	// Unknown id errors.
 	if err := s.SetSelfImproveOptIn("deadbeef", true); err == nil {
 		t.Error("unknown id should error")
+	}
+}
+
+func TestStore_SetToolProfile(t *testing.T) {
+	s := newStore(t)
+	_, tok, err := s.Create("worker", []string{"proj"}, []string{ScopeRead, ScopeWrite}, 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tok.ToolProfile != "" || tok.IsCoreProfile() {
+		t.Errorf("fresh token should default to full profile: %+v", tok)
+	}
+	if err := s.SetToolProfile(tok.ID, "bogus"); err == nil {
+		t.Error("invalid profile must be rejected")
+	}
+	if err := s.SetToolProfile(tok.ID, ToolProfileCore); err != nil {
+		t.Fatal(err)
+	}
+	// Persisted: reopen the store from disk and check the field survived.
+	reopened, err := Open(s.path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reopened.List()
+	if len(got) != 1 || !got[0].IsCoreProfile() {
+		t.Errorf("tool profile did not survive reload: %+v", got)
+	}
+	if err := s.SetToolProfile("nope", ToolProfileCore); err == nil {
+		t.Error("unknown token id must error")
 	}
 }

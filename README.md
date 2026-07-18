@@ -44,7 +44,7 @@ Other installation paths (source, custom compose, bare-metal):
   folder in Obsidian, VS Code, `vim`, or any editor you already use.
   Zero lock-in: delete `.gosidian/` and you have a pure Obsidian
   vault.
-- **An MCP server.** 50 typed tools let agents bootstrap a session,
+- **An MCP server.** 57 typed tools let agents bootstrap a session, ingest files,
   search, read, write, link, handoff, self-check, audit. Bearer-token
   authentication with per-project scoping.
 - **A web UI.** A Vue 3 single-page app served from the same binary
@@ -88,9 +88,14 @@ is a cache — drop it and it rebuilds.
 - **Plancia** tiling window manager (niri-style): notes, graph, search
   and config forms open as resizable, side-by-side windows in a
   horizontally-scrollable workspace, restorable from the URL
-- MCP server over HTTP + SSE with 50 typed tools
+- MCP server over HTTP + SSE with 57 typed tools
 - Bearer tokens with scopes (`read` / `write`) and per-project
-  restriction; cascade-revoke on user disable
+  restriction — including multi-project tokens for orchestrators;
+  cascade-revoke on user disable
+- **Agent orchestration bus**: handoff notes with an atomic
+  claim/complete lifecycle, server-stamped identity, and a
+  `memory_wait_changes` long-poll change feed — a minimal multi-agent
+  task queue where everything stays plain markdown
 - Multi-user web login with **role-based access** (owner / member /
   guest), per-project public/private visibility, and invite-only signup
   (24h TTL)

@@ -261,7 +261,16 @@ func (i *Index) ResolveLinksFor(noteID int64) error {
 // Matches by exact path, title (case-insensitive), or basename (case-insensitive).
 func (i *Index) resolveTargetLocked(target string) string {
 	t := strings.TrimSpace(target)
+	// [[note#heading]] links to a heading INSIDE the note (Obsidian
+	// semantics): resolve the path part, the fragment is presentation-level.
+	// Without this strip every fragment link stayed unresolved — invisible to
+	// backlinks/graph and flagged broken by lint (BUG-025). The markdown
+	// renderer already strips it independently (parser/markdown.go).
+	if idx := strings.IndexByte(t, '#'); idx >= 0 {
+		t = strings.TrimSpace(t[:idx])
+	}
 	if t == "" {
+		// pure [[#heading]] self-link: no cross-note edge to record.
 		return ""
 	}
 	// 1. exact path match (verbatim, then with each note extension; markdown

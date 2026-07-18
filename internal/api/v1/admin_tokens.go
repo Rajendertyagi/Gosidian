@@ -16,13 +16,15 @@ import (
 type mcpTokenView struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
-	Project          string   `json:"project,omitempty"`
+	Project          string   `json:"project,omitempty"`  // display: full scope, comma-joined when multi
+	Projects         []string `json:"projects,omitempty"` // multi-project scope list
 	Scopes           []string `json:"scopes"`
 	OwnerUserID      string   `json:"owner_user_id,omitempty"`
 	CreatedAt        string   `json:"created_at"`
 	ExpiresAt        string   `json:"expires_at,omitempty"`
 	Expired          bool     `json:"expired,omitempty"`
 	SelfImproveOptIn bool     `json:"self_improve_opt_in"`
+	ToolProfile      string   `json:"tool_profile,omitempty"` // "" | "full" | "core"
 }
 
 type mcpTokenCreatedResponse struct {
@@ -32,10 +34,12 @@ type mcpTokenCreatedResponse struct {
 }
 
 type createMCPTokenRequest struct {
-	Name    string   `json:"name"`
-	Project string   `json:"project,omitempty"`
-	Scopes  []string `json:"scopes"`
-	TTLMS   int64    `json:"ttl_ms,omitempty"`
+	Name        string   `json:"name"`
+	Project     string   `json:"project,omitempty"`  // single project (SPA form)
+	Projects    []string `json:"projects,omitempty"` // multi-project scope; wins over Project when set
+	Scopes      []string `json:"scopes"`
+	TTLMS       int64    `json:"ttl_ms,omitempty"`
+	ToolProfile string   `json:"tool_profile,omitempty"` // "" | "full" | "core" (worker subset)
 }
 
 // updateMCPTokenRequest is the PATCH body for an existing token. Fields are
@@ -186,14 +190,29 @@ func (r *Router) createMCPToken(w http.ResponseWriter, req *http.Request) {
 			return
 		}
 	}
+	if !auth.ValidToolProfile(body.ToolProfile) {
+		WriteError(w, http.StatusBadRequest, CodeValidationFormat, "unknown tool_profile: "+body.ToolProfile)
+		return
+	}
 	var ttl time.Duration
 	if body.TTLMS > 0 {
 		ttl = time.Duration(body.TTLMS) * time.Millisecond
 	}
-	plain, tok, err := r.deps.Auth.MCPTokens.Create(body.Name, body.Project, body.Scopes, ttl, user.ID)
+	projects := body.Projects
+	if len(projects) == 0 && body.Project != "" {
+		projects = []string{body.Project}
+	}
+	plain, tok, err := r.deps.Auth.MCPTokens.Create(body.Name, projects, body.Scopes, ttl, user.ID)
 	if err != nil {
 		WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
 		return
+	}
+	if body.ToolProfile != "" {
+		if err := r.deps.Auth.MCPTokens.SetToolProfile(tok.ID, body.ToolProfile); err != nil {
+			WriteError(w, http.StatusBadRequest, CodeValidationFormat, err.Error())
+			return
+		}
+		tok.ToolProfile = body.ToolProfile
 	}
 	if r.deps.Audit != nil {
 		_ = r.deps.Audit.Write(audit.Entry{
@@ -215,11 +234,13 @@ func mcpTokenToView(t *auth.Token) mcpTokenView {
 	v := mcpTokenView{
 		ID:               t.ID,
 		Name:             t.Name,
-		Project:          t.Project,
+		Project:          strings.Join(t.ProjectList(), ", "),
+		Projects:         t.ProjectList(),
 		Scopes:           append([]string(nil), t.Scopes...),
 		OwnerUserID:      t.OwnerUserID,
 		CreatedAt:        t.CreatedAt.UTC().Format(rfc3339Z),
 		SelfImproveOptIn: t.SelfImproveOptIn,
+		ToolProfile:      t.ToolProfile,
 	}
 	if !t.ExpiresAt.IsZero() {
 		v.ExpiresAt = t.ExpiresAt.UTC().Format(rfc3339Z)

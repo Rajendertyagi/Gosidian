@@ -4,7 +4,19 @@ import (
 	"net/http"
 
 	"github.com/gosidian/gosidian/internal/authz"
+	"github.com/gosidian/gosidian/internal/vault"
 )
+
+// pathWithNoteExt reports whether path equals target plus one of the
+// recognised note extensions (extension-less wikilink form).
+func pathWithNoteExt(path, target string) bool {
+	for _, e := range vault.NoteExtensions() {
+		if path == target+e {
+			return true
+		}
+	}
+	return false
+}
 
 // previewRequest carries raw markdown from the editor split-pane.
 type previewRequest struct {
@@ -62,10 +74,12 @@ func (pr previewResolver) Resolve(target string) string {
 	if r.deps.Index == nil {
 		return ""
 	}
-	// Try by exact path first (allows wikilinks like [[folder/Note]]).
+	// Try by exact path first (allows wikilinks like [[folder/Note]]). The
+	// extension-less form is tried against every note extension, not just .md,
+	// so links to .html notes resolve like they do in the index (BUG-024).
 	if rows, err := r.deps.Index.NotesByPrefix(target); err == nil {
 		for _, n := range rows {
-			if (n.Path == target || n.Path == target+".md" || n.Title == target) && r.canSee(pr.p, n.Path) {
+			if (n.Path == target || pathWithNoteExt(n.Path, target) || n.Title == target) && r.canSee(pr.p, n.Path) {
 				return n.Path
 			}
 		}
@@ -96,7 +110,7 @@ func (pr previewResolver) ResolveImage(target string) string {
 	}
 	if path := pr.Resolve(target); path != "" {
 		if note, err := r.deps.Vault.Load(path); err == nil {
-			if ref, ok := r.deps.Vault.MediaRefForNote(note.Path, note.Content); ok && !ref.Broken {
+			if ref, kind := r.deps.Vault.MediaRefForNote(note.Path, note.Content); kind == "image" && !ref.Broken {
 				return ref.URL
 			}
 		}

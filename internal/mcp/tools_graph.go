@@ -46,13 +46,10 @@ func (s *Server) handleHubs(ctx context.Context, req mcp.CallToolRequest) (*mcp.
 	if errRes != nil {
 		return errRes, nil
 	}
-	project := req.GetString("project", "")
-	// Scoped tokens are forced to their project (parity with memory_list_tags).
-	if scope := tok.ProjectFilter(); scope != "" {
-		if project != "" && project != scope {
-			return mcp.NewToolResultErrorf("project %q is outside the token's scope %q", project, scope), nil
-		}
-		project = scope
+	// Scoped tokens are forced to their project(s) (parity with memory_list_tags).
+	project, err := scopedProject(tok, req.GetString("project", ""))
+	if err != nil {
+		return mcp.NewToolResultError(err.Error()), nil
 	}
 	if project != "" {
 		if res := s.rejectIfHidden(project); res != nil {

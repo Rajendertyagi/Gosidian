@@ -76,6 +76,12 @@ A `memory_search` call crosses the following layers:
   (`sandbox="allow-scripts"` **without** `allow-same-origin`), so a
   note's scripts can never touch the host origin, cookies, or the
   REST API. Default off.
+- **Media & table notes** (ADR-013 / ADR-016, opt-in via
+  `[vault] media_notes` / `table_notes`). An image or a CSV becomes a
+  first-class note as a plain `.md` whose frontmatter declares
+  `type: image` / `type: table` plus a `media:` pointer to the
+  attachment; the body is the searchable caption. The SPA renders the
+  image, or the CSV as a paginated table. Default off.
 - **Graph analytics.** Backlinks/outlinks feed two MCP tools beyond
   plain link listing: `memory_hubs` ranks the most-connected notes,
   and `memory_path` finds the shortest wiki-link path between two

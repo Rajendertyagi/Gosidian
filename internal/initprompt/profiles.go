@@ -77,7 +77,49 @@ const StubVersion = 2
 // v2 (2026-06-09, IMP-049): directives now instruct pre-stub projects to
 // self-convert their instruction file at bootstrap — breaks the first-conversion
 // chicken-and-egg so existing projects heal without a manual rollout.
-const DirectivesVersion = 2
+//
+// v3 (2026-07-06, orchestrator-bus M2+M3+M5): handoff lifecycle — documents
+// the pending→claimed→done|rejected states, the claim-before-work rule
+// (memory_claim_handoff / memory_complete_handoff) and the server-stamped
+// created_by/claimed_by/completed_by identity fields; adds type:handoff and
+// the handoff status vocabulary to the closed tag list. Also documents the
+// bootstrap token-economy knobs (known_directives_version / known_etags /
+// mode=lite, batch_get outline/frontmatter modes, hot-oversize lint rule).
+//
+// v4 (2026-07-06, capability discovery): new «Formati di nota e allegati»
+// section — markdown stays the declared default; .html native notes and the
+// attachment upload tools (with the HTTP /upload endpoint, never base64 for
+// large files) are now discoverable from the directives, cross-referencing
+// the `capabilities` block that memory_bootstrap serves alongside; two new
+// ingest-table rows route HTML artifacts and binary files accordingly.
+//
+// v5 (2026-07-06, ADR-016 table notes): «Formati di nota e allegati» gains
+// the CSV table-note bullet (memory_create_table_note, capabilities.table_notes,
+// cell values not indexed → caption required) and the ingest table routes
+// long tabular data to a linked table note instead of the markdown body.
+//
+// v6 (2026-07-06, token-economy round 2): full prose tightening (-24%, same
+// rules); the token-economy section documents the new memory_get oversize
+// guard (bodies over 24 KiB come back truncated with outline + hint;
+// raw:true bypasses) and the bootstrap auto-lite default for oversize hot.md.
+//
+// v7 (2026-07-07, anchors round 2): the token-economy section documents
+// known_anchor_metas — the bootstrap anchors delta for anchor-enabled
+// projects (canonical → meta_version; unchanged items ship without content).
+//
+// v8 (2026-07-11, ADR-018 one-door ingestion): «Formati di nota e allegati»
+// now leads with memory_ingest as THE way to save a file (extension routing,
+// sources cheapest-first incl. the bridge dir surfaced in
+// capabilities.attachments.bridge_dir, the url source and the transfer:http
+// single-use ticket); the ingest-rules table routes CSV/binary files through
+// memory_ingest; the legacy upload tools are footnoted for explicit
+// stage-then-attach flows.
+//
+// v9 (2026-07-12, ADR-019 maintenance digest): the end-of-task workflow gains
+// step 0 — when the bootstrap serves maintenance.attention (hot.md oversize
+// and/or broken wikilinks), propose the relevant grooming before closing;
+// stale_count is context, not an obligation.
+const DirectivesVersion = 9
 
 // AnchorVersion is the version of the agent-anchor template/format. It is
 // substituted into the `<!-- gosidian:anchor v=N ... -->` marker so the

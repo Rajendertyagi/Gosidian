@@ -1,8 +1,8 @@
 // Package mcp — memory_audit_tail tool.
 //
 // Exposes a filtered view of the audit log to agents over MCP. Read-only, no
-// rate limit. Read-scoped tokens with a ProjectFilter are constrained to
-// entries under their project prefix (parity with memory_list_notes scoping).
+// rate limit. Project-scoped tokens are constrained to entries under their
+// project prefixes (parity with memory_list_notes scoping).
 package mcp
 
 import (
@@ -89,14 +89,17 @@ func (s *Server) handleAuditTail(ctx context.Context, req mcp.CallToolRequest) (
 	}
 
 	// Scoping: a project-scoped token may only read audit entries whose Path
-	// starts with its project. An explicit path_prefix is allowed only if it
-	// refines the scope further (i.e. is inside the token's project).
-	if scope := tok.ProjectFilter(); scope != "" {
-		scopePrefix := scope + "/"
+	// starts with one of its projects. An explicit path_prefix is allowed
+	// only if it refines the scope further. With a single project the prefix
+	// is pushed into the query; with several, the per-entry AllowsPath filter
+	// below does the narrowing (entries may then come in under the limit).
+	if list := tok.ProjectList(); len(list) > 0 {
 		if opts.PathPrefix == "" {
-			opts.PathPrefix = scopePrefix
-		} else if !strings.HasPrefix(opts.PathPrefix, scopePrefix) && opts.PathPrefix != scope {
-			return mcp.NewToolResultErrorf("path_prefix %q is outside the token's project scope %q", opts.PathPrefix, scope), nil
+			if len(list) == 1 {
+				opts.PathPrefix = list[0] + "/"
+			}
+		} else if !tok.AllowsPath(opts.PathPrefix) {
+			return mcp.NewToolResultErrorf("path_prefix %q is outside the token's project scope %q", opts.PathPrefix, tok.ScopeLabel()), nil
 		}
 	}
 

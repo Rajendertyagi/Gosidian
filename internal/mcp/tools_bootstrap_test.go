@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/gosidian/gosidian/internal/index"
 	"github.com/gosidian/gosidian/internal/initprompt"
 )
 
@@ -44,19 +46,20 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	body := resultText(t, res)
 
 	var p struct {
-		Project           string               `json:"project"`
-		HotMD             bootstrapFile        `json:"hot_md"`
-		Readme            bootstrapFile        `json:"readme"`
-		AgentMD           bootstrapFile        `json:"agent_md"`
-		ActivePlans       []noteRef            `json:"active_plans"`
-		AvailableSkills   []noteRef            `json:"available_skills"`
-		AvailableAgents   []noteRef            `json:"available_agents"`
-		RecentNotes       []recentNoteResponse `json:"recent_notes"`
-		Stats             bootstrapStats       `json:"stats"`
-		Missing           []string             `json:"missing"`
-		DirectivesVersion int                  `json:"directives_version"`
-		DirectivesBlock   string               `json:"directives_block"`
-		StubVersion       int                  `json:"stub_version"`
+		Project           string                 `json:"project"`
+		HotMD             bootstrapFile          `json:"hot_md"`
+		Readme            bootstrapFile          `json:"readme"`
+		AgentMD           bootstrapFile          `json:"agent_md"`
+		ActivePlans       []noteRef              `json:"active_plans"`
+		AvailableSkills   []noteRef              `json:"available_skills"`
+		AvailableAgents   []noteRef              `json:"available_agents"`
+		RecentNotes       []recentNoteResponse   `json:"recent_notes"`
+		Stats             bootstrapStats         `json:"stats"`
+		Missing           []string               `json:"missing"`
+		DirectivesVersion int                    `json:"directives_version"`
+		DirectivesBlock   string                 `json:"directives_block"`
+		StubVersion       int                    `json:"stub_version"`
+		Capabilities      *bootstrapCapabilities `json:"capabilities"`
 	}
 	if err := json.Unmarshal([]byte(body), &p); err != nil {
 		t.Fatalf("parse: %v body=%s", err, body)
@@ -127,6 +130,61 @@ func TestMCP_Bootstrap_HappyPath(t *testing.T) {
 	if !strings.Contains(p.DirectivesBlock, proj) {
 		t.Error("directives_block should be rendered for the project")
 	}
+
+	// capabilities: always present, mirrors live config (flags off in the test
+	// server) and carries the attachment surface incl. the /upload hint.
+	if p.Capabilities == nil {
+		t.Fatal("capabilities block should always be present")
+	}
+	if p.Capabilities.HTMLNotes || p.Capabilities.MediaNotes {
+		t.Errorf("test server has html/media notes off, got %+v", p.Capabilities)
+	}
+	if p.Capabilities.Attachments.MaxMiB != 10 {
+		t.Errorf("attachments.max_mib = %d, want 10", p.Capabilities.Attachments.MaxMiB)
+	}
+	if len(p.Capabilities.Attachments.Extensions) == 0 {
+		t.Error("attachments.extensions should not be empty")
+	}
+	if !strings.Contains(p.Capabilities.Attachments.UploadEndpointHint, "/upload") {
+		t.Error("attachments.upload_endpoint_hint should mention /upload")
+	}
+}
+
+func TestMCP_Bootstrap_AutoLite(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	// hot.md past the oversize threshold → auto mode serves it lite.
+	big := "---\ntitle: hot\ntype: index\n---\n\n# Hot\n\n## Focus\n\n" +
+		strings.Repeat("filler line for the oversize threshold\n", 600)
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": "auto/hot.md", "content": big})); res.IsError {
+		t.Fatalf("seed: %s", expectError(t, res))
+	}
+
+	parseHot := func(body string) bootstrapFile {
+		t.Helper()
+		var p struct {
+			HotMD bootstrapFile `json:"hot_md"`
+		}
+		if err := json.Unmarshal([]byte(body), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p.HotMD
+	}
+
+	// Default (mode unset) → lite shape with auto_lite flag.
+	res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": "auto"}))
+	hot := parseHot(resultText(t, res))
+	if !hot.AutoLite || hot.Content != "" || len(hot.Headings) == 0 {
+		t.Errorf("auto: want lite shape with auto_lite, got auto_lite=%v len(content)=%d headings=%d",
+			hot.AutoLite, len(hot.Content), len(hot.Headings))
+	}
+
+	// Explicit full → body served, no auto_lite.
+	res, _ = s.handleBootstrap(ctx, call(map[string]any{"project": "auto", "mode": "full"}))
+	hot = parseHot(resultText(t, res))
+	if hot.AutoLite || hot.Content == "" {
+		t.Errorf("full: want body, got auto_lite=%v len=%d", hot.AutoLite, len(hot.Content))
+	}
 }
 
 func TestMCP_Bootstrap_EmptyProject(t *testing.T) {
@@ -160,5 +218,90 @@ func TestMCP_Bootstrap_RequiresProject(t *testing.T) {
 	msg := expectError(t, res)
 	if msg == "" || msg == "unauthorized" {
 		t.Errorf("expected project-required error, got %q", msg)
+	}
+}
+
+func TestMCP_Bootstrap_MaintenanceDigest(t *testing.T) {
+	s, _, _ := newTestServer(t)
+	ctx := context.Background()
+	proj := "mnt"
+
+	// Healthy project: a fresh note, no broken links, small hot.md.
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": proj + "/hot.md", "content": "---\ntitle: hot\n---\n\n# Hot\n"})); res.IsError {
+		t.Fatalf("seed hot: %s", expectError(t, res))
+	}
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": proj + "/ok.md", "content": "# ok\n\n[[mnt/hot]]\n"})); res.IsError {
+		t.Fatalf("seed ok: %s", expectError(t, res))
+	}
+
+	boot := func() bootstrapMaintenance {
+		t.Helper()
+		res, _ := s.handleBootstrap(ctx, call(map[string]any{"project": proj}))
+		var out struct {
+			Maintenance *bootstrapMaintenance `json:"maintenance"`
+		}
+		if err := json.Unmarshal([]byte(resultText(t, res)), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Maintenance == nil {
+			t.Fatal("maintenance block missing from bootstrap payload")
+		}
+		return *out.Maintenance
+	}
+
+	m := boot()
+	if m.Attention || m.BrokenLinks != 0 || m.HotOversize {
+		t.Errorf("healthy project should not raise attention: %+v", m)
+	}
+	if m.StaleCutoffDays != maintenanceStaleCutoffDays || m.HotSize == 0 {
+		t.Errorf("digest basics wrong: %+v", m)
+	}
+
+	// A broken wikilink flips attention on.
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": proj + "/broken.md", "content": "# b\n\n[[mnt/nowhere]]\n"})); res.IsError {
+		t.Fatalf("seed broken: %s", expectError(t, res))
+	}
+	m = boot()
+	if m.BrokenLinks != 1 || !m.Attention {
+		t.Errorf("broken wikilink should raise attention: %+v", m)
+	}
+
+	// Hot oversize (threshold override) also flips attention on its own.
+	if res, _ := s.handleDelete(ctx, call(map[string]any{"path": proj + "/broken.md"})); res.IsError {
+		t.Fatalf("cleanup broken: %s", expectError(t, res))
+	}
+	s.SetLintHotOversizeLimit(8) // hot.md is bigger than 8 bytes
+	m = boot()
+	if !m.HotOversize || !m.Attention || m.BrokenLinks != 0 {
+		t.Errorf("oversize hot should raise attention: %+v", m)
+	}
+
+	// Stale accounting: an old note counts, unless tagged status:done.
+	old := time.Now().AddDate(0, 0, -maintenanceStaleCutoffDays-10).Unix()
+	if err := s.index.Upsert(index.NoteDoc{Path: proj + "/ancient.md", Title: "ancient", Body: "x", ModTime: old, Size: 1}); err != nil {
+		t.Fatal(err)
+	}
+	m = boot()
+	if m.StaleCount != 1 {
+		t.Errorf("stale_count = %d, want 1", m.StaleCount)
+	}
+	if err := s.index.Upsert(index.NoteDoc{Path: proj + "/ancient.md", Title: "ancient", Body: "---\ntags: [status:done]\n---\n\nx", ModTime: old, Size: 1}); err != nil {
+		t.Fatal(err)
+	}
+	m = boot()
+	if m.StaleCount != 0 {
+		t.Errorf("status:done note should not count as stale, got %d", m.StaleCount)
+	}
+
+	// Attachment embeds are unresolved in the links table by design (the
+	// index resolves notes only) — they must NOT count as broken links,
+	// whether the file exists or not (that check is the lint rule's job).
+	s.SetLintHotOversizeLimit(0)
+	if res, _ := s.handleCreate(ctx, call(map[string]any{"path": proj + "/guide.md", "content": "# g\n\n![[deadbeef.webp]]\n"})); res.IsError {
+		t.Fatalf("seed guide: %s", expectError(t, res))
+	}
+	m = boot()
+	if m.BrokenLinks != 0 {
+		t.Errorf("attachment embed inflated broken_links: %+v", m)
 	}
 }

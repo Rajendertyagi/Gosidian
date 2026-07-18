@@ -29,6 +29,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_MCP_MAX_NOTE_BYTES` | `mcp.max_note_bytes` | `1048576` (1 MiB) |
 | `GOSIDIAN_MCP_ALLOWED_UPLOAD_ROOTS` | `mcp.allowed_upload_roots` | empty (vault only) |
 | `GOSIDIAN_MCP_BRIDGE_DIR` | `mcp.bridge_dir` | empty (off; staging dir for cheap `bridge_filename` uploads, IMP-059) |
+| `GOSIDIAN_INGEST_URL_ALLOWLIST` | `mcp.ingest_url_allowlist` | empty (off; comma-separated URL prefixes the `memory_ingest` `url` source may fetch from — the allowlist is the SSRF boundary and also gates every redirect hop) |
 | `GOSIDIAN_TRASH_ENABLED` | `trash.enabled` | `false` |
 | `GOSIDIAN_TRASH_RETENTION` | `trash.retention` | `720h` |
 | `GOSIDIAN_THEME_PRESET` | `theme.preset` | `midnight-luxury` |
@@ -52,6 +53,7 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_VAULT_CACHE_SIZE` | `vault.cache_size` | `128` (`0` disables) |
 | `GOSIDIAN_VAULT_HTML_NOTES` | `vault.html_notes` | `false` (treat single-file `.html` as first-class notes; ADR-011, sandboxed iframe) |
 | `GOSIDIAN_VAULT_MEDIA_NOTES` | `vault.media_notes` | `false` (resolve image media notes: `.md` with `type: image` + `media:`; ADR-013) |
+| `GOSIDIAN_VAULT_TABLE_NOTES` | `vault.table_notes` | `false` (resolve CSV table notes: `.md` with `type: table` + `media:`; ADR-016) |
 | `GOSIDIAN_I18N_DEFAULT_LANG` | `i18n.default_lang` | `en` |
 | `GOSIDIAN_SELF_IMPROVE_ENABLED` | `self_improve.enabled` | `false` |
 | `GOSIDIAN_SELF_IMPROVE_TARGET_PROJECT` | `self_improve.target_project` | `insights` |
@@ -62,6 +64,8 @@ Settings come from four sources, in decreasing precedence:
 | `GOSIDIAN_GLOBAL_ENABLED` | `global.enabled` | `false` |
 | `GOSIDIAN_GLOBAL_PUBLIC_PROJECT` | `global.public_project` | `global` |
 | `GOSIDIAN_GLOBAL_PRIVATE_PROJECT` | `global.private_project` | `global-private` |
+| `GOSIDIAN_ANCHORS_ENABLED` | `agent_anchors.enabled` | `false` (master switch for [agent anchors](mcp/agent-anchors.md); per-project opt-in via the `use_anchors` flag) |
+| — | `lint.hot_oversize_bytes` | `16384` (threshold for the `hot-oversize` lint rule) |
 
 The `config.toml` at `<vault>/.gosidian/config.toml` holds the
 persistent form of the same settings and is edited from the web UI at

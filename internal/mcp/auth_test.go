@@ -11,6 +11,15 @@ import (
 	"github.com/gosidian/gosidian/internal/vault"
 )
 
+// splitProjects adapts the legacy single-project test signature to the
+// multi-project Create API.
+func splitProjects(project string) []string {
+	if project == "" {
+		return nil
+	}
+	return []string{project}
+}
+
 // newScopedServer builds a server wired to a real token store and returns
 // a context pre-loaded with the given token so handlers can be invoked
 // directly (bypassing the SSE transport).
@@ -29,7 +38,7 @@ func newScopedServer(t *testing.T, project string, scopes []string) (*Server, co
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.Create("test", project, scopes, 0, ""); err != nil {
+	if _, _, err := store.Create("test", splitProjects(project), scopes, 0, ""); err != nil {
 		t.Fatal(err)
 	}
 

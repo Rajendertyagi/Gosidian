@@ -23,6 +23,7 @@ import { onApiEvent, type ConcurrencyConflictDetail } from '@/api/client'
 import MarkdownPreview from '@/components/domain/MarkdownPreview.vue'
 import HTMLPreview from '@/components/domain/HTMLPreview.vue'
 import MediaPreview from '@/components/domain/MediaPreview.vue'
+import TablePreview from '@/components/domain/TablePreview.vue'
 import { useRecentlyViewed } from '@/composables/useRecentlyViewed'
 import { planciaKey } from '@/composables/planciaKey'
 import { useAuthStore } from '@/stores/auth'
@@ -72,6 +73,9 @@ const isHtml = computed(() => path.value.toLowerCase().endsWith('.html'))
 // kind='image' + a resolved media ref when the media_notes feature is on. We
 // render the image + caption instead of the bare markdown.
 const isMedia = computed(() => note.value?.kind === 'image')
+// CSV table notes (ADR-016): same overlay mechanism, kind='table' + a media
+// ref pointing at the .csv attachment; rendered as a paginated table.
+const isTable = computed(() => note.value?.kind === 'table')
 const project = computed(() => {
   const parts = path.value.split('/')
   return parts.length > 1 ? parts[0] : undefined
@@ -443,6 +447,13 @@ watch(path, load)
       <!-- Image media note (ADR-013): image + rendered caption -->
       <MediaPreview
         v-else-if="isMedia && note && note.media"
+        :media="note.media"
+        :caption-html="previewHTML"
+        :note-path="note.path"
+      />
+      <!-- CSV table note (ADR-016): paginated table + rendered caption -->
+      <TablePreview
+        v-else-if="isTable && note && note.media"
         :media="note.media"
         :caption-html="previewHTML"
         :note-path="note.path"
